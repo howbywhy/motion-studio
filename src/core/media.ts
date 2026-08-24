@@ -1,5 +1,11 @@
 export type MediaKind = "image" | "video";
 
+export interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
+
 export interface MediaAsset {
   kind: MediaKind;
   source: CanvasImageSource;
@@ -8,6 +14,40 @@ export interface MediaAsset {
   label: string;
   videoEl?: HTMLVideoElement;
   objectUrl?: string;
+}
+
+let sampleCanvas: HTMLCanvasElement | null = null;
+
+/** Cheap average-color estimate: draw the source into a tiny canvas and
+ * read it back. Pure/uncached — callers that run this every frame (a
+ * treatment sampling the live cover-fit layer, which can be video) should
+ * throttle their own call rate. */
+export function sampleAverageColor(source: CanvasImageSource, fallback: RGB = { r: 150, g: 150, b: 150 }): RGB {
+  if (!sampleCanvas) sampleCanvas = document.createElement("canvas");
+  const SIZE = 12;
+  sampleCanvas.width = SIZE;
+  sampleCanvas.height = SIZE;
+  const ctx = sampleCanvas.getContext("2d", { willReadFrequently: true })!;
+  try {
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    ctx.drawImage(source, 0, 0, SIZE, SIZE);
+    const data = ctx.getImageData(0, 0, SIZE, SIZE).data;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      n++;
+    }
+    if (n > 0) return { r: r / n, g: g / n, b: b / n };
+  } catch {
+    // A video with no decoded frame yet, or a cross-origin source, can
+    // throw here — fall back to the neutral default.
+  }
+  return fallback;
 }
 
 export function detectMediaKind(file: File): MediaKind | null {

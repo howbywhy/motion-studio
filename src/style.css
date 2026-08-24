@@ -316,6 +316,38 @@ body {
   margin: 0 0 20px;
 }
 
+.treatment-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.treatment-panel[hidden] {
+  display: none;
+}
+
+.panel-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.treatment-toggle {
+  width: 100%;
+}
+
+.treatment-toggle button {
+  flex: 1;
+}
+
+.image-aware-toggle {
+  align-self: flex-start;
+}
+
 .control-row {
   margin-bottom: 16px;
 }

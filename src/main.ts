@@ -1,11 +1,11 @@
 import "./style.css";
-import { Renderer } from "./core/renderer";
+import { Renderer, type DiagnosticMode } from "./core/renderer";
 import { placeholderA, placeholderB } from "./core/placeholder";
 import { wrapCanvasAsPlaceholder } from "./core/media";
 import { wireMediaDropZone } from "./ui/mediaInput";
 import { buildControls } from "./ui/controls";
 import { BEHAVIORS } from "./behaviors/index";
-import { defaultParamValues, type ParamValues } from "./core/types";
+import { defaultParamValues, type MaskBehavior, type ParamValues } from "./core/types";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -65,6 +65,17 @@ app.innerHTML = `
           <h2 id="behavior-title"></h2>
           <p id="behavior-desc" class="behavior-desc"></p>
         </div>
+        <div class="treatment-panel" id="treatment-panel" hidden>
+          <label class="panel-label">Treatment</label>
+          <div class="seg-toggle treatment-toggle" id="treatment-toggle">
+            <button data-value="clean" class="active">Clean</button>
+            <button data-value="refraction">Refraction</button>
+            <button data-value="registration">Registration</button>
+          </div>
+          <button type="button" class="diagnostic-toggle image-aware-toggle" id="image-aware" title="Experimental: bias field placement toward visually information-rich areas of the photograph">
+            Image Aware
+          </button>
+        </div>
         <div id="controls"></div>
       </aside>
     </main>
@@ -88,6 +99,9 @@ const typeB = document.querySelector<HTMLSpanElement>("#type-b")!;
 const nameA = document.querySelector<HTMLDivElement>("#name-a")!;
 const nameB = document.querySelector<HTMLDivElement>("#name-b")!;
 const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
+const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
+const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggle")!;
+const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!;
 
 const renderer = new Renderer(canvas);
 
@@ -130,19 +144,59 @@ wireMediaDropZone(
 
 // --- behavior tabs ---
 let currentParams: ParamValues = {};
+let currentBehavior: MaskBehavior<unknown> = BEHAVIORS[0];
+let visibleKeysCache = "";
+
+function rebuildControlsPanel(): void {
+  const defs = currentBehavior.visibleParams ? currentBehavior.visibleParams(currentParams) : currentBehavior.params;
+  visibleKeysCache = defs.map((d) => d.key).join(",");
+  buildControls(controlsEl, defs, currentParams, onParamsChange);
+}
+
+function onParamsChange(values: ParamValues): void {
+  currentParams = values;
+  renderer.setParams(values);
+  // Only Bloom declares visibleParams, and only its own structural params
+  // (treatment) change which controls should be visible — a plain slider
+  // drag never changes the visible set, so this never rebuilds mid-drag.
+  if (currentBehavior.visibleParams) {
+    const defs = currentBehavior.visibleParams(values);
+    const key = defs.map((d) => d.key).join(",");
+    if (key !== visibleKeysCache) {
+      visibleKeysCache = key;
+      buildControls(controlsEl, defs, currentParams, onParamsChange);
+    }
+  }
+  syncTreatmentUI();
+}
+
+function syncTreatmentUI(): void {
+  const isBloom = currentBehavior.id === "bloom";
+  treatmentPanel.hidden = !isBloom;
+  if (!isBloom) return;
+  const treatment = currentParams.treatment as string;
+  treatmentToggle.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.getAttribute("data-value") === treatment);
+  });
+  const imageAwareOn = currentParams.imageAware === "on";
+  imageAwareBtn.classList.toggle("active", imageAwareOn);
+  imageAwareBtn.textContent = imageAwareOn ? "Image Aware: On" : "Image Aware";
+}
 
 function selectBehavior(id: string): void {
   const behavior = BEHAVIORS.find((b) => b.id === id) ?? BEHAVIORS[0];
+  currentBehavior = behavior;
   currentParams = defaultParamValues(behavior.params);
   renderer.setBehavior(behavior, currentParams);
 
   titleEl.textContent = `${behavior.index} — ${behavior.name}`;
   descEl.textContent = behavior.description;
 
-  buildControls(controlsEl, behavior.params, currentParams, (values) => {
-    currentParams = values;
-    renderer.setParams(values);
-  });
+  rebuildControlsPanel();
+  syncTreatmentUI();
+
+  const activeDiagnostic = renderer.getDiagnostic();
+  updateDiagnosticLabel(activeDiagnostic === "boundary" && !behavior.renderBoundary ? "mask" : activeDiagnostic);
 
   behaviorTabs.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.getAttribute("data-value") === id);
@@ -158,6 +212,17 @@ for (const behavior of BEHAVIORS) {
 }
 selectBehavior(BEHAVIORS[0].id);
 
+treatmentToggle.addEventListener("click", (e) => {
+  const target = (e.target as HTMLElement).closest("button");
+  if (!target) return;
+  onParamsChange({ ...currentParams, treatment: target.getAttribute("data-value")! });
+});
+
+imageAwareBtn.addEventListener("click", () => {
+  const next = currentParams.imageAware === "on" ? "off" : "on";
+  onParamsChange({ ...currentParams, imageAware: next });
+});
+
 // --- transport ---
 function updatePlayPauseLabel(): void {
   playPauseBtn.textContent = renderer.isPlaying() ? "Pause" : "Play";
@@ -171,10 +236,20 @@ playPauseBtn.addEventListener("click", () => {
 
 swapBtn.addEventListener("click", () => renderer.swap());
 
-// --- diagnostic: show raw mask instead of composited media ---
+// --- diagnostic: cycle off -> mask -> boundary -> off. Boundary is only
+// meaningful for a behavior that defines renderBoundary (Bloom); for one
+// that doesn't (Slabs) that state is skipped entirely. ---
+function updateDiagnosticLabel(mode: DiagnosticMode): void {
+  showMaskBtn.classList.toggle("active", mode !== "off");
+  showMaskBtn.textContent = mode === "off" ? "Show Mask" : mode === "mask" ? "Showing Mask" : "Showing Boundary";
+}
+
 showMaskBtn.addEventListener("click", () => {
-  renderer.setShowMask(!renderer.isShowingMask());
-  showMaskBtn.classList.toggle("active", renderer.isShowingMask());
+  let mode = renderer.cycleDiagnostic();
+  if (mode === "boundary" && !currentBehavior.renderBoundary) {
+    mode = renderer.cycleDiagnostic();
+  }
+  updateDiagnosticLabel(mode);
 });
 
 // --- aspect ratio ---

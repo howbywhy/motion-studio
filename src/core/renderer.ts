@@ -5,6 +5,7 @@ import type { MaskBehavior, ParamValues } from "./types";
 
 export type PlaybackMode = "loop" | "pingpong";
 export type MediaSlot = "A" | "B";
+export type DiagnosticMode = "off" | "mask" | "boundary";
 
 const PING_PONG_PERIOD = 6; // seconds — bounce cycle length, independent of behavior speed
 const MAX_DPR = 2;
@@ -35,6 +36,7 @@ export class Renderer {
   private readonly aLayer = makeCanvas();
   private readonly bLayer = makeCanvas();
   private readonly maskLayer = makeCanvas();
+  private readonly boundaryLayer = makeCanvas();
   private readonly bMasked = makeCanvas();
 
   private width = 0;
@@ -55,7 +57,7 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
 
   private swapped = false;
-  private showMask = false;
+  private diagnostic: DiagnosticMode = "off";
 
   onFrame: (() => void) | null = null;
 
@@ -95,7 +97,7 @@ export class Renderer {
     this.height = h;
     this.dpr = dpr;
 
-    for (const c of [this.visible, this.aLayer, this.bLayer, this.maskLayer, this.bMasked]) {
+    for (const c of [this.visible, this.aLayer, this.bLayer, this.maskLayer, this.boundaryLayer, this.bMasked]) {
       c.width = w;
       c.height = h;
     }
@@ -128,16 +130,20 @@ export class Renderer {
     return this.swapped;
   }
 
-  /** Diagnostic only: render the raw alpha mask over black instead of the
-   * usual A/B composite. Purely a display-time branch in renderFrame — it
-   * doesn't touch media, playback, or mask generation in any way. */
-  setShowMask(show: boolean): void {
-    this.showMask = show;
+  /** Diagnostic only: render the raw mask or boundary field over black
+   * instead of the usual composite. Purely a display-time branch in
+   * renderFrame — it doesn't touch media, playback, or field generation in
+   * any way. Cycles off -> mask -> boundary -> off; a behavior without
+   * `renderBoundary` (Slabs) just falls back to the mask for that state. */
+  cycleDiagnostic(): DiagnosticMode {
+    const order: DiagnosticMode[] = ["off", "mask", "boundary"];
+    this.diagnostic = order[(order.indexOf(this.diagnostic) + 1) % order.length];
     this.renderFrame();
+    return this.diagnostic;
   }
 
-  isShowingMask(): boolean {
-    return this.showMask;
+  getDiagnostic(): DiagnosticMode {
+    return this.diagnostic;
   }
 
   setBehavior<T>(behavior: MaskBehavior<T>, params: ParamValues): void {
@@ -209,21 +215,60 @@ export class Renderer {
     this.drawMediaLayer(this.aLayer.getContext("2d")!, bottom);
     this.drawMediaLayer(this.bLayer.getContext("2d")!, top);
 
+    const time = this.effectiveTime();
     const maskCtx = this.maskLayer.getContext("2d")!;
     maskCtx.clearRect(0, 0, width, height);
     if (this.behavior) {
       maskCtx.save();
-      this.behavior.renderMask(maskCtx, width, height, this.effectiveTime(), this.params, this.state);
+      this.behavior.renderMask(maskCtx, width, height, time, this.params, this.state, this.bLayer);
       maskCtx.restore();
     }
 
-    if (this.showMask) {
-      // Diagnostic: the mask alone, over black — white where B would show,
-      // black where A would show, soft greys wherever the mask itself is
-      // partial (blurred edges, Bloom's falloff). Media isn't touched.
+    // The boundary layer is only ever consumed by the diagnostic view — no
+    // treatment reads this canvas, each derives its own ring geometry
+    // directly from the fields it already has — so skip the extra pass
+    // entirely unless it's actually about to be displayed.
+    const hasBoundary = !!this.behavior?.renderBoundary;
+    const needsBoundary = hasBoundary && this.diagnostic === "boundary";
+    if (needsBoundary) {
+      const boundaryCtx = this.boundaryLayer.getContext("2d")!;
+      boundaryCtx.clearRect(0, 0, width, height);
+      boundaryCtx.save();
+      this.behavior!.renderBoundary!(boundaryCtx, width, height, time, this.params, this.state);
+      boundaryCtx.restore();
+    }
+
+    if (this.diagnostic !== "off") {
+      // Diagnostic: the raw field alone, over black — white = fully active,
+      // black = inactive, soft greys wherever the field itself is partial
+      // (blurred mask edges, the boundary ring). Media isn't touched.
+      const showBoundary = this.diagnostic === "boundary" && hasBoundary;
       this.ctx.fillStyle = "#000000";
       this.ctx.fillRect(0, 0, width, height);
-      this.ctx.drawImage(this.maskLayer, 0, 0);
+      this.ctx.drawImage(showBoundary ? this.boundaryLayer : this.maskLayer, 0, 0);
+      this.onFrame?.();
+      return;
+    }
+
+    if (this.behavior?.renderComposite) {
+      this.behavior.renderComposite(
+        this.ctx,
+        this.aLayer,
+        this.bLayer,
+        this.maskLayer,
+        // Boundary is only ever (re)computed for the diagnostic view (see
+        // above) — this branch never runs while that's showing, so there's
+        // no fresh boundary canvas to hand a treatment here. No current
+        // treatment needs it (each derives its own ring geometry from the
+        // fields it already has); a future one that does would need this
+        // reworked to compute boundary unconditionally again.
+        null,
+        width,
+        height,
+        time,
+        this.params,
+        this.state
+      );
       this.onFrame?.();
       return;
     }
