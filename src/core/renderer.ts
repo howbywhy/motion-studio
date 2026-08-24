@@ -55,6 +55,7 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
 
   private swapped = false;
+  private showMask = false;
 
   onFrame: (() => void) | null = null;
 
@@ -125,6 +126,18 @@ export class Renderer {
 
   isSwapped(): boolean {
     return this.swapped;
+  }
+
+  /** Diagnostic only: render the raw alpha mask over black instead of the
+   * usual A/B composite. Purely a display-time branch in renderFrame — it
+   * doesn't touch media, playback, or mask generation in any way. */
+  setShowMask(show: boolean): void {
+    this.showMask = show;
+    this.renderFrame();
+  }
+
+  isShowingMask(): boolean {
+    return this.showMask;
   }
 
   setBehavior<T>(behavior: MaskBehavior<T>, params: ParamValues): void {
@@ -202,6 +215,17 @@ export class Renderer {
       maskCtx.save();
       this.behavior.renderMask(maskCtx, width, height, this.effectiveTime(), this.params, this.state);
       maskCtx.restore();
+    }
+
+    if (this.showMask) {
+      // Diagnostic: the mask alone, over black — white where B would show,
+      // black where A would show, soft greys wherever the mask itself is
+      // partial (blurred edges, Bloom's falloff). Media isn't touched.
+      this.ctx.fillStyle = "#000000";
+      this.ctx.fillRect(0, 0, width, height);
+      this.ctx.drawImage(this.maskLayer, 0, 0);
+      this.onFrame?.();
+      return;
     }
 
     const bmCtx = this.bMasked.getContext("2d")!;

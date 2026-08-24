@@ -13,7 +13,12 @@ app.innerHTML = `
   <div class="app">
     <header class="topbar">
       <div class="brand">Motion Studio <span class="brand-sub">— masking prototype</span></div>
-      <div class="behavior-tabs" id="behavior-tabs"></div>
+      <div class="topbar-right">
+        <div class="behavior-tabs" id="behavior-tabs"></div>
+        <button type="button" class="diagnostic-toggle" id="show-mask" title="Diagnostic: display the raw alpha mask instead of the composited media">
+          Show Mask
+        </button>
+      </div>
     </header>
     <main class="workspace">
       <section class="stage-panel">
@@ -82,6 +87,7 @@ const typeA = document.querySelector<HTMLSpanElement>("#type-a")!;
 const typeB = document.querySelector<HTMLSpanElement>("#type-b")!;
 const nameA = document.querySelector<HTMLDivElement>("#name-a")!;
 const nameB = document.querySelector<HTMLDivElement>("#name-b")!;
+const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
 
 const renderer = new Renderer(canvas);
 
@@ -164,6 +170,12 @@ playPauseBtn.addEventListener("click", () => {
 });
 
 swapBtn.addEventListener("click", () => renderer.swap());
+
+// --- diagnostic: show raw mask instead of composited media ---
+showMaskBtn.addEventListener("click", () => {
+  renderer.setShowMask(!renderer.isShowingMask());
+  showMaskBtn.classList.toggle("active", renderer.isShowingMask());
+});
 
 // --- aspect ratio ---
 function setAspect(value: string): void {
