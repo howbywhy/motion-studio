@@ -1,3 +1,12 @@
+// PRESERVED, UNREGISTERED: this was the original "01" behavior — visible
+// rectangular regions that travel and reassemble. It read as tiles/
+// venetian-blinds/a transition preset rather than a photographic effect,
+// so it's been replaced in the registry (src/behaviors/index.ts) by
+// "Shift" (./shift/), which keeps the same fragment -> displace -> reveal
+// -> reconstruct idea but expresses it as spatial registration shift
+// instead of moving boxes. Kept here, intact and importable, in case
+// Shift doesn't hold up and this needs to come back — re-add
+// `slabsBehavior` to the BEHAVIORS array in index.ts to restore it.
 import { EASINGS, EASING_OPTIONS, type EasingId } from "../core/easing";
 import { mulberry32 } from "../core/rng";
 import type { MaskBehavior, ParamDef, ParamValues } from "../core/types";

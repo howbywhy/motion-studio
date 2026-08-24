@@ -349,7 +349,7 @@ swapBtn.addEventListener("click", () => renderer.swap());
 
 // --- diagnostic: cycle off -> mask -> boundary -> off. Boundary is only
 // meaningful for a behavior that defines renderBoundary (Bloom); for one
-// that doesn't (Slabs) that state is skipped entirely. ---
+// that doesn't (Shift) that state is skipped entirely. ---
 function updateDiagnosticLabel(mode: DiagnosticMode): void {
   showMaskBtn.classList.toggle("active", mode !== "off");
   showMaskBtn.textContent = mode === "off" ? "Show Mask" : mode === "mask" ? "Showing Mask" : "Showing Boundary";

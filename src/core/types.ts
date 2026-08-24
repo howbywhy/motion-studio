@@ -56,9 +56,10 @@ export interface MaskBehavior<TState = unknown> {
   needsNewState(prev: ParamValues, next: ParamValues): boolean;
   /** The reveal field: white/alpha = B visible, transparent = A visible.
    *  Always computed, every frame, regardless of treatment — it's what the
-   *  Show Mask diagnostic displays. `bLayer` (the top media, already
-   *  cover-fit into a same-size canvas) is passed through for behaviors
-   *  that want to sample the actual photograph (e.g. Image Aware). */
+   *  Show Mask diagnostic displays. `bLayer`/`aLayer` (the media, already
+   *  cover-fit into same-size canvases) are passed through for behaviors
+   *  that want to sample the actual photograph (e.g. Image Aware, or
+   *  Shift biasing its cut placement toward structural transitions). */
   renderMask(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -66,7 +67,8 @@ export interface MaskBehavior<TState = unknown> {
     time: number,
     params: ParamValues,
     state: TState,
-    bLayer?: CanvasImageSource
+    bLayer?: CanvasImageSource,
+    aLayer?: CanvasImageSource
   ): void;
   /** Returns the subset of `params` that should currently render as controls
    *  — e.g. a treatment-specific slider only when that treatment is active.

@@ -246,7 +246,7 @@ export class Renderer {
     maskCtx.clearRect(0, 0, width, height);
     if (this.behavior) {
       maskCtx.save();
-      this.behavior.renderMask(maskCtx, width, height, time, this.params, this.state, this.bLayer);
+      this.behavior.renderMask(maskCtx, width, height, time, this.params, this.state, this.bLayer, this.aLayer);
       maskCtx.restore();
     }
 
