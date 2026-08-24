@@ -55,6 +55,38 @@ export function drawOverscanTranslated(
   ctx.restore();
 }
 
+/** Like drawOverscanTranslated, but elongates the layer along the travel
+ * direction (dx,dy) instead of scaling it isotropically — a piece that's
+ * deforming between where it was and where it's going, not just sliding.
+ * `stretchAmount` (>=0) is extra scale ADDED along the travel axis on top
+ * of the overscan-safety scale (0 = plain translate); the perpendicular
+ * axis only ever gets the safety scale, so this still never exposes a
+ * transparent edge — it can only ever magnify existing pixels further. */
+export function drawOverscanStretched(
+  ctx: CanvasRenderingContext2D,
+  layer: CanvasImageSource,
+  width: number,
+  height: number,
+  dx: number,
+  dy: number,
+  stretchAmount: number,
+  alpha: number
+): void {
+  if (alpha <= 0.003) return;
+  const mag = Math.hypot(dx, dy);
+  const angle = mag > 0.001 ? Math.atan2(dy, dx) : 0;
+  const baseScale = 1 + 2 * Math.max(Math.abs(dx) / width, Math.abs(dy) / height) * 1.08;
+  const alongScale = baseScale * (1 + Math.max(0, stretchAmount));
+  ctx.save();
+  if (alpha < 1) ctx.globalAlpha = alpha;
+  ctx.translate(width / 2 + dx, height / 2 + dy);
+  ctx.rotate(angle);
+  ctx.scale(alongScale, baseScale);
+  ctx.rotate(-angle);
+  ctx.drawImage(layer, -width / 2, -height / 2);
+  ctx.restore();
+}
+
 /** Draws `source` into `targetCtx` with a single blur pass — the one place
  * every expression softens its fragment/field edges, so there is exactly
  * one feathering knob (blur radius) shared across all three rather than
