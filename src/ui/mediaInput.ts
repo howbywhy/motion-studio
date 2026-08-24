@@ -1,4 +1,4 @@
-import { detectMediaKind, type MediaAsset } from "../core/media";
+import { defaultTransform, detectMediaKind, type MediaAsset } from "../core/media";
 
 const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
 
@@ -25,6 +25,7 @@ function loadFile(
         naturalH: img.naturalHeight,
         label: file.name,
         objectUrl,
+        transform: defaultTransform(),
       });
     };
     img.onerror = () => {
@@ -58,6 +59,7 @@ function loadFile(
         label: file.name,
         videoEl: video,
         objectUrl,
+        transform: defaultTransform(),
       });
       void video.play().catch(() => {
         /* Autoplay can be rejected by the browser; the element still

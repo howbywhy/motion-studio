@@ -1,11 +1,11 @@
 import "./style.css";
-import { Renderer, type DiagnosticMode } from "./core/renderer";
+import { Renderer, type DiagnosticMode, type MediaSlot } from "./core/renderer";
 import { placeholderA, placeholderB } from "./core/placeholder";
 import { wrapCanvasAsPlaceholder } from "./core/media";
 import { wireMediaDropZone } from "./ui/mediaInput";
 import { buildControls } from "./ui/controls";
 import { BEHAVIORS } from "./behaviors/index";
-import { defaultParamValues, type MaskBehavior, type ParamValues } from "./core/types";
+import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues } from "./core/types";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -61,6 +61,17 @@ app.innerHTML = `
         </div>
       </section>
       <aside class="control-panel">
+        <div class="composition-panel">
+          <div class="panel-label-row">
+            <label class="panel-label">Composition</label>
+            <div class="seg-toggle edit-target-toggle" id="edit-target-toggle">
+              <button data-value="A" class="active">A</button>
+              <button data-value="B">B</button>
+            </div>
+          </div>
+          <div id="composition-controls"></div>
+          <button type="button" class="reset-btn" id="composition-reset">Reset</button>
+        </div>
         <div class="behavior-meta">
           <h2 id="behavior-title"></h2>
           <p id="behavior-desc" class="behavior-desc"></p>
@@ -102,6 +113,9 @@ const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
 const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
 const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggle")!;
 const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!;
+const editTargetToggle = document.querySelector<HTMLDivElement>("#edit-target-toggle")!;
+const compositionControlsEl = document.querySelector<HTMLDivElement>("#composition-controls")!;
+const compositionResetBtn = document.querySelector<HTMLButtonElement>("#composition-reset")!;
 
 const renderer = new Renderer(canvas);
 
@@ -140,6 +154,103 @@ wireMediaDropZone(
     showSlotMeta(nameB, typeB, asset.label, asset.kind);
   },
   (message) => showSlotError(nameB, message)
+);
+
+// --- composition: per-media scale/position, independent of masking/
+// treatment entirely (see Renderer — it's baked into aLayer/bLayer before
+// anything else touches them). "A"/"B" here always mean the load slot,
+// never the swapped visual order — separate from Swap A/B on purpose. ---
+let editTarget: MediaSlot = "A";
+
+const transformParamDefs: ParamDef[] = [
+  { type: "range", key: "scale", label: "Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" },
+  { type: "range", key: "x", label: "Position X", min: -100, max: 100, step: 1, default: 0, unit: "%" },
+  { type: "range", key: "y", label: "Position Y", min: -100, max: 100, step: 1, default: 0, unit: "%" },
+];
+
+function compositionValues(slot: MediaSlot): ParamValues {
+  const t = renderer.getTransform(slot);
+  return { scale: Math.round(t.scale * 100), x: Math.round(t.x * 100), y: Math.round(t.y * 100) };
+}
+
+function onCompositionChange(values: ParamValues): void {
+  renderer.setTransform(editTarget, {
+    scale: (values.scale as number) / 100,
+    x: (values.x as number) / 100,
+    y: (values.y as number) / 100,
+  });
+}
+
+function rebuildCompositionPanel(): void {
+  buildControls(compositionControlsEl, transformParamDefs, compositionValues(editTarget), onCompositionChange);
+}
+
+editTargetToggle.addEventListener("click", (e) => {
+  const target = (e.target as HTMLElement).closest("button");
+  if (!target) return;
+  editTarget = target.getAttribute("data-value") as MediaSlot;
+  editTargetToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === target));
+  rebuildCompositionPanel();
+});
+
+compositionResetBtn.addEventListener("click", () => {
+  renderer.resetTransform(editTarget);
+  rebuildCompositionPanel();
+});
+
+rebuildCompositionPanel();
+
+// --- direct manipulation on the canvas: drag to reposition the currently
+// selected edit target, ctrl/cmd + wheel (trackpad pinch synthesizes this)
+// to scale it. Compositing order (Swap A/B) is never touched here. ---
+canvas.style.cursor = "grab";
+canvas.style.touchAction = "none";
+
+let dragState: { pointerId: number; startClientX: number; startClientY: number; startX: number; startY: number } | null = null;
+
+canvas.addEventListener("pointerdown", (e) => {
+  const t = renderer.getTransform(editTarget);
+  dragState = { pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY, startX: t.x, startY: t.y };
+  canvas.setPointerCapture(e.pointerId);
+  canvas.style.cursor = "grabbing";
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragState || dragState.pointerId !== e.pointerId) return;
+  const rect = canvas.getBoundingClientRect();
+  // Content follows the cursor (grab-and-drag), so a rightward drag must
+  // decrease x (which is defined as increasing the crop window's source
+  // position — see coverFitTransformedRect) to shift visible content right.
+  const dxNorm = ((e.clientX - dragState.startClientX) / rect.width) * 2;
+  const dyNorm = ((e.clientY - dragState.startClientY) / rect.height) * 2;
+  const t = renderer.getTransform(editTarget);
+  renderer.setTransform(editTarget, {
+    scale: t.scale,
+    x: Math.min(1, Math.max(-1, dragState.startX - dxNorm)),
+    y: Math.min(1, Math.max(-1, dragState.startY - dyNorm)),
+  });
+  rebuildCompositionPanel();
+});
+
+function endDrag(e: PointerEvent): void {
+  if (!dragState || dragState.pointerId !== e.pointerId) return;
+  dragState = null;
+  canvas.style.cursor = "grab";
+}
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return; // require a modifier so page/trackpad scroll is untouched otherwise
+    e.preventDefault();
+    const t = renderer.getTransform(editTarget);
+    const nextScale = Math.min(2.5, Math.max(1, t.scale - e.deltaY * 0.003));
+    renderer.setTransform(editTarget, { ...t, scale: nextScale });
+    rebuildCompositionPanel();
+  },
+  { passive: false }
 );
 
 // --- behavior tabs ---

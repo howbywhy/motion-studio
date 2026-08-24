@@ -6,6 +6,32 @@ export interface RGB {
   b: number;
 }
 
+/** User-adjustable framing applied on top of the cover-fit baseline, before
+ * anything else (masking, treatments, Image Aware) ever sees the media.
+ * `scale` 1 = the plain cover-fit crop; increasing it zooms further into
+ * the media from there. `x`/`y` are normalized -1..1 pan within whatever
+ * slack that scale opens up — by construction that range can never expose
+ * empty canvas, at any scale. Lives on the asset itself (not the slot), so
+ * it travels with the media through a swap and resets only when that
+ * asset is replaced. */
+export interface MediaTransform {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export function defaultTransform(): MediaTransform {
+  return { scale: 1, x: 0, y: 0 };
+}
+
+export function clampTransform(t: MediaTransform): MediaTransform {
+  return {
+    scale: Math.min(2.5, Math.max(1, t.scale)),
+    x: Math.min(1, Math.max(-1, t.x)),
+    y: Math.min(1, Math.max(-1, t.y)),
+  };
+}
+
 export interface MediaAsset {
   kind: MediaKind;
   source: CanvasImageSource;
@@ -14,6 +40,7 @@ export interface MediaAsset {
   label: string;
   videoEl?: HTMLVideoElement;
   objectUrl?: string;
+  transform: MediaTransform;
 }
 
 let sampleCanvas: HTMLCanvasElement | null = null;
@@ -77,5 +104,5 @@ export function disposeMediaAsset(asset: MediaAsset | null | undefined): void {
 }
 
 export function wrapCanvasAsPlaceholder(canvas: HTMLCanvasElement, label: string): MediaAsset {
-  return { kind: "image", source: canvas, naturalW: canvas.width, naturalH: canvas.height, label };
+  return { kind: "image", source: canvas, naturalW: canvas.width, naturalH: canvas.height, label, transform: defaultTransform() };
 }

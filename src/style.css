@@ -316,6 +316,45 @@ body {
   margin: 0 0 20px;
 }
 
+.composition-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.panel-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-label-row .panel-label {
+  margin: 0;
+}
+
+.edit-target-toggle button {
+  min-width: 30px;
+}
+
+.reset-btn {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.reset-btn:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
 .treatment-panel {
   display: flex;
   flex-direction: column;

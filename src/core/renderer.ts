@@ -1,6 +1,6 @@
-import { drawCoverFit } from "./coverFit";
+import { drawTransformedCoverFit } from "./coverFit";
 import { pingPong } from "./easing";
-import { disposeMediaAsset, type MediaAsset } from "./media";
+import { clampTransform, disposeMediaAsset, type MediaAsset, type MediaTransform } from "./media";
 import type { MaskBehavior, ParamValues } from "./types";
 
 export type PlaybackMode = "loop" | "pingpong";
@@ -17,12 +17,17 @@ function makeCanvas(): HTMLCanvasElement {
 
 /**
  * Owns the full compositing pipeline. Media A and Media B (each an image
- * or a video) are cover-fit into same-size offscreen canvases fresh on
- * every single render — this is the single source of truth for
- * "identically cropped, full-frame, aligned", and it's what lets a video
- * source just keep playing on its own: each frame we simply sample
- * whatever frame the <video> element currently shows via drawImage,
- * nothing about the source is ever reloaded or seeked. B is revealed
+ * or a video) are cover-fit — then further scaled/panned by that asset's
+ * own MediaTransform — into same-size offscreen canvases fresh on every
+ * single render. This is the single source of truth for "identically
+ * cropped, full-frame, aligned" (both always fill the destination exactly,
+ * whatever their framing), and it's what lets a video source just keep
+ * playing on its own: each frame we simply sample whatever frame the
+ * <video> element currently shows via drawImage, nothing about the source
+ * is ever reloaded or seeked. Because the transform is baked into aLayer/
+ * bLayer at this one point, everything downstream — the mask, Image
+ * Aware's sampling of bLayer, every treatment — sees only the
+ * already-framed media and needs no awareness that framing exists. B is revealed
  * strictly by compositing a fresh mask with `destination-in`, then drawing
  * that over the A layer — so visibility is controlled by the mask alone,
  * and any area the mask doesn't touch simply shows A (never black, since A
@@ -121,6 +126,25 @@ export class Renderer {
     return slot === "A" ? this.mediaA : this.mediaB;
   }
 
+  /** Framing lives on the asset itself (see MediaTransform), so reading it
+   * back and writing to it are keyed by slot but never touch which asset
+   * is loaded — swap, behavior, and playback state are all untouched. */
+  getTransform(slot: MediaSlot): MediaTransform {
+    const asset = slot === "A" ? this.mediaA : this.mediaB;
+    return asset?.transform ?? { scale: 1, x: 0, y: 0 };
+  }
+
+  setTransform(slot: MediaSlot, transform: MediaTransform): void {
+    const asset = slot === "A" ? this.mediaA : this.mediaB;
+    if (!asset) return;
+    asset.transform = clampTransform(transform);
+    this.renderFrame();
+  }
+
+  resetTransform(slot: MediaSlot): void {
+    this.setTransform(slot, { scale: 1, x: 0, y: 0 });
+  }
+
   swap(): void {
     this.swapped = !this.swapped;
     this.renderFrame();
@@ -198,7 +222,9 @@ export class Renderer {
 
   private drawMediaLayer(ctx: CanvasRenderingContext2D, asset: MediaAsset | null): void {
     ctx.clearRect(0, 0, this.width, this.height);
-    if (asset) drawCoverFit(ctx, asset.source, asset.naturalW, asset.naturalH, this.width, this.height);
+    if (asset) {
+      drawTransformedCoverFit(ctx, asset.source, asset.naturalW, asset.naturalH, this.width, this.height, asset.transform);
+    }
   }
 
   /** Renders exactly one frame at the current time without advancing
