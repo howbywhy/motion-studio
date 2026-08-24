@@ -5,7 +5,7 @@ import { wrapCanvasAsPlaceholder } from "./core/media";
 import { wireMediaDropZone } from "./ui/mediaInput";
 import { buildControls } from "./ui/controls";
 import { BEHAVIORS } from "./behaviors/index";
-import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues } from "./core/types";
+import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -77,12 +77,8 @@ app.innerHTML = `
           <p id="behavior-desc" class="behavior-desc"></p>
         </div>
         <div class="treatment-panel" id="treatment-panel" hidden>
-          <label class="panel-label">Treatment</label>
-          <div class="seg-toggle treatment-toggle" id="treatment-toggle">
-            <button data-value="clean" class="active">Clean</button>
-            <button data-value="refraction">Refraction</button>
-            <button data-value="registration">Registration</button>
-          </div>
+          <label class="panel-label" id="treatment-label">Treatment</label>
+          <div class="seg-toggle treatment-toggle" id="treatment-toggle"></div>
           <button type="button" class="diagnostic-toggle image-aware-toggle" id="image-aware" title="Experimental: bias field placement toward visually information-rich areas of the photograph">
             Image Aware
           </button>
@@ -111,6 +107,7 @@ const nameA = document.querySelector<HTMLDivElement>("#name-a")!;
 const nameB = document.querySelector<HTMLDivElement>("#name-b")!;
 const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
 const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
+const treatmentLabel = document.querySelector<HTMLLabelElement>("#treatment-label")!;
 const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggle")!;
 const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!;
 const editTargetToggle = document.querySelector<HTMLDivElement>("#edit-target-toggle")!;
@@ -281,14 +278,40 @@ function onParamsChange(values: ParamValues): void {
   syncTreatmentUI();
 }
 
+/** Any behavior can offer a segmented "expression/treatment" selector by
+ * declaring a `select`-typed param named "treatment" — Bloom's
+ * Clean/Refraction/Registration and Shift's Slice/Drift/Diffuse both work
+ * this way, so the panel itself needs no per-behavior knowledge. Image
+ * Aware stays specific to Bloom (Shift's rebuild has no equivalent). */
+function findTreatmentDef(behavior: MaskBehavior<unknown>): SelectParamDef | null {
+  const def = behavior.params.find((d) => d.key === "treatment");
+  return def && def.type === "select" ? def : null;
+}
+
+function rebuildTreatmentToggle(def: SelectParamDef): void {
+  treatmentToggle.innerHTML = "";
+  for (const opt of def.options) {
+    const btn = document.createElement("button");
+    btn.textContent = opt.label;
+    btn.setAttribute("data-value", opt.value);
+    treatmentToggle.appendChild(btn);
+  }
+}
+
 function syncTreatmentUI(): void {
+  const treatmentDef = findTreatmentDef(currentBehavior);
+  treatmentPanel.hidden = !treatmentDef;
+  if (treatmentDef) {
+    treatmentLabel.textContent = treatmentDef.label;
+    const treatment = currentParams.treatment as string;
+    treatmentToggle.querySelectorAll("button").forEach((b) => {
+      b.classList.toggle("active", b.getAttribute("data-value") === treatment);
+    });
+  }
+
   const isBloom = currentBehavior.id === "bloom";
-  treatmentPanel.hidden = !isBloom;
+  imageAwareBtn.hidden = !isBloom;
   if (!isBloom) return;
-  const treatment = currentParams.treatment as string;
-  treatmentToggle.querySelectorAll("button").forEach((b) => {
-    b.classList.toggle("active", b.getAttribute("data-value") === treatment);
-  });
   const imageAwareOn = currentParams.imageAware === "on";
   imageAwareBtn.classList.toggle("active", imageAwareOn);
   imageAwareBtn.textContent = imageAwareOn ? "Image Aware: On" : "Image Aware";
@@ -304,6 +327,8 @@ function selectBehavior(id: string): void {
   descEl.textContent = behavior.description;
 
   rebuildControlsPanel();
+  const treatmentDef = findTreatmentDef(behavior);
+  if (treatmentDef) rebuildTreatmentToggle(treatmentDef);
   syncTreatmentUI();
 
   const activeDiagnostic = renderer.getDiagnostic();
