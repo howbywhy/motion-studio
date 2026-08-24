@@ -1,7 +1,6 @@
 import type { MaskBehavior, ParamDef, ParamValues } from "../../core/types";
-import { getScratch } from "./compose";
 import { computeGlobalPhase } from "./timing";
-import { buildSliceState, renderSlicePhaseField, type SliceState } from "./slice";
+import { buildSliceState, renderSliceComposite, renderSlicePhaseField, type SliceState } from "./slice";
 import { buildDriftState, renderDriftComposite, renderDriftPhaseField, type DriftState } from "./drift";
 import { buildDiffuseState, renderDiffuseComposite, renderDiffusePhaseField, type DiffuseState } from "./diffuse";
 
@@ -94,22 +93,8 @@ export const shiftBehavior: MaskBehavior<ShiftBehaviorState> = {
     const blurPx = 2 + overlapFrac * Math.min(width, height) * 0.03;
     const direction = p.direction as number;
 
-    if (state.mode === "slice") {
-      // Slice needs no spatial offset — this is exactly the renderer's own
-      // generic destination-in path, replicated here because the mask
-      // canvas (already the correct blurred phase field, computed by
-      // renderMask above) is only handed to a behavior that defines
-      // renderComposite, not to the generic default it would otherwise use.
-      const bm = getScratch("slice-bmasked", width, height);
-      const bmCtx = bm.getContext("2d")!;
-      bmCtx.clearRect(0, 0, width, height);
-      bmCtx.drawImage(bLayer, 0, 0);
-      bmCtx.globalCompositeOperation = "destination-in";
-      bmCtx.drawImage(maskLayer, 0, 0);
-      bmCtx.globalCompositeOperation = "source-over";
-      ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(aLayer, 0, 0);
-      ctx.drawImage(bm, 0, 0);
+    if (state.mode === "slice" && state.slice) {
+      renderSliceComposite(ctx, aLayer, bLayer, width, height, direction, state.slice, globalPhase, overlapFrac, blurPx);
       return;
     }
     if (state.mode === "drift" && state.drift) {

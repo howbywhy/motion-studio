@@ -6,7 +6,16 @@
  * nonzero envelope pay for translation + blend + feathering. Active
  * fragments are drawn last (so they read as "on top" while detached) at
  * reduced opacity so overlapping pieces blend into genuine soft double
- * exposure rather than opaque stacking. */
+ * exposure rather than opaque stacking.
+ *
+ * A fragment isn't a single translated copy of itself: it's a short trail
+ * of copies at increasing offset and increasing A->B blend, seen through
+ * the fragment's own current (fully displaced) silhouette — like a single
+ * long exposure of one piece in motion, rather than a piece that merely
+ * teleports from rest to its new position. The nearest-to-rest copy in
+ * that trail is what keeps a piece from reading as having simply vacated
+ * its origin — a faint trace of it stays legible even at full
+ * displacement. */
 import { mulberry32 } from "../../core/rng";
 import { applyGrain, blurInto, drawOverscanTranslated, getScratch } from "./compose";
 import { distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
@@ -24,6 +33,8 @@ export interface DriftState {
 }
 
 const BASE_DRIFT_FRAC = 0.15;
+const TRAIL_OFFSET_FRACS = [0, 0.38, 0.72, 1.0];
+const TRAIL_OPACITIES = [0.16, 0.32, 0.5, 0.88];
 
 /** Direction is intentionally not baked in here — only the per-fragment
  * deviation from it is — so nudging Direction doesn't require reshuffling
@@ -124,8 +135,14 @@ export function renderDriftComposite(
     mctx.restore();
 
     cctx.clearRect(0, 0, width, height);
-    drawOverscanTranslated(cctx, aLayer, width, height, dx, dy, 1);
-    drawOverscanTranslated(cctx, bLayer, width, height, dx, dy, phase);
+    for (let k = 0; k < TRAIL_OFFSET_FRACS.length; k++) {
+      const f = TRAIL_OFFSET_FRACS[k];
+      const echoDx = dx * f;
+      const echoDy = dy * f;
+      const echoBlend = Math.min(1, phase * (0.4 + f * 0.6));
+      drawOverscanTranslated(cctx, aLayer, width, height, echoDx, echoDy, TRAIL_OPACITIES[k]);
+      drawOverscanTranslated(cctx, bLayer, width, height, echoDx, echoDy, TRAIL_OPACITIES[k] * echoBlend);
+    }
     cctx.save();
     cctx.globalCompositeOperation = "destination-in";
     cctx.filter = blurPx > 0.4 ? `blur(${blurPx}px)` : "none";
