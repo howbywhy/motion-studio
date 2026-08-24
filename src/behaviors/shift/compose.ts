@@ -66,3 +66,47 @@ export function blurInto(targetCtx: CanvasRenderingContext2D, source: CanvasImag
   targetCtx.filter = "none";
   targetCtx.restore();
 }
+
+const GRAIN_TILE = 220;
+let grainTile: HTMLCanvasElement | null = null;
+
+/** A small tileable field of per-pixel alpha noise (RGB is irrelevant —
+ * this is only ever composited with destination-in, which multiplies the
+ * *existing* alpha by this alpha and discards the color entirely). Built
+ * once, reused forever: this is texture, not animation, so it doesn't need
+ * to change frame to frame — it reads as grain because it's riding on top
+ * of shapes that ARE moving every frame. */
+function getGrainTile(): HTMLCanvasElement {
+  if (grainTile) return grainTile;
+  const c = makeCanvas();
+  c.width = GRAIN_TILE;
+  c.height = GRAIN_TILE;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(GRAIN_TILE, GRAIN_TILE);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = d[i + 1] = d[i + 2] = 255;
+    d[i + 3] = 150 + Math.floor(Math.random() * 105); // 150..255 -- never fully erases coverage
+  }
+  ctx.putImageData(img, 0, 0);
+  grainTile = c;
+  return c;
+}
+
+/** Textures an already-painted alpha field (a mask, or any canvas whose
+ * alpha channel matters more than its color) with photographic grain,
+ * without touching a single pixel outside what's already covered — this
+ * is what keeps a soft blurred edge from reading as a clean digital
+ * gradient. Multiplies the existing alpha down by the grain tile's own
+ * alpha (150-255 of 255), so it can only ever subtly roughen an edge, never
+ * uniformly dim it — there's deliberately no intensity knob here: this is
+ * texture, not a creative parameter. */
+export function applyGrain(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  const tile = getGrainTile();
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-in";
+  const pattern = ctx.createPattern(tile, "repeat")!;
+  ctx.fillStyle = pattern;
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
+}

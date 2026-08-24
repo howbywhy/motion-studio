@@ -56,11 +56,24 @@ function shuffledOrder(count: number, rand: () => number): number[] {
  * the full span (a genuine time-slice, fragments visibly out of sync with
  * each other). `rhythmFrac` (0..1) adds uneven, bursty clustering on top of
  * an otherwise even stagger — 0 is a smooth, evenly-paced sweep; 1 reads as
- * syncopated pulses. Always seeded + shuffled (not independently random per
- * fragment) so a handful of fragments never accidentally clump into a dead
- * zone with nothing active — see the earlier Shift's post-mortem on this. */
-export function distributeFragmentTimings(count: number, spreadFrac: number, rhythmFrac: number, rand: () => number): FragmentTiming[] {
-  const order = shuffledOrder(count, rand);
+ * syncopated pulses. Fragment index i is normally assigned a SHUFFLED slot
+ * (not independently random per fragment, so a handful never accidentally
+ * clump into a dead zone with nothing active — see the earlier Shift's
+ * post-mortem on this) so which piece moves first has no relation to its
+ * position. `coherent` skips the shuffle, so index order IS slot order —
+ * for a caller whose fragments are already laid out in a meaningful spatial
+ * sequence (Slice's bands, stacked edge to edge), this turns the stagger
+ * into a genuine directional sweep — one photographic moment unfolding
+ * across space, like a strobe exposure — rather than scattered pieces
+ * turning in a spatially arbitrary order. */
+export function distributeFragmentTimings(
+  count: number,
+  spreadFrac: number,
+  rhythmFrac: number,
+  rand: () => number,
+  coherent = false
+): FragmentTiming[] {
+  const order = coherent ? Array.from({ length: count }, (_, i) => i) : shuffledOrder(count, rand);
   const evenSlot = 1 / count;
   const timings: FragmentTiming[] = [];
   for (let i = 0; i < count; i++) {

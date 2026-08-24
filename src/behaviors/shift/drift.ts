@@ -8,7 +8,7 @@
  * reduced opacity so overlapping pieces blend into genuine soft double
  * exposure rather than opaque stacking. */
 import { mulberry32 } from "../../core/rng";
-import { blurInto, drawOverscanTranslated, getScratch } from "./compose";
+import { applyGrain, blurInto, drawOverscanTranslated, getScratch } from "./compose";
 import { distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
 import { buildWavyPartition, clipToWavyRegion, type WavyCut } from "./wavy";
 
@@ -65,6 +65,7 @@ export function renderDriftPhaseField(
     sctx.restore();
   }
   blurInto(targetCtx, scratch, blurPx);
+  applyGrain(targetCtx, width, height);
 }
 
 export function renderDriftComposite(
@@ -132,6 +133,7 @@ export function renderDriftComposite(
     cctx.filter = "none";
     cctx.globalCompositeOperation = "source-over";
     cctx.restore();
+    applyGrain(cctx, width, height);
 
     ctx.save();
     ctx.globalAlpha = 1 - overlapFrac * 0.55 * phase;

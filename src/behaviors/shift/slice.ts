@@ -8,7 +8,7 @@
  * line), and the whole field is blurred in one pass so no edge reads as a
  * drawn shape — this is a blend field, not a set of moving windows. */
 import { mulberry32 } from "../../core/rng";
-import { blurInto, getScratch } from "./compose";
+import { applyGrain, blurInto, getScratch } from "./compose";
 import { distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
 import { clipToSequentialBand, randomWave, type WaveParams, type WavyCut } from "./wavy";
 
@@ -37,7 +37,10 @@ export function buildSliceState(fragment: number, spread: number, rhythm: number
     cuts.push({ orientation: "horizontal", pos: cum, amplitudeFrac, wave });
   }
   const timingsRand = mulberry32(seed + 104729);
-  const timings = distributeFragmentTimings(count, spread / 100, rhythm / 100, timingsRand);
+  // coherent=true: band index order IS temporal order, so the transition
+  // reads as a directional sweep across the bands (a strobe-exposure
+  // quality) rather than a spatially arbitrary stagger.
+  const timings = distributeFragmentTimings(count, spread / 100, rhythm / 100, timingsRand, true);
   return { cuts, timings };
 }
 
@@ -75,4 +78,5 @@ export function renderSlicePhaseField(
   }
   sctx.restore();
   blurInto(targetCtx, scratch, blurPx);
+  applyGrain(targetCtx, width, height);
 }

@@ -11,7 +11,7 @@
  * rather than a plain crossfade — is what keeps this reading as
  * photographic information changing state instead of a blur/dissolve. */
 import { mulberry32 } from "../../core/rng";
-import { blurInto, drawOverscanTranslated, getScratch } from "./compose";
+import { applyGrain, blurInto, drawOverscanTranslated, getScratch } from "./compose";
 import { fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
 
 interface CellShape {
@@ -115,6 +115,7 @@ export function renderDiffusePhaseField(
   sctx.clearRect(0, 0, width, height);
   cachedActivity = paintPhaseField(sctx, width, height, state, globalPhase, overlapFrac);
   blurInto(targetCtx, scratch, blurPx);
+  applyGrain(targetCtx, width, height);
 }
 
 export function renderDiffuseComposite(
