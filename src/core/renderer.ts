@@ -1,8 +1,10 @@
 import { drawCoverFit } from "./coverFit";
 import { pingPong } from "./easing";
+import { disposeMediaAsset, type MediaAsset } from "./media";
 import type { MaskBehavior, ParamValues } from "./types";
 
 export type PlaybackMode = "loop" | "pingpong";
+export type MediaSlot = "A" | "B";
 
 const PING_PONG_PERIOD = 6; // seconds — bounce cycle length, independent of behavior speed
 const MAX_DPR = 2;
@@ -13,20 +15,22 @@ function makeCanvas(): HTMLCanvasElement {
 }
 
 /**
- * Owns the full compositing pipeline. Image A and Image B are each drawn,
- * independently, cover-fit into same-size offscreen canvases whenever they
- * change or the frame resizes — this is the single source of truth for
- * "identically cropped, full-frame, aligned". Every animation frame only
- * the mask is redrawn; A and B pixel content never moves, resizes, or
- * shifts on its own. B is revealed strictly by compositing a fresh mask
- * with `destination-in`, then drawing that over the static A layer — so
- * visibility is controlled by the mask alone, and any area the mask
- * doesn't touch simply shows A (never black, since A always fully covers
- * the frame).
+ * Owns the full compositing pipeline. Media A and Media B (each an image
+ * or a video) are cover-fit into same-size offscreen canvases fresh on
+ * every single render — this is the single source of truth for
+ * "identically cropped, full-frame, aligned", and it's what lets a video
+ * source just keep playing on its own: each frame we simply sample
+ * whatever frame the <video> element currently shows via drawImage,
+ * nothing about the source is ever reloaded or seeked. B is revealed
+ * strictly by compositing a fresh mask with `destination-in`, then drawing
+ * that over the A layer — so visibility is controlled by the mask alone,
+ * and any area the mask doesn't touch simply shows A (never black, since A
+ * always fully covers the frame).
  */
 export class Renderer {
   private readonly visible: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
+  private readonly videoHost: HTMLDivElement;
 
   private readonly aLayer = makeCanvas();
   private readonly bLayer = makeCanvas();
@@ -37,10 +41,8 @@ export class Renderer {
   private height = 0;
   private dpr = 1;
 
-  private imgA: CanvasImageSource | null = null;
-  private imgB: CanvasImageSource | null = null;
-  private imgASize: { w: number; h: number } | null = null;
-  private imgBSize: { w: number; h: number } | null = null;
+  private mediaA: MediaAsset | null = null;
+  private mediaB: MediaAsset | null = null;
 
   private behavior: MaskBehavior<unknown> | null = null;
   private params: ParamValues = {};
@@ -61,6 +63,25 @@ export class Renderer {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("2D context unavailable");
     this.ctx = ctx;
+
+    // Loaded <video> elements live here — visually hidden, but attached
+    // to the document so browsers keep decoding/playing them. They are
+    // never drawn directly; only sampled into aLayer/bLayer each frame.
+    this.videoHost = document.createElement("div");
+    this.videoHost.setAttribute("aria-hidden", "true");
+    this.videoHost.style.position = "fixed";
+    this.videoHost.style.top = "0";
+    this.videoHost.style.left = "0";
+    this.videoHost.style.width = "1px";
+    this.videoHost.style.height = "1px";
+    this.videoHost.style.overflow = "hidden";
+    this.videoHost.style.opacity = "0";
+    this.videoHost.style.pointerEvents = "none";
+    (canvas.parentElement ?? document.body).appendChild(this.videoHost);
+  }
+
+  getVideoHost(): HTMLElement {
+    return this.videoHost;
   }
 
   resize(cssWidth: number, cssHeight: number): void {
@@ -80,53 +101,30 @@ export class Renderer {
     this.visible.style.width = `${cssWidth}px`;
     this.visible.style.height = `${cssHeight}px`;
 
-    this.redrawStaticLayers();
     this.renderFrame(); // repaint immediately so resize never shows a stale/blank frame
   }
 
-  setImageA(img: CanvasImageSource, naturalW: number, naturalH: number): void {
-    this.imgA = img;
-    this.imgASize = { w: naturalW, h: naturalH };
-    this.redrawStaticLayers();
+  /** Loads a new asset into slot A or B. Mask behavior/params/state are
+   * untouched — media and mask animation are fully independent. */
+  setMedia(slot: MediaSlot, asset: MediaAsset): void {
+    const prev = slot === "A" ? this.mediaA : this.mediaB;
+    if (slot === "A") this.mediaA = asset;
+    else this.mediaB = asset;
     this.renderFrame();
+    if (prev && prev !== asset) disposeMediaAsset(prev);
   }
 
-  setImageB(img: CanvasImageSource, naturalW: number, naturalH: number): void {
-    this.imgB = img;
-    this.imgBSize = { w: naturalW, h: naturalH };
-    this.redrawStaticLayers();
-    this.renderFrame();
+  getMedia(slot: MediaSlot): MediaAsset | null {
+    return slot === "A" ? this.mediaA : this.mediaB;
   }
 
   swap(): void {
     this.swapped = !this.swapped;
-    this.redrawStaticLayers();
     this.renderFrame();
   }
 
   isSwapped(): boolean {
     return this.swapped;
-  }
-
-  private redrawStaticLayers(): void {
-    if (this.width === 0 || this.height === 0) return;
-
-    const bottomImg = this.swapped ? this.imgB : this.imgA;
-    const bottomSize = this.swapped ? this.imgBSize : this.imgASize;
-    const topImg = this.swapped ? this.imgA : this.imgB;
-    const topSize = this.swapped ? this.imgASize : this.imgBSize;
-
-    const actx = this.aLayer.getContext("2d")!;
-    actx.clearRect(0, 0, this.width, this.height);
-    if (bottomImg && bottomSize) {
-      drawCoverFit(actx, bottomImg, bottomSize.w, bottomSize.h, this.width, this.height);
-    }
-
-    const bctx = this.bLayer.getContext("2d")!;
-    bctx.clearRect(0, 0, this.width, this.height);
-    if (topImg && topSize) {
-      drawCoverFit(bctx, topImg, topSize.w, topSize.h, this.width, this.height);
-    }
   }
 
   setBehavior<T>(behavior: MaskBehavior<T>, params: ParamValues): void {
@@ -179,10 +177,24 @@ export class Renderer {
     return this.elapsed;
   }
 
-  /** Renders exactly one frame at the current time without advancing playback. */
+  private drawMediaLayer(ctx: CanvasRenderingContext2D, asset: MediaAsset | null): void {
+    ctx.clearRect(0, 0, this.width, this.height);
+    if (asset) drawCoverFit(ctx, asset.source, asset.naturalW, asset.naturalH, this.width, this.height);
+  }
+
+  /** Renders exactly one frame at the current time without advancing
+   * playback. Media layers are redrawn fresh every call (cheap cover-fit
+   * draws) so a live video source is always sampled at its current
+   * frame — this is what keeps video playback fully decoupled from the
+   * mask animation loop. */
   renderFrame(): void {
     const { width, height } = this;
     if (width === 0 || height === 0) return;
+
+    const bottom = this.swapped ? this.mediaB : this.mediaA;
+    const top = this.swapped ? this.mediaA : this.mediaB;
+    this.drawMediaLayer(this.aLayer.getContext("2d")!, bottom);
+    this.drawMediaLayer(this.bLayer.getContext("2d")!, top);
 
     const maskCtx = this.maskLayer.getContext("2d")!;
     maskCtx.clearRect(0, 0, width, height);

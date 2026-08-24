@@ -144,34 +144,99 @@ body {
   display: block;
 }
 
-.corner-drop {
-  position: absolute;
-  top: 10px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(10, 10, 12, 0.55);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
+.media-panel {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  max-width: 480px;
+}
+
+.media-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 10px;
+  background: var(--panel);
   cursor: pointer;
-  backdrop-filter: blur(4px);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.corner-a {
-  left: 10px;
+.media-slot:hover,
+.media-slot.drag-over {
+  border-color: var(--text-dim);
+  background: #1a1a1e;
 }
 
-.corner-b {
-  right: 10px;
+.media-slot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
-.corner-drop:hover,
-.corner-drop.drag-over {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: var(--text);
+.media-slot-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.media-slot-type {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.media-slot-type.type-image {
+  color: #7fd6d1;
+}
+
+.media-slot-type.type-video {
+  color: #e0a25b;
+}
+
+.load-media-btn {
+  background: var(--text);
+  color: var(--bg);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.media-slot-name {
+  font-size: 11px;
+  color: var(--text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-slot-name.has-error {
+  color: #e8827a;
+  white-space: normal;
+  text-overflow: clip;
+  line-height: 1.4;
+}
+
+.media-slot-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.7;
 }
 
 .stage-controls {

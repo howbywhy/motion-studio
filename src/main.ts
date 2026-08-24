@@ -1,7 +1,8 @@
 import "./style.css";
 import { Renderer } from "./core/renderer";
 import { placeholderA, placeholderB } from "./core/placeholder";
-import { wireImageInput } from "./ui/imageInput";
+import { wrapCanvasAsPlaceholder } from "./core/media";
+import { wireMediaDropZone } from "./ui/mediaInput";
 import { buildControls } from "./ui/controls";
 import { BEHAVIORS } from "./behaviors/index";
 import { defaultParamValues, type ParamValues } from "./core/types";
@@ -16,6 +17,26 @@ app.innerHTML = `
     </header>
     <main class="workspace">
       <section class="stage-panel">
+        <div class="media-panel">
+          <div class="media-slot" id="slot-a">
+            <div class="media-slot-row">
+              <span class="media-slot-badge">A</span>
+              <span class="media-slot-type" id="type-a">—</span>
+            </div>
+            <button type="button" class="load-media-btn" id="btn-a">Load Media A</button>
+            <div class="media-slot-name" id="name-a">No file selected</div>
+            <div class="media-slot-hint">or drop an image / video here</div>
+          </div>
+          <div class="media-slot" id="slot-b">
+            <div class="media-slot-row">
+              <span class="media-slot-badge">B</span>
+              <span class="media-slot-type" id="type-b">—</span>
+            </div>
+            <button type="button" class="load-media-btn" id="btn-b">Load Media B</button>
+            <div class="media-slot-name" id="name-b">No file selected</div>
+            <div class="media-slot-hint">or drop an image / video here</div>
+          </div>
+        </div>
         <div class="stage-toolbar">
           <div class="seg-toggle" id="aspect-toggle">
             <button data-value="4:5" class="active">4:5</button>
@@ -28,8 +49,6 @@ app.innerHTML = `
         </div>
         <div class="stage-frame" id="stage-frame">
           <canvas id="canvas"></canvas>
-          <button class="corner-drop corner-a" id="dropzone-a" title="Drop or click to set Image A">A</button>
-          <button class="corner-drop corner-b" id="dropzone-b" title="Drop or click to set Image B">B</button>
         </div>
         <div class="stage-controls">
           <button id="play-pause" class="primary">Pause</button>
@@ -57,19 +76,51 @@ const playPauseBtn = document.querySelector<HTMLButtonElement>("#play-pause")!;
 const swapBtn = document.querySelector<HTMLButtonElement>("#swap")!;
 const aspectToggle = document.querySelector<HTMLDivElement>("#aspect-toggle")!;
 const playbackToggle = document.querySelector<HTMLDivElement>("#playback-toggle")!;
-const dropA = document.querySelector<HTMLButtonElement>("#dropzone-a")!;
-const dropB = document.querySelector<HTMLButtonElement>("#dropzone-b")!;
+const slotA = document.querySelector<HTMLDivElement>("#slot-a")!;
+const slotB = document.querySelector<HTMLDivElement>("#slot-b")!;
+const typeA = document.querySelector<HTMLSpanElement>("#type-a")!;
+const typeB = document.querySelector<HTMLSpanElement>("#type-b")!;
+const nameA = document.querySelector<HTMLDivElement>("#name-a")!;
+const nameB = document.querySelector<HTMLDivElement>("#name-b")!;
 
 const renderer = new Renderer(canvas);
 
 // --- default placeholder imagery so the mask is testable immediately ---
-const phA = placeholderA();
-const phB = placeholderB();
-renderer.setImageA(phA, phA.width, phA.height);
-renderer.setImageB(phB, phB.width, phB.height);
+renderer.setMedia("A", wrapCanvasAsPlaceholder(placeholderA(), "Placeholder A"));
+renderer.setMedia("B", wrapCanvasAsPlaceholder(placeholderB(), "Placeholder B"));
 
-wireImageInput(dropA, (img, w, h) => renderer.setImageA(img, w, h));
-wireImageInput(dropB, (img, w, h) => renderer.setImageB(img, w, h));
+function showSlotMeta(nameEl: HTMLDivElement, typeEl: HTMLSpanElement, label: string, kind: "image" | "video"): void {
+  nameEl.textContent = label;
+  nameEl.classList.remove("has-error");
+  typeEl.textContent = kind === "image" ? "IMAGE" : "VIDEO";
+  typeEl.classList.toggle("type-image", kind === "image");
+  typeEl.classList.toggle("type-video", kind === "video");
+}
+
+function showSlotError(nameEl: HTMLDivElement, message: string): void {
+  nameEl.textContent = message;
+  nameEl.classList.add("has-error");
+}
+
+wireMediaDropZone(
+  slotA,
+  renderer.getVideoHost(),
+  (asset) => {
+    renderer.setMedia("A", asset);
+    showSlotMeta(nameA, typeA, asset.label, asset.kind);
+  },
+  (message) => showSlotError(nameA, message)
+);
+
+wireMediaDropZone(
+  slotB,
+  renderer.getVideoHost(),
+  (asset) => {
+    renderer.setMedia("B", asset);
+    showSlotMeta(nameB, typeB, asset.label, asset.kind);
+  },
+  (message) => showSlotError(nameB, message)
+);
 
 // --- behavior tabs ---
 let currentParams: ParamValues = {};
