@@ -31,14 +31,21 @@
  * Critically, this is NOT "more fragments doing more things" — it's a
  * HIERARCHY. One or two fragments per state are picked as dominant and get
  * the large, dramatic distortions (translate/stretch/compress/drag/
- * overshoot at real magnitude); everything else stays quiet (mostly
- * anchored, occasionally a faint retain or a barely-there translate). The
- * goal is an otherwise coherent photograph with one or two genuinely
- * impossible spatial contradictions in it, not many fragments each nudged
- * a little. */
+ * overshoot at real magnitude, DOMINANT_REACH); everything else stays
+ * quiet (mostly anchored, occasionally a faint retain or a barely-there
+ * translate, QUIET_REACH). The goal is an otherwise coherent photograph
+ * with one or two genuinely impossible spatial contradictions in it, not
+ * many fragments each nudged a little.
+ *
+ * "Otherwise coherent" needs the quiet majority to actually read as ONE
+ * photograph, not as many small independently-fading patches — every
+ * "anchored" fragment therefore shares a single wide background envelope
+ * (see backgroundPhase) instead of its own individual timing, so their
+ * content and alpha are identical everywhere and there's no visible seam
+ * between them left to see. */
 import { mulberry32 } from "../../core/rng";
 import { applyGrain, blurInto, drawOverscanStretched, drawOverscanTranslated, drawScaled, getScratch } from "./compose";
-import { distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
+import { bumpEnvelope, distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
 import { buildWavyPartition, clipToWavyRegion, type WavyCut } from "./wavy";
 
 export type DriftFragmentKind = "anchored" | "translate" | "stretch" | "compress" | "drag" | "overshoot" | "retain";
@@ -87,8 +94,23 @@ export interface DriftState {
 }
 
 const BASE_DRIFT_FRAC = 0.13;
-const DOMINANT_REACH = 2.6;
-const QUIET_REACH = 0.35;
+const DOMINANT_REACH = 3.1;
+const QUIET_REACH = 0.22;
+
+/** One shared, wide, gentle envelope for the "anchored" kind — the quiet
+ * majority. Individually-timed anchored fragments each drawing a plain
+ * in-place crossfade at their OWN blend ratio is what made the rest of the
+ * photograph read as a patchwork of many small independently-fading
+ * regions (visible seams, even though none of them displace) rather than
+ * "one coherent photograph, mostly undisturbed." Every anchored fragment
+ * uses this same phase instead of its own timing, so their content and
+ * alpha are identical everywhere and the union of their draws is
+ * indistinguishable from one full-frame crossfade — no seams left to see,
+ * because there's nothing left for a seam to be between. */
+function backgroundPhase(globalPhase: GlobalPhase): number {
+  if (!globalPhase.inTransform) return 0;
+  return bumpEnvelope(globalPhase.localPhase, 0.5, 0.62);
+}
 
 /** Direction is intentionally not baked in here — only the per-fragment
  * deviation from it is — so nudging Direction doesn't require reshuffling
@@ -232,7 +254,7 @@ export function renderDriftComposite(
 
   const resolved = state.fragments.map((frag) => ({
     frag,
-    phase: fragmentPhase(globalPhase, frag.timing),
+    phase: frag.kind === "anchored" ? backgroundPhase(globalPhase) : fragmentPhase(globalPhase, frag.timing),
   }));
   const order = resolved.map((_, i) => i).sort((a, b) => resolved[a].phase - resolved[b].phase);
 
@@ -248,7 +270,14 @@ export function renderDriftComposite(
     }
 
     const reach = frag.dominant ? DOMINANT_REACH : QUIET_REACH;
-    const baseDrift = Math.min(width, height) * BASE_DRIFT_FRAC * frag.magnitudeFrac * reach;
+    // Overlap now scales displacement DISTANCE, not just edge opacity --
+    // without this, "Overlap" barely moved the image at all, which made it
+    // a dishonest label for the XY pad's "direction + distance" framing.
+    // Pivoted at the default overlap (42%) so the already-tuned Balanced
+    // look is reproduced exactly (scale == 1 there); Restrained/Expressive
+    // presets now land at genuinely different magnitudes either side of it.
+    const overlapScale = 0.5 + overlapFrac * 1.19;
+    const baseDrift = Math.min(width, height) * BASE_DRIFT_FRAC * frag.magnitudeFrac * reach * overlapScale;
     const rad = ((directionDeg + frag.angleJitterDeg) * Math.PI) / 180;
     const dx = Math.cos(rad) * baseDrift * phase;
     const dy = Math.sin(rad) * baseDrift * phase;

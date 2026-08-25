@@ -4,6 +4,7 @@ import { placeholderA, placeholderB } from "./core/placeholder";
 import { wrapCanvasAsPlaceholder, type MediaAsset } from "./core/media";
 import { wireMediaDropZone } from "./ui/mediaInput";
 import { buildControls } from "./ui/controls";
+import { buildXYPad } from "./ui/xyPad";
 import { BEHAVIORS } from "./behaviors/index";
 import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
@@ -308,10 +309,40 @@ let currentParams: ParamValues = {};
 let currentBehavior: MaskBehavior<unknown> = BEHAVIORS[0];
 let visibleKeysCache = "";
 
+// Shift's Direction+Overlap are really one polar displacement quantity --
+// see ui/xyPad.ts. This is the one prototype control group called for
+// before any wider propagation of the visual-control system; every other
+// behavior still renders through the plain generic panel.
+function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: ParamValues, onChange: (patch: ParamValues) => void): void {
+  container.innerHTML = "";
+  if (currentBehavior.id !== "shift") {
+    buildControls(container, defs, values, onChange);
+    return;
+  }
+  const angleDef = defs.find((d) => d.key === "direction");
+  const radiusDef = defs.find((d) => d.key === "overlap");
+  if (!angleDef || angleDef.type !== "range" || !radiusDef || radiusDef.type !== "range") {
+    buildControls(container, defs, values, onChange);
+    return;
+  }
+  const before = defs.filter((d) => d.key === "fragment");
+  const after = defs.filter((d) => d.key !== "direction" && d.key !== "overlap" && d.key !== "fragment");
+  // Each buildControls call clears its OWN container on entry, so the
+  // three groups need separate sub-containers -- sharing one would have
+  // the second/third call wipe out what the previous group just rendered.
+  const beforeEl = document.createElement("div");
+  const afterEl = document.createElement("div");
+  container.appendChild(beforeEl);
+  buildControls(beforeEl, before, values, onChange);
+  buildXYPad(container, angleDef, radiusDef, values, onChange);
+  container.appendChild(afterEl);
+  buildControls(afterEl, after, values, onChange);
+}
+
 function rebuildControlsPanel(): void {
   const defs = currentBehavior.visibleParams ? currentBehavior.visibleParams(currentParams) : currentBehavior.params;
   visibleKeysCache = defs.map((d) => d.key).join(",");
-  buildControls(controlsEl, defs, currentParams, onParamsChange);
+  renderControlDefs(controlsEl, defs, currentParams, onParamsChange);
 }
 
 // `patch` carries only the one key that changed (see ui/controls.ts) —
@@ -330,7 +361,7 @@ function onParamsChange(patch: ParamValues): void {
     const key = defs.map((d) => d.key).join(",");
     if (key !== visibleKeysCache) {
       visibleKeysCache = key;
-      buildControls(controlsEl, defs, currentParams, onParamsChange);
+      renderControlDefs(controlsEl, defs, currentParams, onParamsChange);
     }
   }
   syncTreatmentUI();
@@ -704,20 +735,91 @@ renderSavedStatesList();
 // — see Renderer.finalizeOutput), so exporting it directly guarantees the
 // file matches what's on screen with no separate render path to drift out
 // of sync, and captures the canvas's own backing-store resolution (up to
-// 2x device pixel ratio), not just its on-screen CSS size. ---
+// 2x device pixel ratio), not just its on-screen CSS size.
+//
+// canvas.toBlob() takes its pixel snapshot SYNCHRONOUSLY at the moment
+// it's called (the HTML spec requires the bitmap to be copied before
+// control returns to the caller; only the encoding happens off-thread
+// afterward) — so whatever is still animating on screen after this line
+// runs can never affect the exported bytes.
+//
+// The plain `<a download>` path below is the correct, complete
+// implementation for a normal deployed browser. It does nothing when this
+// app is opened as a published Claude Artifact, though: that viewer never
+// grants a page direct download access (a deliberate sandbox boundary,
+// not a bug here), so a programmatic download click there is silently
+// inert. When `window.claude.use` is present (i.e. running inside that
+// artifact runtime), route the save through its `downloads` capability
+// instead, which prompts the viewer directly; fall back to `<a download>`
+// whenever that capability isn't there, including every normal browser
+// deployment where `window.claude` doesn't exist at all. ---
+interface ClaudeDownloadsNamespace {
+  save(request: { filename: string; data: Blob }): Promise<{ status: "saved" }>;
+}
+interface ClaudeGlobal {
+  use<T = unknown>(name: string): Promise<T | null>;
+}
+declare global {
+  interface Window {
+    claude?: ClaudeGlobal;
+  }
+}
+
+function exportFilename(): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `motion-studio-${currentBehavior.id}-${currentParams.treatment ?? "export"}-${stamp}.png`;
+}
+
+function downloadBlobDirectly(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function setExportStatus(text: string, revertAfterMs?: number): void {
+  const original = "Export PNG";
+  exportPngBtn.textContent = text;
+  if (revertAfterMs) {
+    setTimeout(() => {
+      exportPngBtn.textContent = original;
+    }, revertAfterMs);
+  }
+}
+
+async function exportCurrentFrameAsPng(): Promise<void> {
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) {
+    setExportStatus("Export failed", 2000);
+    return;
+  }
+  const filename = exportFilename();
+
+  if (window.claude?.use) {
+    try {
+      const downloads = await window.claude.use<ClaudeDownloadsNamespace>("downloads");
+      if (downloads) {
+        await downloads.save({ filename, data: blob });
+        setExportStatus("Saved", 1500);
+        return;
+      }
+    } catch {
+      // Declined, rate-limited, or unavailable after all — fall through to
+      // the direct browser download rather than leaving the click with no
+      // visible result.
+    }
+  }
+
+  downloadBlobDirectly(blob, filename);
+  setExportStatus("Download started", 1500);
+}
+
 exportPngBtn.addEventListener("click", () => {
-  canvas.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    a.download = `motion-studio-${currentBehavior.id}-${currentParams.treatment ?? "export"}-${stamp}.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }, "image/png");
+  void exportCurrentFrameAsPng();
 });
 
 // --- responsive stage sizing (resize preserves alignment: renderer

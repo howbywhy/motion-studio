@@ -23,9 +23,24 @@
  * (Direction, via one canvas rotation), stay in coherent spatial order (a
  * directional sweep, not a scattered stagger — see timing.ts), and their
  * boundaries undulate continuously so none of it reads as a ruled line or
- * a moving window. */
+ * a moving window.
+ *
+ * Their TIMING is deliberately clustered rather than evenly spread: raw
+ * per-band centers get snapped hard (78%) toward a small set of shared
+ * event centers (buildSliceEventCenters), so a handful of bands fire in
+ * near-unison as one legible temporal event instead of many bands each
+ * getting their own slightly-different moment — that reads as a smooth
+ * gradient/effect, not a chronophotographic exposure. A band also has a
+ * chance (PARTIAL_CHANCE) of only affecting a partial-width slice of its
+ * own strip rather than the full frame width, so a temporal event can read
+ * as one displaced limb or region rather than a clean full-width stripe.
+ * And instead of crossfading a translated copy in place (repeated
+ * translucent ghosts), advance/retreat/overlap bands draw an ANISOTROPIC
+ * STRETCH along Direction (drawOverscanStretched) that grows with the
+ * band's own displacement phase — a directional exposure drag, closer to
+ * slit-scan/registration-error smear than a stacked double exposure. */
 import { mulberry32 } from "../../core/rng";
-import { applyGrain, blurInto, drawOverscanTranslated, getScratch } from "./compose";
+import { applyGrain, blurInto, drawOverscanStretched, drawOverscanTranslated, getScratch } from "./compose";
 import { distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
 import { clipToSequentialBand, randomWave, type WaveParams, type WavyCut } from "./wavy";
 
@@ -51,6 +66,8 @@ function pickRole(rand: () => number): SliceBandRole {
 export interface SliceBand {
   role: SliceBandRole;
   magnitudeFrac: number; // per-band variation in how far advance/retreat/overlap reach
+  stretchAmount: number; // per-band anisotropic smear for advance/retreat/overlap -- exposure drag, not a rigid duplicate
+  partialRange: [number, number] | null; // along-band extent this band's content is confined to; null = spans the band's full length
   alphaTiming: FragmentTiming; // drives the A->B blend ratio
   dispTiming: FragmentTiming; // same center, wider width -- displacement is active before/after the blend itself is
 }
@@ -65,6 +82,35 @@ function bandWeights(count: number, rand: () => number, uniformity: number): num
   const blended = raw.map((w) => w * (1 - uniformity) + uniformity);
   const sum = blended.reduce((a, b) => a + b, 0);
   return blended.map((w) => w / sum);
+}
+
+/** A small number of unevenly-placed temporal "events" (2-5, loosely
+ * driven by Spread) rather than one continuous sweep -- the difference
+ * between "the photograph has a few genuinely distinct moments in it" and
+ * "one smooth wipe." Placement is jittered around even spacing, never
+ * exactly even. */
+function buildSliceEventCenters(rand: () => number, spreadFrac: number): number[] {
+  const eventCount = Math.max(2, Math.min(5, Math.round(2 + spreadFrac * 2.4 + rand())));
+  const centers: number[] = [];
+  for (let i = 0; i < eventCount; i++) {
+    const base = (i + 0.5) / eventCount;
+    const jitter = (rand() - 0.5) * (0.75 / eventCount);
+    centers.push(Math.min(0.95, Math.max(0.05, base + jitter)));
+  }
+  return centers.sort((a, b) => a - b);
+}
+
+function nearestEventCenter(centers: number[], t: number): number {
+  let best = centers[0];
+  let bestDist = Infinity;
+  for (const c of centers) {
+    const d = Math.abs(c - t);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best;
 }
 
 export function buildSliceState(fragment: number, spread: number, rhythm: number, seed: number): SliceState {
@@ -83,21 +129,62 @@ export function buildSliceState(fragment: number, spread: number, rhythm: number
   // coherent=true: band index order IS temporal order, so the transition
   // reads as a directional sweep across the bands (a strobe-exposure
   // quality) rather than a spatially arbitrary stagger.
-  const alphaTimings = distributeFragmentTimings(count, spread / 100, rhythm / 100, timingsRand, true);
+  const rawAlphaTimings = distributeFragmentTimings(count, spread / 100, rhythm / 100, timingsRand, true);
+
+  // Snap each band's independently-spread center strongly toward its
+  // nearest shared event -- most of the way, not all of it, so bands
+  // sharing an event still show slight individual lag/lead rather than
+  // moving in perfect lockstep.
+  const eventCenters = buildSliceEventCenters(timingsRand, spread / 100);
+  const SNAP = 0.78;
+  const alphaTimings = rawAlphaTimings.map((t) => {
+    const nearest = nearestEventCenter(eventCenters, t.center);
+    const center = t.center * (1 - SNAP) + nearest * SNAP;
+    const width = Math.max(0.045, t.width * 0.82);
+    return { center, width };
+  });
+
+  const PARTIAL_CHANCE = 0.34;
   const bands: SliceBand[] = alphaTimings.map((alphaTiming) => {
     const dispWidthMul = 1.35 + timingsRand() * 0.95; // 1.35..2.3 -- variable per-band lag/lead
     const dispTiming: FragmentTiming = { center: alphaTiming.center, width: Math.min(0.55, alphaTiming.width * dispWidthMul) };
     const role = pickRole(timingsRand);
     const magnitudeFrac = 0.65 + timingsRand() * 0.85;
-    return { role, magnitudeFrac, alphaTiming, dispTiming };
+    const stretchAmount = 0.5 + timingsRand() * 0.75;
+
+    let partialRange: [number, number] | null = null;
+    // "held" bands stay in place already -- a partial crop on top would
+    // just look like a floating patch rather than a moment of the photo
+    // partially changing, so only the roles that already carry a temporal
+    // event (advance/retreat/overlap) get to be partial.
+    if (role !== "held" && timingsRand() < PARTIAL_CHANCE) {
+      const span = 0.32 + timingsRand() * 0.3;
+      const start = timingsRand() * (1 - span);
+      partialRange = [start, start + span];
+    }
+
+    return { role, magnitudeFrac, stretchAmount, partialRange, alphaTiming, dispTiming };
   });
   return { cuts, bands };
 }
 
 /** Builds one band's blurred, grained alpha shape — a plain axis-aligned
  * bitmap even though it was drawn via a rotated clip, so it can be used as
- * an ordinary destination-in mask against un-rotated A/B content. */
-function buildBandMask(width: number, height: number, directionDeg: number, cuts: WavyCut[], index: number, blurPx: number): HTMLCanvasElement {
+ * an ordinary destination-in mask against un-rotated A/B content.
+ * `partialRange`, when given, additionally confines the band along its own
+ * length (in the rotated diag-space) to that fraction — a partial-body
+ * echo rather than a stripe spanning the entire frame; the hard rectangle
+ * edge this introduces gets softened by the same blur pass as the rest of
+ * the band's boundary, below. */
+function buildBandMask(
+  width: number,
+  height: number,
+  directionDeg: number,
+  cuts: WavyCut[],
+  index: number,
+  blurPx: number,
+  partialRange: [number, number] | null
+): HTMLCanvasElement {
   const diag = Math.ceil(Math.sqrt(width * width + height * height)) + 8;
   const raw = getScratch("slice-band-raw", width, height);
   const rctx = raw.getContext("2d")!;
@@ -107,6 +194,11 @@ function buildBandMask(width: number, height: number, directionDeg: number, cuts
   rctx.rotate((directionDeg * Math.PI) / 180);
   rctx.translate(-diag / 2, -diag / 2);
   clipToSequentialBand(rctx, cuts, index, diag, diag);
+  if (partialRange) {
+    rctx.beginPath();
+    rctx.rect(partialRange[0] * diag, 0, (partialRange[1] - partialRange[0]) * diag, diag);
+    rctx.clip();
+  }
   rctx.fillStyle = "#ffffff";
   rctx.fillRect(0, 0, diag, diag);
   rctx.restore();
@@ -156,9 +248,14 @@ export function renderSlicePhaseField(
 }
 
 /** Paints one band's content according to its role — this is where the
- * four roles actually diverge. At most two fairly opaque layers each, so a
- * paused frame reads as distinct coexisting exposures, not a fading
- * motion-blur trail. */
+ * four roles actually diverge. Held is a plain crossfade in place; the
+ * roles that carry actual motion (advance/retreat/overlap) stretch
+ * anisotropically along their own travel direction rather than sliding a
+ * rigid duplicate -- exposure drag, closer to a slit-scan or long-exposure
+ * smear than a pasted-on copy. The stretch grows in with dispPhase (none
+ * at rest, full once the band is fully underway), and stays modest
+ * (band.stretchAmount, not Drift's dramatic range) so it reads as
+ * photographic motion, not a spatial dislocation. */
 function paintBandContent(
   cctx: CanvasRenderingContext2D,
   aLayer: HTMLCanvasElement,
@@ -167,9 +264,11 @@ function paintBandContent(
   height: number,
   band: SliceBand,
   alphaPhase: number,
+  dispPhase: number,
   dx: number,
   dy: number
 ): void {
+  const stretch = band.stretchAmount * dispPhase;
   switch (band.role) {
     case "held": {
       // Retains its original position -- a legible, undisplaced moment.
@@ -178,23 +277,26 @@ function paintBandContent(
       break;
     }
     case "advance": {
-      // Sampled decisively forward along Direction -- a LATER position.
-      drawOverscanTranslated(cctx, aLayer, width, height, dx, dy, 1);
-      drawOverscanTranslated(cctx, bLayer, width, height, dx, dy, alphaPhase);
+      // Sampled decisively forward along Direction -- a LATER position,
+      // smeared toward it rather than snapped there.
+      drawOverscanStretched(cctx, aLayer, width, height, dx, dy, stretch, 1);
+      drawOverscanStretched(cctx, bLayer, width, height, dx, dy, stretch, alphaPhase);
       break;
     }
     case "retreat": {
       // Sampled decisively backward along Direction -- an EARLIER position.
-      drawOverscanTranslated(cctx, aLayer, width, height, -dx, -dy, 1);
-      drawOverscanTranslated(cctx, bLayer, width, height, -dx, -dy, alphaPhase);
+      drawOverscanStretched(cctx, aLayer, width, height, -dx, -dy, stretch, 1);
+      drawOverscanStretched(cctx, bLayer, width, height, -dx, -dy, stretch, alphaPhase);
       break;
     }
     case "overlap": {
       // Two decisive moments visibly coexisting -- an impossible double
-      // exposure, not a fading echo trail.
+      // exposure, not a fading echo trail. The displaced copy carries a
+      // lighter smear than advance/retreat so it still reads as a second
+      // distinct exposure, not a blurred trail.
       drawOverscanTranslated(cctx, aLayer, width, height, 0, 0, 1);
       drawOverscanTranslated(cctx, bLayer, width, height, 0, 0, alphaPhase * 0.55);
-      drawOverscanTranslated(cctx, bLayer, width, height, dx, dy, alphaPhase * 0.9);
+      drawOverscanStretched(cctx, bLayer, width, height, dx, dy, stretch * 0.55, alphaPhase * 0.9);
       break;
     }
   }
@@ -235,13 +337,13 @@ export function renderSliceComposite(
     const dispPhase = fragmentPhase(globalPhase, band.dispTiming);
     if (alphaPhase <= 0.003 && dispPhase <= 0.003) continue;
 
-    const mask = buildBandMask(width, height, directionDeg, state.cuts, i, blurPx);
+    const mask = buildBandMask(width, height, directionDeg, state.cuts, i, blurPx, band.partialRange);
     const disp = maxDispPx * band.magnitudeFrac * dispPhase;
     const dx = dirX * disp;
     const dy = dirY * disp;
 
     cctx.clearRect(0, 0, width, height);
-    paintBandContent(cctx, aLayer, bLayer, width, height, band, alphaPhase, dx, dy);
+    paintBandContent(cctx, aLayer, bLayer, width, height, band, alphaPhase, dispPhase, dx, dy);
 
     cctx.save();
     cctx.globalCompositeOperation = "destination-in";

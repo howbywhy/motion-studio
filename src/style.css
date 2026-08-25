@@ -547,6 +547,94 @@ select {
   font-size: 12px;
 }
 
+.xy-pad-group {
+  margin-bottom: 16px;
+}
+
+.xy-pad-group > label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.xy-pad-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.xy-pad-svg {
+  flex: none;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.xy-pad-ring {
+  fill: none;
+  stroke: var(--panel-border);
+  stroke-width: 1;
+}
+
+.xy-pad-ring-inner {
+  stroke-dasharray: 2 3;
+}
+
+.xy-pad-spoke {
+  stroke: var(--panel-border);
+  stroke-width: 1;
+}
+
+.xy-pad-stem {
+  stroke: var(--text-dim);
+  stroke-width: 1.5;
+}
+
+.xy-pad-puck {
+  fill: var(--text);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.xy-pad-numbers {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.xy-pad-number-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.xy-pad-number-row span:first-child {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.xy-pad-number {
+  width: 52px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.xy-pad-unit {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 12px;
+}
+
 @media (max-width: 860px) {
   .workspace {
     flex-direction: column;

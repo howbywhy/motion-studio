@@ -19,10 +19,18 @@ export interface Preset {
 
 const shiftBase = { direction: 18 };
 
+// Fragment is held close to Balanced's value across all three tiers here,
+// deliberately -- Slice's event-clustering means a LOW fragment count
+// produces fewer, larger bands that read as a bolder photographic streak,
+// not a calmer one, so swinging Fragment hard between tiers (as the other
+// behaviors do) actually inverted Restrained/Expressive: the old preset
+// numbers made "Restrained" look more dramatic than "Expressive" at their
+// own maximums. Overlap/Spread/Rhythm/Speed still scale monotonically with
+// perceived intensity, so those carry the restrained-to-expressive range.
 const SLICE: Preset[] = [
-  { id: "slice-restrained", label: "Restrained", values: { ...shiftBase, fragment: 25, spread: 55, overlap: 20, rhythm: 15, speed: 0.6 } },
+  { id: "slice-restrained", label: "Restrained", values: { ...shiftBase, fragment: 35, spread: 45, overlap: 18, rhythm: 15, speed: 0.55 } },
   { id: "slice-balanced", label: "Balanced", values: { ...shiftBase, fragment: 40, spread: 72, overlap: 42, rhythm: 28, speed: 0.8 } },
-  { id: "slice-expressive", label: "Expressive", values: { ...shiftBase, fragment: 65, spread: 90, overlap: 75, rhythm: 45, speed: 1.1 } },
+  { id: "slice-expressive", label: "Expressive", values: { ...shiftBase, fragment: 45, spread: 92, overlap: 85, rhythm: 50, speed: 1.15 } },
 ];
 
 const DRIFT: Preset[] = [
