@@ -15,6 +15,12 @@ app.innerHTML = `
       <div class="brand">Motion Studio <span class="brand-sub">— masking prototype</span></div>
       <div class="topbar-right">
         <div class="behavior-tabs" id="behavior-tabs"></div>
+        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global output layer: the Registration print-separation texture over the complete composition, whatever behaviour is active">
+          Registration
+        </button>
+        <button type="button" class="diagnostic-toggle" id="bw-toggle" title="Global output layer: render the final composition in monochrome">
+          B&amp;W
+        </button>
         <button type="button" class="diagnostic-toggle" id="show-mask" title="Diagnostic: display the raw alpha mask instead of the composited media">
           Show Mask
         </button>
@@ -106,6 +112,8 @@ const typeB = document.querySelector<HTMLSpanElement>("#type-b")!;
 const nameA = document.querySelector<HTMLDivElement>("#name-a")!;
 const nameB = document.querySelector<HTMLDivElement>("#name-b")!;
 const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
+const registrationBtn = document.querySelector<HTMLButtonElement>("#registration-toggle")!;
+const bwBtn = document.querySelector<HTMLButtonElement>("#bw-toggle")!;
 const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
 const treatmentLabel = document.querySelector<HTMLLabelElement>("#treatment-label")!;
 const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggle")!;
@@ -386,6 +394,22 @@ showMaskBtn.addEventListener("click", () => {
     mode = renderer.cycleDiagnostic();
   }
   updateDiagnosticLabel(mode);
+});
+
+// --- global output-layer toggles: Registration, B&W. Deliberately binary
+// (no strength slider), applied after whatever behavior/treatment is
+// active, unaffected by behavior switching, media type, or Swap A/B — see
+// Renderer.finalizeOutput. ---
+registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
+registrationBtn.addEventListener("click", () => {
+  renderer.setRegistrationEnabled(!renderer.isRegistrationEnabled());
+  registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
+});
+
+bwBtn.classList.toggle("active", renderer.isBWEnabled());
+bwBtn.addEventListener("click", () => {
+  renderer.setBWEnabled(!renderer.isBWEnabled());
+  bwBtn.classList.toggle("active", renderer.isBWEnabled());
 });
 
 // --- aspect ratio ---

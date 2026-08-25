@@ -1,4 +1,4 @@
-import { sampleAverageColor, type RGB } from "../../core/media";
+import { paintRegistrationInkContent } from "../../core/registrationInk";
 import type { ResolvedField } from "./fields";
 
 // --- pooled scratch canvases -------------------------------------------
@@ -188,31 +188,15 @@ export function paintRefraction(
 
 // --- REGISTRATION ---------------------------------------------------------
 
-let halftonePattern: CanvasPattern | null = null;
-function getHalftonePattern(ctx: CanvasRenderingContext2D): CanvasPattern {
-  if (halftonePattern) return halftonePattern;
-  const tile = makeCanvas();
-  tile.width = 8;
-  tile.height = 8;
-  const tctx = tile.getContext("2d")!;
-  tctx.fillStyle = "#000000";
-  tctx.beginPath();
-  tctx.arc(2, 2, 2.1, 0, Math.PI * 2);
-  tctx.arc(6, 6, 2.1, 0, Math.PI * 2);
-  tctx.fill();
-  halftonePattern = ctx.createPattern(tile, "repeat")!;
-  return halftonePattern;
-}
-
-let lastTint: RGB = { r: 150, g: 150, b: 150 };
-let lastTintAt = 0;
-
 /** Print/graphic: right at each field's boundary ring, the emerging photo
  * momentarily separates into two mis-registered "inks" — a hard black
  * contrast pass and a pass tinted from the photograph's own average color
  * — plus a faint halftone screen, all confined to the ring and fading out
  * as the field matures, so it reads as a transitional print-reproduction
- * state rather than a permanent filter. */
+ * state rather than a permanent filter. The ink itself (what it looks
+ * like) is shared with the global Registration output-layer toggle — see
+ * core/registrationInk.ts; only the per-field ring confinement is Bloom's
+ * own, since it comes from field geometry the global layer doesn't have. */
 export function paintRegistration(
   ctx: CanvasRenderingContext2D,
   aLayer: HTMLCanvasElement,
@@ -226,38 +210,12 @@ export function paintRegistration(
   paintClean(ctx, aLayer, bLayer, maskLayer, width, height);
   if (amount <= 0.001) return;
 
-  const now = performance.now();
-  if (now - lastTintAt > 400) {
-    lastTintAt = now;
-    const avg = sampleAverageColor(bLayer);
-    lastTint = { r: avg.r * 0.62, g: avg.g * 0.62, b: avg.b * 0.62 };
-  }
-
   const { contentScratch: scratch, tintScratch } = getScratches(width, height);
   const off = 2 + amount * 5;
-  const tctx = tintScratch.getContext("2d")!;
 
   for (const field of fields) {
     const bbox = fieldBBox(field, 1.35, width, height);
     if (bbox.w <= 1 || bbox.h <= 1) continue;
-
-    // Isolated color-separation pass, tinted from the media's own color —
-    // built separately so it layers cleanly onto the black pass below
-    // rather than multiplying into it (which was crushing dark photo
-    // regions into a flat black smudge with no visible structure).
-    tctx.clearRect(bbox.x, bbox.y, bbox.w, bbox.h);
-    tctx.save();
-    tctx.beginPath();
-    tctx.rect(bbox.x, bbox.y, bbox.w, bbox.h);
-    tctx.clip();
-    tctx.filter = "grayscale(1) contrast(1.3)";
-    tctx.translate(-off, off * 0.4);
-    tctx.drawImage(bLayer, 0, 0);
-    tctx.filter = "none";
-    tctx.globalCompositeOperation = "source-atop";
-    tctx.fillStyle = `rgb(${lastTint.r | 0},${lastTint.g | 0},${lastTint.b | 0})`;
-    tctx.fillRect(bbox.x, bbox.y, bbox.w, bbox.h);
-    tctx.restore();
 
     paintRingClipped(
       ctx,
@@ -266,33 +224,7 @@ export function paintRegistration(
       width,
       height,
       amount,
-      (sctx) => {
-        // Black separation: high-contrast grayscale B, offset — drawn at
-        // partial alpha (not solid) so it reads as an ink layer, not a
-        // silhouette that crushes everything beneath it to black.
-        sctx.save();
-        sctx.globalAlpha = 0.8;
-        sctx.filter = "grayscale(1) contrast(1.55)";
-        sctx.translate(off, -off * 0.4);
-        sctx.drawImage(bLayer, 0, 0);
-        sctx.filter = "none";
-        sctx.restore();
-
-        // Tinted color separation, offset the other way, layered on top —
-        // the two half-transparent offset passes are what read as
-        // mis-registered print, rather than either one alone.
-        sctx.save();
-        sctx.globalAlpha = 0.6;
-        sctx.drawImage(tintScratch, bbox.x, bbox.y, bbox.w, bbox.h, bbox.x, bbox.y, bbox.w, bbox.h);
-        sctx.restore();
-
-        // A light halftone accent
-        sctx.save();
-        sctx.globalAlpha = 0.22;
-        sctx.fillStyle = getHalftonePattern(sctx);
-        sctx.fillRect(bbox.x, bbox.y, bbox.w, bbox.h);
-        sctx.restore();
-      },
+      (sctx, ringBbox) => paintRegistrationInkContent(sctx, tintScratch, bLayer, ringBbox, off),
       true
     );
   }

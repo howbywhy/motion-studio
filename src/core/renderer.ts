@@ -1,6 +1,7 @@
 import { drawTransformedCoverFit } from "./coverFit";
 import { pingPong } from "./easing";
 import { clampTransform, disposeMediaAsset, type MediaAsset, type MediaTransform } from "./media";
+import { GLOBAL_REGISTRATION_AMOUNT, paintGlobalRegistration } from "./registrationInk";
 import type { MaskBehavior, ParamValues } from "./types";
 
 export type PlaybackMode = "loop" | "pingpong";
@@ -32,6 +33,16 @@ function makeCanvas(): HTMLCanvasElement {
  * that over the A layer — so visibility is controlled by the mask alone,
  * and any area the mask doesn't touch simply shows A (never black, since A
  * always fully covers the frame).
+ *
+ * Whichever behavior produces the composite, it always renders into
+ * `composedLayer` (an intermediate canvas) rather than the visible canvas
+ * directly — `finalizeOutput` then applies the global, behavior-agnostic
+ * output-layer states (Registration, B&W) on top of that, before copying
+ * the result onto the visible canvas. This is what lets Registration/B&W
+ * sit "after" any behavior's own composite as a common surface language,
+ * without any behavior needing to know they exist. The Show Mask
+ * diagnostic bypasses this entirely (it shows the raw field, not a
+ * composed photograph, so neither output-layer state applies to it).
  */
 export class Renderer {
   private readonly visible: HTMLCanvasElement;
@@ -43,6 +54,7 @@ export class Renderer {
   private readonly maskLayer = makeCanvas();
   private readonly boundaryLayer = makeCanvas();
   private readonly bMasked = makeCanvas();
+  private readonly composedLayer = makeCanvas();
 
   private width = 0;
   private height = 0;
@@ -63,6 +75,8 @@ export class Renderer {
 
   private swapped = false;
   private diagnostic: DiagnosticMode = "off";
+  private registrationOn = false;
+  private bwOn = false;
 
   onFrame: (() => void) | null = null;
 
@@ -102,7 +116,7 @@ export class Renderer {
     this.height = h;
     this.dpr = dpr;
 
-    for (const c of [this.visible, this.aLayer, this.bLayer, this.maskLayer, this.boundaryLayer, this.bMasked]) {
+    for (const c of [this.visible, this.aLayer, this.bLayer, this.maskLayer, this.boundaryLayer, this.bMasked, this.composedLayer]) {
       c.width = w;
       c.height = h;
     }
@@ -168,6 +182,28 @@ export class Renderer {
 
   getDiagnostic(): DiagnosticMode {
     return this.diagnostic;
+  }
+
+  /** Global output-layer states — applied in `finalizeOutput` after
+   * whichever behavior has already composed the frame, identically
+   * whatever behavior/treatment/media combination is active. Neither
+   * touches media, mask, or behavior state in any way. */
+  setRegistrationEnabled(on: boolean): void {
+    this.registrationOn = on;
+    this.renderFrame();
+  }
+
+  isRegistrationEnabled(): boolean {
+    return this.registrationOn;
+  }
+
+  setBWEnabled(on: boolean): void {
+    this.bwOn = on;
+    this.renderFrame();
+  }
+
+  isBWEnabled(): boolean {
+    return this.bwOn;
   }
 
   setBehavior<T>(behavior: MaskBehavior<T>, params: ParamValues): void {
@@ -276,9 +312,11 @@ export class Renderer {
       return;
     }
 
+    const composedCtx = this.composedLayer.getContext("2d")!;
+
     if (this.behavior?.renderComposite) {
       this.behavior.renderComposite(
-        this.ctx,
+        composedCtx,
         this.aLayer,
         this.bLayer,
         this.maskLayer,
@@ -295,7 +333,7 @@ export class Renderer {
         this.params,
         this.state
       );
-      this.onFrame?.();
+      this.finalizeOutput(width, height);
       return;
     }
 
@@ -307,9 +345,33 @@ export class Renderer {
     bmCtx.drawImage(this.maskLayer, 0, 0);
     bmCtx.globalCompositeOperation = "source-over";
 
+    composedCtx.clearRect(0, 0, width, height);
+    composedCtx.drawImage(this.aLayer, 0, 0);
+    composedCtx.drawImage(this.bMasked, 0, 0);
+
+    this.finalizeOutput(width, height);
+  }
+
+  /** Applies the global, behavior-agnostic output-layer states on top of
+   * whatever the behavior just composed into `composedLayer`, then copies
+   * the result onto the visible canvas. With both states off this is a
+   * byte-for-byte copy — no filter, no extra pass — so the visible frame is
+   * pixel-identical to drawing the behavior's composite straight to the
+   * visible canvas, as before this indirection existed. */
+  private finalizeOutput(width: number, height: number): void {
+    const composedCtx = this.composedLayer.getContext("2d")!;
+    if (this.registrationOn) {
+      paintGlobalRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, GLOBAL_REGISTRATION_AMOUNT);
+    }
+
     this.ctx.clearRect(0, 0, width, height);
-    this.ctx.drawImage(this.aLayer, 0, 0);
-    this.ctx.drawImage(this.bMasked, 0, 0);
+    if (this.bwOn) {
+      this.ctx.filter = "grayscale(1)";
+      this.ctx.drawImage(this.composedLayer, 0, 0);
+      this.ctx.filter = "none";
+    } else {
+      this.ctx.drawImage(this.composedLayer, 0, 0);
+    }
 
     this.onFrame?.();
   }
