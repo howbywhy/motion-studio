@@ -1,7 +1,7 @@
 import { drawTransformedCoverFit } from "./coverFit";
 import { pingPong } from "./easing";
 import { clampTransform, disposeMediaAsset, type MediaAsset, type MediaTransform } from "./media";
-import { GLOBAL_REGISTRATION_AMOUNT, paintGlobalRegistration } from "./registrationInk";
+import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration } from "./registrationInk";
 import type { MaskBehavior, ParamValues } from "./types";
 
 export type PlaybackMode = "loop" | "pingpong";
@@ -37,12 +37,13 @@ function makeCanvas(): HTMLCanvasElement {
  * Whichever behavior produces the composite, it always renders into
  * `composedLayer` (an intermediate canvas) rather than the visible canvas
  * directly — `finalizeOutput` then applies the global, behavior-agnostic
- * output-layer states (Registration, B&W) on top of that, before copying
- * the result onto the visible canvas. This is what lets Registration/B&W
- * sit "after" any behavior's own composite as a common surface language,
- * without any behavior needing to know they exist. The Show Mask
- * diagnostic bypasses this entirely (it shows the raw field, not a
- * composed photograph, so neither output-layer state applies to it).
+ * output-layer states on top of that, before copying the result onto the
+ * visible canvas: behavior render -> persistent registration -> reactive
+ * registration -> B&W (if enabled) -> visible canvas. This is what lets
+ * Registration/B&W sit "after" any behavior's own composite as a common
+ * surface language, without any behavior needing to know they exist. The
+ * Show Mask diagnostic bypasses this entirely (it shows the raw field, not
+ * a composed photograph, so neither output-layer state applies to it).
  */
 export class Renderer {
   private readonly visible: HTMLCanvasElement;
@@ -361,7 +362,12 @@ export class Renderer {
   private finalizeOutput(width: number, height: number): void {
     const composedCtx = this.composedLayer.getContext("2d")!;
     if (this.registrationOn) {
-      paintGlobalRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, GLOBAL_REGISTRATION_AMOUNT);
+      // Persistent base first (unmasked, subtle, present everywhere) --
+      // then the reactive layer on top (mask-gated, pronounced), so
+      // activity intensifies the same surface language rather than
+      // introducing it from zero.
+      paintPersistentRegistration(composedCtx, this.bLayer, width, height, BASE_REGISTRATION_AMOUNT);
+      paintReactiveRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, REACTIVE_REGISTRATION_AMOUNT);
     }
 
     this.ctx.clearRect(0, 0, width, height);

@@ -2,19 +2,26 @@
  * and a pass tinted from the photograph's own average color, offset from
  * each other, plus a faint halftone screen — originally built as Bloom's
  * Registration treatment (see behaviors/bloom/treatments.ts), now promoted
- * here so it has exactly one implementation shared by two callers:
+ * here so it has exactly one implementation shared by three callers:
  *   - Bloom's own Registration treatment, confined to each field's own
  *     boundary ring (unchanged look — still built there, from field
  *     geometry that only Bloom has).
- *   - The global Registration output-layer toggle (paintGlobalRegistration
- *     below), confined instead to wherever ANY behavior's own reveal mask
- *     is currently transitioning — the one thing every behavior always
- *     computes, regardless of its own geometry — so the exact same ink
- *     texture can sit on top of Slice, Drift, Diffuse, or any Bloom
- *     treatment as a common photographic surface language, not a
- *     Bloom-specific effect.
- * This module owns only the ink formula and the generic mask-driven
- * variant; it knows nothing about fields, rings, or any other
+ *   - The global output layer's PERSISTENT base (paintPersistentRegistration
+ *     below) — a restrained, unmasked pass across the entire frame, present
+ *     whether or not anything is transforming. This is what makes
+ *     Registration read as the surface the whole photograph is printed on,
+ *     not a transition effect that vanishes the instant a region settles.
+ *   - The global output layer's REACTIVE component (paintReactiveRegistration
+ *     below), confined to wherever ANY behavior's own reveal mask is
+ *     currently transitioning — the one thing every behavior always
+ *     computes, regardless of its own geometry — layered on top of the
+ *     persistent base so activity intensifies the same language rather than
+ *     introducing a different one.
+ * The global output layer is always: persistent base, then reactive on top
+ * (see Renderer.finalizeOutput) — "whole image lightly misregistered, active
+ * transformation strongly misregistered," never a hard on/off per pixel.
+ * This module owns only the ink formula and these two full-frame-scale
+ * variants; it knows nothing about fields, rings, or any other
  * behavior-specific geometry. */
 import { sampleAverageColor, type RGB } from "./media";
 
@@ -178,20 +185,58 @@ function buildBoundaryAlpha(maskLayer: HTMLCanvasElement, width: number, height:
   return globalBoundarySmall;
 }
 
-/** Fixed strength for the global toggle — deliberately not exposed as a
- * slider yet (a binary visual-language decision). Matches Bloom's own
- * Registration treatment default (registrationAmount=40%) so the texture
- * reads at the same intensity as the treatment it's shared with. */
-export const GLOBAL_REGISTRATION_AMOUNT = 0.4;
+/** Reactive peak strength — deliberately not exposed as a slider yet (a
+ * binary visual-language decision). Matches Bloom's own Registration
+ * treatment default (registrationAmount=40%) so the texture reads at the
+ * same intensity as the treatment it's shared with, right at the moment a
+ * region is most actively transitioning. */
+export const REACTIVE_REGISTRATION_AMOUNT = 0.4;
 
-/** Global, behavior-agnostic Registration: the same ink formula as Bloom's
- * own Registration treatment, confined instead to wherever the
- * already-composed frame's reveal mask is transitioning — a common
- * photographic surface language applied after whichever behavior has
- * already composed the image, never part of that behavior's own
- * transformation logic. Draws directly onto `ctx` (source-over), layering
- * on top of whatever is already there. */
-export function paintGlobalRegistration(
+/** Persistent base strength — roughly a quarter of the reactive peak, the
+ * middle of the requested 20-30% range. Subtle enough to read as "this
+ * photograph was printed, not rendered," never as a permanent glitch
+ * filter sitting over an otherwise clean frame. */
+export const BASE_REGISTRATION_AMOUNT = 0.1;
+
+/** The persistent base layer: the same ink formula, painted across the
+ * ENTIRE frame with no masking at all -- present at rest, present wherever
+ * a region has already fully settled at A or B, present regardless of
+ * whether any behavior is even active. This is what keeps Registration
+ * from disappearing the instant nothing is transitioning; the reactive
+ * layer (paintReactiveRegistration) then intensifies the same language on
+ * top of this, it never has to reintroduce it from zero. */
+export function paintPersistentRegistration(
+  ctx: CanvasRenderingContext2D,
+  bLayer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  amount: number
+): void {
+  if (amount <= 0.001) return;
+
+  if (!globalInkScratch) globalInkScratch = makeCanvas();
+  if (!globalTintScratch) globalTintScratch = makeCanvas();
+  sizeCanvas(globalInkScratch, width, height);
+  sizeCanvas(globalTintScratch, width, height);
+
+  const ictx = globalInkScratch.getContext("2d")!;
+  ictx.clearRect(0, 0, width, height);
+  const off = 2 + amount * 5;
+  paintRegistrationInkContent(ictx, globalTintScratch, bLayer, { x: 0, y: 0, w: width, h: height }, off);
+
+  ctx.save();
+  ctx.globalAlpha = amount;
+  ctx.drawImage(globalInkScratch, 0, 0);
+  ctx.restore();
+}
+
+/** The reactive layer: the same ink formula, confined to wherever the
+ * already-composed frame's reveal mask is transitioning -- layered ON TOP
+ * of the persistent base (see Renderer.finalizeOutput), so activity makes
+ * the same surface language more pronounced rather than switching to a
+ * different effect. Draws directly onto `ctx` (source-over), on top of
+ * whatever the persistent base already put there. */
+export function paintReactiveRegistration(
   ctx: CanvasRenderingContext2D,
   bLayer: HTMLCanvasElement,
   maskLayer: HTMLCanvasElement,
