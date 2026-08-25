@@ -87,6 +87,29 @@ body {
   border-style: solid;
 }
 
+.topbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--panel-border);
+}
+
+/* Show Mask is a diagnostic tool, not a creative control — visually
+   demoted below Registration/B&W (which stay at full prominence as the
+   primary global output-layer controls) rather than removed, since it
+   stays useful for understanding what a behavior is doing. */
+.diagnostic-toggle.demoted {
+  opacity: 0.4;
+  font-size: 9px;
+}
+
+.diagnostic-toggle.demoted:hover {
+  opacity: 0.75;
+}
+
+.diagnostic-toggle.demoted.active {
+  opacity: 1;
+}
+
 .behavior-tabs button {
   background: transparent;
   border: 1px solid var(--panel-border);
@@ -385,6 +408,101 @@ body {
 
 .image-aware-toggle {
   align-self: flex-start;
+}
+
+.preset-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.preset-panel[hidden] {
+  display: none;
+}
+
+.preset-toggle {
+  width: 100%;
+}
+
+.preset-toggle button {
+  flex: 1;
+}
+
+.saved-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.saved-states-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saved-states-empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.saved-state-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.saved-state-name {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.saved-state-rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--text-dim);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.saved-state-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.saved-state-actions button {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  padding: 3px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.saved-state-actions button:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
 }
 
 .control-row {

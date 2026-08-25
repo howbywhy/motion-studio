@@ -128,13 +128,19 @@ export class Renderer {
   }
 
   /** Loads a new asset into slot A or B. Mask behavior/params/state are
-   * untouched — media and mask animation are fully independent. */
-  setMedia(slot: MediaSlot, asset: MediaAsset): void {
+   * untouched — media and mask animation are fully independent. The
+   * outgoing asset is disposed by default (its original behavior); pass
+   * `disposePrevious: false` when something else still holds a live
+   * reference to it (a Saved State referencing the same media the user is
+   * about to replace) — otherwise that reference would be left pointing at
+   * a torn-down video element. */
+  setMedia(slot: MediaSlot, asset: MediaAsset, options?: { disposePrevious?: boolean }): void {
     const prev = slot === "A" ? this.mediaA : this.mediaB;
     if (slot === "A") this.mediaA = asset;
     else this.mediaB = asset;
     this.renderFrame();
-    if (prev && prev !== asset) disposeMediaAsset(prev);
+    const shouldDispose = options?.disposePrevious ?? true;
+    if (prev && prev !== asset && shouldDispose) disposeMediaAsset(prev);
   }
 
   getMedia(slot: MediaSlot): MediaAsset | null {

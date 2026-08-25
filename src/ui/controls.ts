@@ -1,12 +1,30 @@
 import type { ParamDef, ParamValues } from "../core/types";
 
-/** Builds a control panel for a param schema into `container`, calling
- * `onChange` with the full updated ParamValues on every input. */
+/** Builds a control panel for a param schema into `container`. `values` is
+ * read ONLY to set each control's initial displayed value at build time —
+ * it is never captured, mutated, or read again afterward. Every control's
+ * own handler reports just the one key it owns as a PATCH (`{ [key]: v }`)
+ * via `onChange`, and the caller is solely responsible for merging that
+ * patch against its own live, authoritative state.
+ *
+ * This is deliberate, not an oversight: an earlier version had each
+ * handler close over a shared local `values` object and reassign it
+ * (`values = {...values, [key]: v}`) before calling `onChange(values)`.
+ * That local copy diverged the moment ANYTHING updated the real state
+ * through a different path without rebuilding this panel (e.g. clicking a
+ * treatment toggle, whose handler updated the caller's own state object
+ * directly) — the panel's sliders never saw that change. The next slider
+ * drag would then spread its OWN stale copy (still holding the old
+ * treatment) right back over the caller's now-current state, silently
+ * reverting it. Emitting single-key patches instead of caller-merged
+ * snapshots removes the stale copy entirely: there is nothing here left to
+ * go out of sync, because this module never owns any state past the
+ * instant a control is built. */
 export function buildControls(
   container: HTMLElement,
   defs: ParamDef[],
   values: ParamValues,
-  onChange: (values: ParamValues) => void
+  onChange: (patch: ParamValues) => void
 ): void {
   container.innerHTML = "";
 
@@ -33,9 +51,8 @@ export function buildControls(
 
       input.addEventListener("input", () => {
         const v = parseFloat(input.value);
-        values = { ...values, [def.key]: v };
         valueEl.textContent = fmt(v);
-        onChange(values);
+        onChange({ [def.key]: v });
       });
 
       const inputRow = document.createElement("div");
@@ -54,8 +71,7 @@ export function buildControls(
         select.appendChild(o);
       }
       select.addEventListener("change", () => {
-        values = { ...values, [def.key]: select.value };
-        onChange(values);
+        onChange({ [def.key]: select.value });
       });
       row.appendChild(select);
     }
