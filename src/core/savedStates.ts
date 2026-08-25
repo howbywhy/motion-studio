@@ -4,12 +4,19 @@ import type { ParamValues } from "./types";
 /** A lightweight, in-memory (session-only) capture of enough state to
  * recreate the exact output: behavior, expression/treatment (folded into
  * `params.treatment`), every behavior param, both global output-layer
- * toggles, and each loaded media's transform. Media itself is referenced
- * by identity, never cloned or re-encoded — `transform` is a plain-object
+ * toggles, and the source sequence. Media itself is referenced by
+ * identity, never cloned or re-encoded — `transform` is a plain-object
  * SNAPSHOT taken at save time, not a pointer into the live, mutable
  * MediaTransform on the asset, so a later crop/scale edit on the still-
  * loaded asset can never retroactively change what an earlier save
  * captured. */
+export interface SavedSource {
+  id: string;
+  asset: MediaAsset;
+  transform: MediaTransform;
+  label: string;
+}
+
 export interface SavedState {
   id: string;
   name: string;
@@ -18,11 +25,12 @@ export interface SavedState {
   params: ParamValues;
   registrationOn: boolean;
   bwOn: boolean;
-  swapped: boolean;
   aspect: string;
   playbackMode: "loop" | "pingpong";
-  mediaA: { asset: MediaAsset; transform: MediaTransform; label: string } | null;
-  mediaB: { asset: MediaAsset; transform: MediaTransform; label: string } | null;
+  loopSeconds: number;
+  selectedId: string | null;
+  audioEnabled: boolean;
+  sources: SavedSource[];
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;
@@ -53,8 +61,7 @@ export function duplicateSavedState(id: string): SavedState | null {
     name: `${found.name} copy`,
     createdAt: Date.now(),
     params: { ...found.params },
-    mediaA: found.mediaA ? { ...found.mediaA, transform: { ...found.mediaA.transform } } : null,
-    mediaB: found.mediaB ? { ...found.mediaB, transform: { ...found.mediaB.transform } } : null,
+    sources: found.sources.map((s) => ({ ...s, transform: { ...s.transform } })),
   };
   states = [...states, copy];
   return copy;
@@ -71,9 +78,8 @@ export function deleteSavedState(id: string): SavedState | null {
 }
 
 /** Whether any saved state still holds a reference to this exact asset —
- * callers use this before disposing an outgoing asset (see
- * Renderer.setMedia's `disposePrevious` option) so replacing the live
- * media in a slot never breaks a saved state that still points at it. */
+ * callers use this before disposing an outgoing asset so replacing the live
+ * media never breaks a saved state that still points at it. */
 export function isAssetReferencedBySavedState(asset: MediaAsset): boolean {
-  return states.some((s) => s.mediaA?.asset === asset || s.mediaB?.asset === asset);
+  return states.some((s) => s.sources.some((src) => src.asset === asset));
 }

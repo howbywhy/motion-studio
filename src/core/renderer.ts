@@ -1,14 +1,37 @@
 import { drawTransformedCoverFit } from "./coverFit";
-import { pingPong } from "./easing";
-import { clampTransform, disposeMediaAsset, type MediaAsset, type MediaTransform } from "./media";
-import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration } from "./registrationInk";
+import { timeFromPhase, type ClockMode } from "./phaseClock";
+import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
+import { clampTransform, disposeMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
+import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk } from "./registrationInk";
+import {
+  clampLoopPhase,
+  clampLoopSeconds,
+  LOOP_SECONDS_DEFAULT,
+  loopPhaseFromElapsed,
+  moveIndex,
+  resolveActivePair,
+  type PairMapping,
+  type PlaybackMode,
+  type SequenceItem,
+} from "./sequence";
 import type { MaskBehavior, ParamValues } from "./types";
 
-export type PlaybackMode = "loop" | "pingpong";
+export type { PlaybackMode, SequenceItem };
 export type MediaSlot = "A" | "B";
 export type DiagnosticMode = "off" | "mask" | "boundary";
 
-const PING_PONG_PERIOD = 6; // seconds — bounce cycle length, independent of behavior speed
+export interface FrameProfile {
+  graphicMs: number;
+  mediaMs: number;
+  maskMs: number;
+  compositeMs: number;
+  resolveMs: number;
+  printPrepMs: number;
+  registrationMs: number;
+  outputMs: number;
+  totalMs: number;
+}
+
 const MAX_DPR = 2;
 
 function makeCanvas(): HTMLCanvasElement {
@@ -17,8 +40,8 @@ function makeCanvas(): HTMLCanvasElement {
 }
 
 /**
- * Owns the full compositing pipeline. Media A and Media B (each an image
- * or a video) are cover-fit — then further scaled/panned by that asset's
+ * Owns the full compositing pipeline. Media A and Media B (each an image,
+ * a video, or a generated graphic canvas) are cover-fit — then further scaled/panned by that asset's
  * own MediaTransform — into same-size offscreen canvases fresh on every
  * single render. This is the single source of truth for "identically
  * cropped, full-frame, aligned" (both always fill the destination exactly,
@@ -33,6 +56,9 @@ function makeCanvas(): HTMLCanvasElement {
  * that over the A layer — so visibility is controlled by the mask alone,
  * and any area the mask doesn't touch simply shows A (never black, since A
  * always fully covers the frame).
+ *
+ * Sequence → active pair A/B → existing behaviour → Print → B&W → Output.
+ * Behaviours never see the sequence array. They still receive two layers.
  *
  * Whichever behavior produces the composite, it always renders into
  * `composedLayer` (an intermediate canvas) rather than the visible canvas
@@ -63,6 +89,11 @@ export class Renderer {
 
   private mediaA: MediaAsset | null = null;
   private mediaB: MediaAsset | null = null;
+  private items: SequenceItem[] = [];
+  private selectedId: string | null = null;
+  private idSeq = 1;
+  private loopSeconds = LOOP_SECONDS_DEFAULT;
+  private lastPairKey = "";
 
   private behavior: MaskBehavior<unknown> | null = null;
   private params: ParamValues = {};
@@ -71,15 +102,32 @@ export class Renderer {
   private playing = false;
   private elapsed = 0;
   private lastTs = 0;
-  private rafId = 0;
   private playbackMode: PlaybackMode = "loop";
-
-  private swapped = false;
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
   private bwOn = false;
 
   onFrame: (() => void) | null = null;
+
+  private clockMode: ClockMode = "auto";
+  private holdPhase = 0;
+  private profiling = false;
+  private loopActive = false;
+  private printInkDirty = true;
+  private audioEnabled = true;
+  /** Set by a user Play / Audio click. Boot autoplay stays muted so the
+   * browser does not block video.play() before a gesture. */
+  private audioUnlocked = false;
+  /** Last video granted editorial audio. May outlive the active pair
+   * (VIDEO → FIELD keeps the video audible). Never two at once. */
+  private audioAsset: MediaAsset | null = null;
+  private audioHysteresis: "hold" | "incoming" = "hold";
+  private lastAudioPairKey = "";
+  /** Independent of behaviour HOLD and of video Pause. Live FIELD topology
+   * and Live frequency modulation both read this clock — HOLD does not
+   * freeze it. Live FIELD is source motion, not behaviour motion. */
+  private graphicElapsed = 0;
+  lastProfile: FrameProfile | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.visible = canvas;
@@ -124,27 +172,146 @@ export class Renderer {
     this.visible.style.width = `${cssWidth}px`;
     this.visible.style.height = `${cssHeight}px`;
 
+    this.syncGraphicRasters();
+    this.invalidatePrintInk();
     this.renderFrame(); // repaint immediately so resize never shows a stale/blank frame
   }
 
-  /** Loads a new asset into slot A or B. Mask behavior/params/state are
-   * untouched — media and mask animation are fully independent. The
-   * outgoing asset is disposed by default (its original behavior); pass
-   * `disposePrevious: false` when something else still holds a live
-   * reference to it (a Saved State referencing the same media the user is
-   * about to replace) — otherwise that reference would be left pointing at
-   * a torn-down video element. */
-  setMedia(slot: MediaSlot, asset: MediaAsset, options?: { disposePrevious?: boolean }): void {
-    const prev = slot === "A" ? this.mediaA : this.mediaB;
-    if (slot === "A") this.mediaA = asset;
-    else this.mediaB = asset;
+  nextSourceId(): string {
+    return `src-${this.idSeq++}`;
+  }
+
+  getSequence(): SequenceItem[] {
+    return this.items;
+  }
+
+  getSelectedId(): string | null {
+    return this.selectedId;
+  }
+
+  getSelectedItem(): SequenceItem | null {
+    if (!this.selectedId) return this.items[0] ?? null;
+    return this.items.find((item) => item.id === this.selectedId) ?? this.items[0] ?? null;
+  }
+
+  selectItem(id: string | null): void {
+    this.selectedId = id;
+  }
+
+  setSequence(items: SequenceItem[], selectedId?: string | null): void {
+    this.items = items;
+    for (const item of items) {
+      const n = Number.parseInt(item.id.replace(/^src-/, ""), 10);
+      if (Number.isFinite(n)) this.idSeq = Math.max(this.idSeq, n + 1);
+    }
+    this.selectedId = selectedId ?? items[0]?.id ?? null;
+    this.syncGraphicRasters();
+    this.bindActivePair();
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  addSource(asset: MediaAsset, options?: { select?: boolean }): SequenceItem {
+    const item: SequenceItem = { id: this.nextSourceId(), asset };
+    this.items = [...this.items, item];
+    if (options?.select !== false) this.selectedId = item.id;
+    this.syncGraphicRasters();
+    this.syncOneVideo(asset);
+    this.bindActivePair();
+    this.invalidatePrintInk();
+    this.renderFrame();
+    return item;
+  }
+
+  removeSource(id: string, options?: { dispose?: boolean }): SequenceItem | null {
+    const index = this.items.findIndex((item) => item.id === id);
+    if (index < 0) return null;
+    const [removed] = this.items.splice(index, 1);
+    if (!removed) return null;
+    if (this.selectedId === id) this.selectedId = this.items[Math.min(index, this.items.length - 1)]?.id ?? null;
+    this.bindActivePair();
+    this.invalidatePrintInk();
+    this.renderFrame();
+    if (options?.dispose !== false) disposeMediaAsset(removed.asset);
+    return removed;
+  }
+
+  moveSource(from: number, to: number): void {
+    this.items = moveIndex(this.items, from, to);
+    this.bindActivePair();
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  /** Reverse sequence order. Replaces Swap A/B now that slots are not permanent. */
+  reverseSequence(): void {
+    this.items = this.items.slice().reverse();
+    this.bindActivePair();
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  replaceSource(id: string, asset: MediaAsset, options?: { disposePrevious?: boolean }): void {
+    const index = this.items.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const prev = this.items[index]!.asset;
+    this.items[index] = { id, asset };
+    this.syncGraphicRasters();
+    this.syncOneVideo(asset);
+    this.bindActivePair();
+    this.invalidatePrintInk();
     this.renderFrame();
     const shouldDispose = options?.disposePrevious ?? true;
     if (prev && prev !== asset && shouldDispose) disposeMediaAsset(prev);
   }
 
+  getSource(id: string): MediaAsset | null {
+    return this.items.find((item) => item.id === id)?.asset ?? null;
+  }
+
+  getSourceAt(index: number): SequenceItem | null {
+    return this.items[index] ?? null;
+  }
+
+  /** Replace sequence index 0 (A) or 1 (B). Not the moving active pair. */
+  setMedia(slot: MediaSlot, asset: MediaAsset, options?: { disposePrevious?: boolean }): void {
+    const index = slot === "A" ? 0 : 1;
+    const item = this.items[index];
+    if (item) {
+      this.replaceSource(item.id, asset, options);
+      return;
+    }
+    this.addSource(asset);
+  }
+
   getMedia(slot: MediaSlot): MediaAsset | null {
+    this.bindActivePair();
     return slot === "A" ? this.mediaA : this.mediaB;
+  }
+
+  getLoopSeconds(): number {
+    return this.loopSeconds;
+  }
+
+  setLoopSeconds(seconds: number): void {
+    const next = clampLoopSeconds(seconds);
+    if (this.clockMode === "hold") {
+      this.loopSeconds = next;
+    } else {
+      const phase = this.getLoopPhase();
+      this.loopSeconds = next;
+      this.elapsed = phase * this.loopSeconds;
+    }
+    this.renderFrame();
+  }
+
+  getActivePair(): PairMapping & { aId: string | null; bId: string | null } {
+    const mapping = this.pairMapping();
+    return {
+      ...mapping,
+      aId: this.items[mapping.aIndex]?.id ?? null,
+      bId: this.items[mapping.bIndex]?.id ?? null,
+    };
   }
 
   /** Framing lives on the asset itself (see MediaTransform), so reading it
@@ -159,6 +326,20 @@ export class Renderer {
     const asset = slot === "A" ? this.mediaA : this.mediaB;
     if (!asset) return;
     asset.transform = clampTransform(transform);
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  getItemTransform(id: string): MediaTransform {
+    const asset = this.getSource(id);
+    return asset?.transform ?? { scale: 1, x: 0, y: 0 };
+  }
+
+  setItemTransform(id: string, transform: MediaTransform): void {
+    const asset = this.getSource(id);
+    if (!asset) return;
+    asset.transform = clampTransform(transform);
+    this.invalidatePrintInk();
     this.renderFrame();
   }
 
@@ -166,13 +347,16 @@ export class Renderer {
     this.setTransform(slot, { scale: 1, x: 0, y: 0 });
   }
 
+  resetItemTransform(id: string): void {
+    this.setItemTransform(id, { scale: 1, x: 0, y: 0 });
+  }
+
   swap(): void {
-    this.swapped = !this.swapped;
-    this.renderFrame();
+    this.reverseSequence();
   }
 
   isSwapped(): boolean {
-    return this.swapped;
+    return false;
   }
 
   /** Diagnostic only: render the raw mask or boundary field over black
@@ -197,6 +381,7 @@ export class Renderer {
    * touches media, mask, or behavior state in any way. */
   setRegistrationEnabled(on: boolean): void {
     this.registrationOn = on;
+    this.invalidatePrintInk();
     this.renderFrame();
   }
 
@@ -217,6 +402,7 @@ export class Renderer {
     this.behavior = behavior as MaskBehavior<unknown>;
     this.params = params;
     this.state = behavior.createState(params);
+    this.renderFrame();
   }
 
   setParams(params: ParamValues): void {
@@ -225,48 +411,356 @@ export class Renderer {
       this.state = this.behavior.createState(params);
     }
     this.params = params;
+    this.renderFrame();
+  }
+
+  setClockMode(mode: ClockMode): void {
+    if (mode === this.clockMode) return;
+    if (mode === "hold") {
+      this.holdPhase = this.getLoopPhase();
+    } else {
+      this.elapsed = this.holdPhase * this.loopSeconds;
+      this.lastTs = performance.now();
+    }
+    this.clockMode = mode;
+    this.renderFrame();
+  }
+
+  getClockMode(): ClockMode {
+    return this.clockMode;
+  }
+
+  setHoldPhase(phase: number): void {
+    this.clockMode = "hold";
+    this.holdPhase = clampLoopPhase(phase);
+    this.renderFrame();
+  }
+
+  /** Global sequence position 0..1. Behaviours receive pair-local phase. */
+  getPhase(): number {
+    return this.getLoopPhase();
+  }
+
+  getLoopPhase(): number {
+    if (this.clockMode === "hold") return this.holdPhase;
+    return loopPhaseFromElapsed(this.elapsed, this.loopSeconds);
+  }
+
+  getLocalPhase(): number {
+    return this.pairMapping().localPhase;
+  }
+
+  setProfiling(on: boolean): void {
+    this.profiling = on;
+    if (!on) this.lastProfile = null;
   }
 
   setPlaybackMode(mode: PlaybackMode): void {
     this.playbackMode = mode;
+    this.bindActivePair();
+    this.renderFrame();
+  }
+
+  getPlaybackMode(): PlaybackMode {
+    return this.playbackMode;
+  }
+
+  setAudioEnabled(on: boolean): void {
+    this.audioEnabled = on;
+    this.syncAudio();
+  }
+
+  unlockAudio(): void {
+    this.audioUnlocked = true;
+    this.syncAudio();
+  }
+
+  isAudioEnabled(): boolean {
+    return this.audioEnabled;
+  }
+
+  isAudioUnlocked(): boolean {
+    return this.audioUnlocked;
+  }
+
+  hasVideoSource(): boolean {
+    return this.items.some((item) => Boolean(item.asset.videoEl));
+  }
+
+  setSeamCandidate(mode: SeamCandidate): void {
+    setSeamCandidate(mode);
+    this.renderFrame();
+  }
+
+  getSeamCandidate(): SeamCandidate {
+    return getSeamCandidate();
   }
 
   play(): void {
-    if (this.playing) return;
     this.playing = true;
-    this.lastTs = performance.now();
-    this.rafId = requestAnimationFrame(this.tick);
+    this.syncActiveVideos();
+    this.syncAudio();
+    this.startLoop();
   }
 
   pause(): void {
     this.playing = false;
-    if (this.rafId) cancelAnimationFrame(this.rafId);
-    this.rafId = 0;
+    this.setVideoPaused(true);
+    this.syncAudio();
   }
 
   isPlaying(): boolean {
     return this.playing;
   }
 
+  getCanvasSize(): { width: number; height: number; dpr: number } {
+    return { width: this.width, height: this.height, dpr: this.dpr };
+  }
+
+  mediaInfo(): {
+    swapped: boolean;
+    playing: boolean;
+    sequenceLength: number;
+    loopPhase: number;
+    localPhase: number;
+    behaviorPhase: number;
+    pairIndex: number;
+    resolve: number;
+    seam: string;
+    audioLabel: string | null;
+    audioUnlocked: boolean;
+    A: { kind: string; label: string; w: number; h: number; paused: boolean | null; currentTime: number | null; muted: boolean | null; motion: string | null } | null;
+    B: { kind: string; label: string; w: number; h: number; paused: boolean | null; currentTime: number | null; muted: boolean | null; motion: string | null } | null;
+  } {
+    const mapping = this.pairMapping();
+    const slot = (asset: MediaAsset | null) =>
+      asset
+        ? {
+            kind: asset.kind,
+            label: asset.label,
+            w: asset.naturalW,
+            h: asset.naturalH,
+            paused: asset.videoEl ? asset.videoEl.paused : null,
+            currentTime: asset.videoEl ? asset.videoEl.currentTime : null,
+            muted: asset.videoEl ? asset.videoEl.muted : null,
+            motion: asset.graphic?.getMotion() ?? null,
+          }
+        : null;
+    const env = sequenceEnvelope(
+      this.behavior?.id,
+      this.params.treatment as string | undefined,
+      mapping.localPhase,
+    );
+    return {
+      swapped: false,
+      playing: this.playing,
+      sequenceLength: this.items.length,
+      loopPhase: this.getLoopPhase(),
+      localPhase: mapping.localPhase,
+      behaviorPhase: env.behaviorPhase,
+      pairIndex: mapping.pairIndex,
+      resolve: env.resolve,
+      seam: getSeamCandidate(),
+      audioLabel: this.audioAsset?.label ?? null,
+      audioUnlocked: this.audioUnlocked,
+      A: slot(this.mediaA),
+      B: slot(this.mediaB),
+    };
+  }
+
+  /** Source pixels changed (graphic params, etc.) — Print ink must rebuild. */
+  touchMedia(): void {
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  forEachSource(fn: (item: SequenceItem) => void): void {
+    for (const item of this.items) fn(item);
+  }
+
+  private invalidatePrintInk(): void {
+    this.printInkDirty = true;
+  }
+
+  private syncGraphicRasters(): void {
+    if (this.width < 1 || this.height < 1) return;
+    for (const item of this.items) {
+      const g = item.asset.graphic;
+      if (!g) continue;
+      g.setRasterSize(this.width, this.height, this.dpr);
+    }
+  }
+
+  private pairMapping(): PairMapping {
+    return resolveActivePair(this.items.length, this.getLoopPhase(), this.playbackMode);
+  }
+
+  private bindActivePair(): void {
+    const mapping = this.pairMapping();
+    const a = this.items[mapping.aIndex]?.asset ?? null;
+    const b = mapping.untreated ? a : this.items[mapping.bIndex]?.asset ?? null;
+    this.mediaA = a;
+    this.mediaB = b;
+    const key = `${mapping.aIndex}/${mapping.bIndex}/${mapping.untreated ? "u" : "p"}`;
+    if (key !== this.lastPairKey) {
+      this.lastPairKey = key;
+      this.printInkDirty = true;
+      this.syncActiveVideos();
+    }
+  }
+
+  private hasLiveSource(): boolean {
+    return [this.mediaA, this.mediaB].some(
+      (a) => Boolean(a?.videoEl) || a?.graphic?.getMotion() === "live",
+    );
+  }
+
+  private paintGraphics(): void {
+    const selected = this.getSelectedItem()?.asset ?? null;
+    const seen = new Set<MediaAsset>();
+    for (const asset of [this.mediaA, this.mediaB, selected]) {
+      if (!asset || seen.has(asset)) continue;
+      seen.add(asset);
+      const g = asset.graphic;
+      if (!g) continue;
+      const live = g.getMotion() === "live";
+      const t = live ? this.graphicElapsed : 0;
+      if (!g.dirty && !live) continue;
+      g.paint(t);
+      g.paintedAt = t;
+      g.dirty = false;
+      this.printInkDirty = true;
+    }
+  }
+
+  private syncOneVideo(asset: MediaAsset): void {
+    if (!asset.videoEl) return;
+    if (this.playing) void asset.videoEl.play().catch(() => undefined);
+    else asset.videoEl.pause();
+  }
+
+  /** Keep every sequence video decoding while Play is on. Pair changes
+   * only retarget mute — they must not pause/play, which clicks and can
+   * reset decoder state. */
+  private syncActiveVideos(): void {
+    for (const item of this.items) {
+      const video = item.asset.videoEl;
+      if (!video) continue;
+      if (this.playing) void video.play().catch(() => undefined);
+      else video.pause();
+    }
+  }
+
+  private startLoop(): void {
+    if (this.loopActive) return;
+    this.loopActive = true;
+    this.lastTs = performance.now();
+    requestAnimationFrame(this.tick);
+  }
+
   private tick = (ts: number): void => {
     const dt = (ts - this.lastTs) / 1000;
     this.lastTs = ts;
-    this.elapsed += dt;
+    if (this.clockMode === "auto") this.elapsed += dt;
+    if (this.playing) this.graphicElapsed += dt;
+    this.graphicElapsed += dt;
     this.renderFrame();
-    if (this.playing) this.rafId = requestAnimationFrame(this.tick);
+    this.syncAudio();
+    if (this.loopActive) requestAnimationFrame(this.tick);
   };
 
-  private effectiveTime(): number {
-    if (this.playbackMode === "pingpong") {
-      return pingPong(this.elapsed, PING_PONG_PERIOD / 2) * PING_PONG_PERIOD;
+  private setVideoPaused(paused: boolean): void {
+    if (paused) {
+      for (const item of this.items) {
+        item.asset.videoEl?.pause();
+      }
+      return;
     }
-    return this.elapsed;
+    this.syncActiveVideos();
+  }
+
+  /** Pair progress 0→1 is remapped onto the behaviour's native phase so a
+   * pair ends at peak B (not the native return to A). Next pair's A is this
+   * pair's B — dominant source continues. */
+  private effectiveTime(): number {
+    const env = sequenceEnvelope(
+      this.behavior?.id,
+      this.params.treatment as string | undefined,
+      this.pairMapping().localPhase,
+    );
+    return timeFromPhase(this.behavior?.id, env.behaviorPhase, this.params);
+  }
+
+  /**
+   * Editorial audio owner — not visual-mask fluctuation.
+   *
+   * A source with a video track may own sound when it is the incoming /
+   * dominant editorial source (localPhase ≥ 0.55 with hysteresis at 0.45).
+   * FIELD and stills never take ownership. If the visually dominant source
+   * has no audio, keep the most recently relevant video in the sequence.
+   * Pair changes do not restart a continuing video. Never two unmuted.
+   */
+  private pickAudioAsset(progress: number): MediaAsset | null {
+    const a = this.mediaA;
+    const b = this.mediaB;
+    const aVid = videoMayOwnAudio(a) ? a : null;
+    const bVid = videoMayOwnAudio(b) ? b : null;
+    if (this.lastPairKey !== this.lastAudioPairKey) {
+      this.lastAudioPairKey = this.lastPairKey;
+      this.audioHysteresis = "hold";
+      if (this.audioAsset && this.audioAsset !== a && this.audioAsset !== b) {
+        // Previous owner left the pair. Keep it until an incoming video
+        // becomes editorially dominant — unless neither slot has video.
+        if (!aVid && !bVid && this.items.some((item) => item.asset === this.audioAsset)) {
+          return this.audioAsset;
+        }
+      }
+    }
+    if (this.audioHysteresis === "hold" && progress >= 0.55 && bVid) this.audioHysteresis = "incoming";
+    else if (this.audioHysteresis === "incoming" && progress < 0.45) this.audioHysteresis = "hold";
+
+    const incoming = this.audioHysteresis === "incoming" ? bVid : null;
+    if (incoming) {
+      this.audioAsset = incoming;
+      return incoming;
+    }
+    if (aVid) {
+      this.audioAsset = aVid;
+      return aVid;
+    }
+    if (videoMayOwnAudio(this.audioAsset) && this.items.some((item) => item.asset === this.audioAsset)) {
+      return this.audioAsset;
+    }
+    if (bVid) {
+      this.audioAsset = bVid;
+      return bVid;
+    }
+    this.audioAsset = null;
+    return null;
+  }
+
+  private syncAudio(): void {
+    this.bindActivePair();
+    const mapping = this.pairMapping();
+    const owner = mapping.untreated
+      ? videoMayOwnAudio(this.mediaA)
+        ? this.mediaA
+        : this.items.find((item) => videoMayOwnAudio(item.asset))?.asset ?? null
+      : this.pickAudioAsset(mapping.localPhase);
+    const wantSound = this.playing && this.audioEnabled && this.audioUnlocked && Boolean(owner?.videoEl);
+    for (const item of this.items) {
+      const video = item.asset.videoEl;
+      if (!video) continue;
+      video.muted = !(wantSound && item.asset === owner);
+    }
   }
 
   private drawMediaLayer(ctx: CanvasRenderingContext2D, asset: MediaAsset | null): void {
     ctx.clearRect(0, 0, this.width, this.height);
     if (asset) {
+      ctx.imageSmoothingEnabled = asset.kind !== "graphic";
       drawTransformedCoverFit(ctx, asset.source, asset.naturalW, asset.naturalH, this.width, this.height, asset.transform);
+      ctx.imageSmoothingEnabled = true;
     }
   }
 
@@ -279,10 +773,27 @@ export class Renderer {
     const { width, height } = this;
     if (width === 0 || height === 0) return;
 
-    const bottom = this.swapped ? this.mediaB : this.mediaA;
-    const top = this.swapped ? this.mediaA : this.mediaB;
-    this.drawMediaLayer(this.aLayer.getContext("2d")!, bottom);
-    this.drawMediaLayer(this.bLayer.getContext("2d")!, top);
+    const t0 = this.profiling ? performance.now() : 0;
+    const mark = (): number => (this.profiling ? performance.now() : 0);
+
+    this.bindActivePair();
+    this.paintGraphics();
+    const tGraphic = mark();
+
+    const mapping = this.pairMapping();
+    this.drawMediaLayer(this.aLayer.getContext("2d")!, this.mediaA);
+    this.drawMediaLayer(this.bLayer.getContext("2d")!, this.mediaB);
+    const tMedia = mark();
+
+    if (mapping.untreated) {
+      const maskCtx = this.maskLayer.getContext("2d")!;
+      maskCtx.clearRect(0, 0, width, height);
+      const composedCtx = this.composedLayer.getContext("2d")!;
+      composedCtx.clearRect(0, 0, width, height);
+      composedCtx.drawImage(this.aLayer, 0, 0);
+      this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tMedia, mark());
+      return;
+    }
 
     const time = this.effectiveTime();
     const maskCtx = this.maskLayer.getContext("2d")!;
@@ -293,10 +804,6 @@ export class Renderer {
       maskCtx.restore();
     }
 
-    // The boundary layer is only ever consumed by the diagnostic view — no
-    // treatment reads this canvas, each derives its own ring geometry
-    // directly from the fields it already has — so skip the extra pass
-    // entirely unless it's actually about to be displayed.
     const hasBoundary = !!this.behavior?.renderBoundary;
     const needsBoundary = hasBoundary && this.diagnostic === "boundary";
     if (needsBoundary) {
@@ -306,11 +813,9 @@ export class Renderer {
       this.behavior!.renderBoundary!(boundaryCtx, width, height, time, this.params, this.state);
       boundaryCtx.restore();
     }
+    const tMask = mark();
 
     if (this.diagnostic !== "off") {
-      // Diagnostic: the raw field alone, over black — white = fully active,
-      // black = inactive, soft greys wherever the field itself is partial
-      // (blurred mask edges, the boundary ring). Media isn't touched.
       const showBoundary = this.diagnostic === "boundary" && hasBoundary;
       this.ctx.fillStyle = "#000000";
       this.ctx.fillRect(0, 0, width, height);
@@ -327,12 +832,6 @@ export class Renderer {
         this.aLayer,
         this.bLayer,
         this.maskLayer,
-        // Boundary is only ever (re)computed for the diagnostic view (see
-        // above) — this branch never runs while that's showing, so there's
-        // no fresh boundary canvas to hand a treatment here. No current
-        // treatment needs it (each derives its own ring geometry from the
-        // fields it already has); a future one that does would need this
-        // reworked to compute boundary unconditionally again.
         null,
         width,
         height,
@@ -340,41 +839,78 @@ export class Renderer {
         this.params,
         this.state
       );
-      this.finalizeOutput(width, height);
-      return;
+    } else {
+      const bmCtx = this.bMasked.getContext("2d")!;
+      bmCtx.clearRect(0, 0, width, height);
+      bmCtx.globalCompositeOperation = "source-over";
+      bmCtx.drawImage(this.bLayer, 0, 0);
+      bmCtx.globalCompositeOperation = "destination-in";
+      bmCtx.drawImage(this.maskLayer, 0, 0);
+      bmCtx.globalCompositeOperation = "source-over";
+
+      composedCtx.clearRect(0, 0, width, height);
+      composedCtx.drawImage(this.aLayer, 0, 0);
+      composedCtx.drawImage(this.bMasked, 0, 0);
     }
-
-    const bmCtx = this.bMasked.getContext("2d")!;
-    bmCtx.clearRect(0, 0, width, height);
-    bmCtx.globalCompositeOperation = "source-over";
-    bmCtx.drawImage(this.bLayer, 0, 0);
-    bmCtx.globalCompositeOperation = "destination-in";
-    bmCtx.drawImage(this.maskLayer, 0, 0);
-    bmCtx.globalCompositeOperation = "source-over";
-
-    composedCtx.clearRect(0, 0, width, height);
-    composedCtx.drawImage(this.aLayer, 0, 0);
-    composedCtx.drawImage(this.bMasked, 0, 0);
-
-    this.finalizeOutput(width, height);
+    const tComposite = mark();
+    const env = sequenceEnvelope(
+      this.behavior?.id,
+      this.params.treatment as string | undefined,
+      mapping.localPhase,
+    );
+    this.applySequenceResolve(composedCtx, env.resolve);
+    const tResolve = mark();
+    this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tMask, tComposite, tResolve);
   }
 
-  /** Applies the global, behavior-agnostic output-layer states on top of
-   * whatever the behavior just composed into `composedLayer`, then copies
-   * the result onto the visible canvas. With both states off this is a
-   * byte-for-byte copy — no filter, no extra pass — so the visible frame is
-   * pixel-identical to drawing the behavior's composite straight to the
-   * visible canvas, as before this indirection existed. */
-  private finalizeOutput(width: number, height: number): void {
-    const composedCtx = this.composedLayer.getContext("2d")!;
+  /** Sequence-only: expand B through a dilation of the existing behaviour
+   * mask. Isolated from Bloom's HOLD language. Not a full-frame opacity
+   * crossfade. */
+  private applySequenceResolve(composedCtx: CanvasRenderingContext2D, resolve: number): void {
+    if (resolve < 0.008) return;
+    const { width, height } = this;
+    const radius = resolve * 0.2 * Math.min(width, height);
+    const dctx = this.bMasked.getContext("2d")!;
+    dctx.clearRect(0, 0, width, height);
+    dctx.globalCompositeOperation = "source-over";
+    dctx.drawImage(this.maskLayer, 0, 0);
+    const steps = 8;
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      dctx.drawImage(this.maskLayer, Math.cos(a) * radius, Math.sin(a) * radius);
+    }
+    dctx.globalCompositeOperation = "source-in";
+    dctx.drawImage(this.bLayer, 0, 0);
+    dctx.globalCompositeOperation = "source-over";
+    composedCtx.drawImage(this.bMasked, 0, 0);
+  }
+
+  private finalizeOutput(
+    composedCtx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    t0: number,
+    tGraphic: number,
+    tMedia: number,
+    tMask: number,
+    tComposite: number,
+    tResolve = tComposite,
+  ): void {
+    const mark = (): number => (this.profiling ? performance.now() : 0);
+
+    const tPrep0 = mark();
     if (this.registrationOn) {
-      // Persistent base first (unmasked, subtle, present everywhere) --
-      // then the reactive layer on top (mask-gated, pronounced), so
-      // activity intensifies the same surface language rather than
-      // introducing it from zero.
+      if (this.hasLiveSource() || this.printInkDirty) {
+        prepareGlobalPrintInk(this.bLayer, width, height);
+        if (!this.hasLiveSource()) this.printInkDirty = false;
+      }
+    }
+    const tPrep = mark();
+    if (this.registrationOn) {
       paintPersistentRegistration(composedCtx, this.bLayer, width, height, BASE_REGISTRATION_AMOUNT);
       paintReactiveRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, REACTIVE_REGISTRATION_AMOUNT);
     }
+    const tReg = mark();
 
     this.ctx.clearRect(0, 0, width, height);
     if (this.bwOn) {
@@ -383,6 +919,21 @@ export class Renderer {
       this.ctx.filter = "none";
     } else {
       this.ctx.drawImage(this.composedLayer, 0, 0);
+    }
+    const tOut = mark();
+
+    if (this.profiling) {
+      this.lastProfile = {
+        graphicMs: tGraphic - t0,
+        mediaMs: tMedia - tGraphic,
+        maskMs: tMask - tMedia,
+        compositeMs: tComposite - tMask,
+        resolveMs: tResolve - tComposite,
+        printPrepMs: tPrep - tPrep0,
+        registrationMs: tReg - tPrep,
+        outputMs: tOut - tReg,
+        totalMs: tOut - t0,
+      };
     }
 
     this.onFrame?.();

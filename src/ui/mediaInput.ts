@@ -1,6 +1,15 @@
 import { defaultTransform, detectMediaKind, type MediaAsset } from "../core/media";
 
-const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
+  const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
+
+export function loadMediaFile(
+  file: File,
+  videoHost: HTMLElement,
+  onLoad: (asset: MediaAsset) => void,
+  onError: (message: string) => void
+): void {
+  loadFile(file, videoHost, onLoad, onError);
+}
 
 function loadFile(
   file: File,
@@ -36,38 +45,35 @@ function loadFile(
     return;
   }
 
-  // Video: a single persistent <video> element decodes and plays
-  // continuously in a hidden host; every render frame just samples
-  // whatever frame it's currently on via drawImage. Nothing here ever
-  // reloads or seeks it, so playback is never reset from the render loop.
+  // Video: a single persistent <video> element decodes in a hidden host;
+  // every render frame samples whatever frame it's on via drawImage.
+  // Playback is owned by Renderer.play/pause — this loader must not call
+  // play(), or a file loaded while paused would start moving on its own.
+  // muted=true is the load-time autoplay-safe default. Renderer.syncAudio
+  // unmutes the current audio owner after a user Play/Audio gesture.
   const video = document.createElement("video");
   video.muted = true;
+  video.volume = 1;
   video.loop = true;
   video.playsInline = true;
-  video.autoplay = true;
+  video.autoplay = false;
   video.preload = "auto";
   videoHost.appendChild(video);
 
-  video.addEventListener(
-    "loadedmetadata",
-    () => {
-      onLoad({
-        kind: "video",
-        source: video,
-        naturalW: video.videoWidth,
-        naturalH: video.videoHeight,
-        label: file.name,
-        videoEl: video,
-        objectUrl,
-        transform: defaultTransform(),
-      });
-      void video.play().catch(() => {
-        /* Autoplay can be rejected by the browser; the element still
-         * decodes frames once the user interacts with the page again. */
-      });
-    },
-    { once: true }
-  );
+  const commit = (): void => {
+    if (video.videoWidth < 1 || video.videoHeight < 1) return;
+    onLoad({
+      kind: "video",
+      source: video,
+      naturalW: video.videoWidth,
+      naturalH: video.videoHeight,
+      label: file.name,
+      videoEl: video,
+      objectUrl,
+      transform: defaultTransform(),
+    });
+  };
+  video.addEventListener("loadeddata", commit, { once: true });
   video.addEventListener(
     "error",
     () => {
@@ -94,7 +100,12 @@ export function wireMediaDropZone(
   input.style.display = "none";
   zone.appendChild(input);
 
-  zone.addEventListener("click", () => input.click());
+  zone.addEventListener("click", (e) => {
+    if (zone.dataset.filePick === "off") return;
+    const t = e.target as HTMLElement;
+    if (t.closest(".seg-toggle, input, textarea, .graphic-slot-ui")) return;
+    input.click();
+  });
   input.addEventListener("change", () => {
     const file = input.files?.[0];
     if (file) loadFile(file, videoHost, onLoad, onError);
@@ -102,6 +113,7 @@ export function wireMediaDropZone(
   });
 
   zone.addEventListener("dragover", (e) => {
+    if (zone.dataset.filePick === "off") return;
     e.preventDefault();
     zone.classList.add("drag-over");
   });
@@ -109,6 +121,7 @@ export function wireMediaDropZone(
   zone.addEventListener("drop", (e) => {
     e.preventDefault();
     zone.classList.remove("drag-over");
+    if (zone.dataset.filePick === "off") return;
     const file = e.dataTransfer?.files?.[0];
     if (file) loadFile(file, videoHost, onLoad, onError);
   });

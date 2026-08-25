@@ -43,12 +43,19 @@ const params: ParamDef[] = [
 // with the mask that frame, and avoids recomputing field geometry 2-3x.
 // Safe as module state: one Bloom instance exists per page.
 let cachedFields: ResolvedField[] = [];
+let lastMap: { width: number; height: number; fields: ResolvedField[] } | null = null;
+
+/** Composition-space snapshot of the fields rendered this frame.
+ * Read-only — the field map UI consumes this; nothing writes back. */
+export function lastBloomFieldMap(): { width: number; height: number; fields: ResolvedField[] } | null {
+  return lastMap;
+}
 
 export const bloomBehavior: MaskBehavior<BloomState> = {
   id: "bloom",
   name: "Bloom",
-  index: "02",
-  description: "Localized atmospheric light fields drive where transformation happens; a treatment decides what happens inside them.",
+  index: "01",
+  description: "Local fields alter where one source emerges through another.",
   params,
   createState(p: ParamValues): BloomState {
     return { fields: buildFields(Math.round(p.fieldCount as number)) };
@@ -68,6 +75,7 @@ export const bloomBehavior: MaskBehavior<BloomState> = {
     const softnessFrac = (p.softness as number) / 100;
     const attractors = p.imageAware === "on" && bLayer ? getImageAwareAttractors(bLayer) : null;
     cachedFields = computeResolvedFields(width, height, time, p, state, attractors);
+    lastMap = { width, height, fields: cachedFields };
     renderMaskFromFields(ctx, width, height, cachedFields, softnessFrac);
   },
   renderBoundary(ctx): void {

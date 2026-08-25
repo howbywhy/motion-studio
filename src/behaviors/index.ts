@@ -12,6 +12,6 @@ import { bloomBehavior } from "./bloom";
 // reveal B underneath). See each one's own header comment; re-add its
 // export to this array to bring it back.
 export const BEHAVIORS: MaskBehavior<unknown>[] = [
-  shiftBehavior as MaskBehavior<unknown>,
   bloomBehavior as MaskBehavior<unknown>,
+  shiftBehavior as MaskBehavior<unknown>,
 ];

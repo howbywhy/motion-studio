@@ -1,4 +1,18 @@
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "graphic";
+export type GraphicMotion = "static" | "live";
+
+/** Renderer-facing handle. Generated FIELD occupies a media slot and is
+ * sampled like any other CanvasImageSource; behaviours never see this. */
+export interface GraphicDriver {
+  dirty: boolean;
+  paintedAt: number;
+  paint(time: number): void;
+  getMotion(): GraphicMotion;
+  setAspect(aspectW: number, aspectH: number): void;
+  /** Match the output raster so the screen is generated at native pixels,
+   * never by upscaling a smaller FIELD texture. */
+  setRasterSize(width: number, height: number, dpr?: number): void;
+}
 
 export interface RGB {
   r: number;
@@ -41,6 +55,10 @@ export interface MediaAsset {
   videoEl?: HTMLVideoElement;
   objectUrl?: string;
   transform: MediaTransform;
+  graphic?: GraphicDriver;
+  /** Sticky soundtrack probe. Videos start unknown so they can own
+   *  audio immediately; silent files flip to "no" after a short play. */
+  soundtrack?: "unknown" | "yes" | "no";
 }
 
 let sampleCanvas: HTMLCanvasElement | null = null;
@@ -87,6 +105,46 @@ export function detectMediaKind(file: File): MediaKind | null {
   if (/\.(jpe?g|png|webp)$/.test(name)) return "image";
   if (/\.(mp4|mov|webm)$/.test(name)) return "video";
   return null;
+}
+
+type VideoAudioProbe = HTMLVideoElement & {
+  mozHasAudio?: boolean;
+  audioTracks?: { length: number };
+  webkitAudioDecodedByteCount?: number;
+};
+
+/** FIELD and stills never own sound. A video may own sound until playback
+ * proves it has no soundtrack — then it must not steal the previous owner. */
+export function videoMayOwnAudio(asset: MediaAsset | null | undefined): boolean {
+  if (!asset?.videoEl) return false;
+  refreshSoundtrack(asset);
+  return asset.soundtrack !== "no";
+}
+
+export function refreshSoundtrack(asset: MediaAsset): void {
+  const video = asset.videoEl as VideoAudioProbe | undefined;
+  if (!video) {
+    asset.soundtrack = "no";
+    return;
+  }
+  if (asset.soundtrack === "yes" || asset.soundtrack === "no") return;
+  if (video.audioTracks && video.audioTracks.length > 0) {
+    asset.soundtrack = "yes";
+    return;
+  }
+  if (video.mozHasAudio === true) {
+    asset.soundtrack = "yes";
+    return;
+  }
+  if (typeof video.webkitAudioDecodedByteCount === "number" && video.webkitAudioDecodedByteCount > 0) {
+    asset.soundtrack = "yes";
+    return;
+  }
+  if (!video.paused && video.readyState >= 2 && video.currentTime > 0.4) {
+    if (video.mozHasAudio === false || video.webkitAudioDecodedByteCount === 0 || video.audioTracks?.length === 0) {
+      asset.soundtrack = "no";
+    }
+  }
 }
 
 /** Releases everything a loaded asset holds — the decoded video element

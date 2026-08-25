@@ -1,11 +1,10 @@
 import type { ParamValues } from "./types";
 
 /** Curated starting points, not arbitrary technical defaults. Scoped per
- * expression/treatment (Slice, Drift, Diffuse, Bloom/Clean, Bloom/
- * Refraction, Bloom/Registration) rather than per behavior, since those
- * are the actual meaningfully-different visual outcomes a designer picks
- * between — each behavior's own two treatments/expressions can call for
- * very different "how far do I push this" curves.
+ * expression/treatment (Diffuse, Slice, Bloom/Clean, Bloom/Refraction,
+ * Bloom/Registration). Drift presets are retained so a saved state whose
+ * treatment is still `"drift"` can match Restrained/Balanced/Expressive
+ * without being rewritten — Drift is hidden from the selector, not deleted.
  *
  * "Balanced" is always exactly the existing, already-tuned default for
  * that treatment — these presets never alter the underlying behavior, only

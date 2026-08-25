@@ -22,9 +22,9 @@ export interface GlobalPhase {
   localPhase: number; // 0..1 across the transform span; 0 while resting at WHOLE
 }
 
-const TRANSFORM_SPAN_SECONDS = 6.5; // base fracture->transform->reassemble duration at speed=1
+export const TRANSFORM_SPAN_SECONDS = 6.5; // base fracture->transform->reassemble duration at speed=1
 
-export function computeGlobalPhase(time: number, params: ParamValues): GlobalPhase {
+export function shiftCycleSpans(params: ParamValues): { holdSpan: number; transformSpan: number; cycle: number } {
   const speed = Math.max(0.01, params.speed as number);
   const rhythm = Math.min(1, Math.max(0, (params.rhythm as number) / 100));
   // Rhythm also shapes how long the photograph rests, fully WHOLE, between
@@ -33,7 +33,11 @@ export function computeGlobalPhase(time: number, params: ParamValues): GlobalPha
   const holdSeconds = 2.4 * (1 - rhythm) + 0.2;
   const holdSpan = holdSeconds / speed;
   const transformSpan = TRANSFORM_SPAN_SECONDS / speed;
-  const cycle = holdSpan + transformSpan;
+  return { holdSpan, transformSpan, cycle: holdSpan + transformSpan };
+}
+
+export function computeGlobalPhase(time: number, params: ParamValues): GlobalPhase {
+  const { holdSpan, transformSpan, cycle } = shiftCycleSpans(params);
   let t = time % cycle;
   if (t < 0) t += cycle;
   const inTransform = t >= holdSpan;

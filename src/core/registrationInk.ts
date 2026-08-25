@@ -153,8 +153,66 @@ function sizeCanvas(c: HTMLCanvasElement, w: number, h: number): void {
 let globalInkScratch: HTMLCanvasElement | null = null;
 let globalTintScratch: HTMLCanvasElement | null = null;
 let globalBoundarySmall: HTMLCanvasElement | null = null;
+let globalBlackSrc: HTMLCanvasElement | null = null;
+let globalTintSrc: HTMLCanvasElement | null = null;
 
 const BOUNDARY_SMALL_W = 200;
+
+/** Filter B once per Print frame (or once until still media changes).
+ * Persistent and reactive only differ by offset, so sharing these sources
+ * is pixel-equivalent to filtering inside each pass. Bloom's own
+ * Registration treatment still uses paintRegistrationInkContent. */
+export function prepareGlobalPrintInk(bLayer: HTMLCanvasElement, width: number, height: number): void {
+  if (!globalBlackSrc) globalBlackSrc = makeCanvas();
+  if (!globalTintSrc) globalTintSrc = makeCanvas();
+  sizeCanvas(globalBlackSrc, width, height);
+  sizeCanvas(globalTintSrc, width, height);
+
+  const bctx = globalBlackSrc.getContext("2d")!;
+  bctx.clearRect(0, 0, width, height);
+  bctx.filter = "grayscale(1) contrast(1.55)";
+  bctx.drawImage(bLayer, 0, 0);
+  bctx.filter = "none";
+
+  const tint = currentInkTint(bLayer);
+  const tctx = globalTintSrc.getContext("2d")!;
+  tctx.clearRect(0, 0, width, height);
+  tctx.filter = "grayscale(1) contrast(1.3)";
+  tctx.drawImage(bLayer, 0, 0);
+  tctx.filter = "none";
+  tctx.globalCompositeOperation = "source-atop";
+  tctx.fillStyle = `rgb(${tint.r | 0},${tint.g | 0},${tint.b | 0})`;
+  tctx.fillRect(0, 0, width, height);
+  tctx.globalCompositeOperation = "source-over";
+}
+
+function blitPreparedPrintInk(sctx: CanvasRenderingContext2D, width: number, height: number, off: number): void {
+  if (!globalBlackSrc || !globalTintSrc) return;
+  sctx.save();
+  sctx.beginPath();
+  sctx.rect(0, 0, width, height);
+  sctx.clip();
+
+  sctx.save();
+  sctx.globalAlpha = 0.8;
+  sctx.translate(off, -off * 0.4);
+  sctx.drawImage(globalBlackSrc, 0, 0);
+  sctx.restore();
+
+  sctx.save();
+  sctx.globalAlpha = 0.6;
+  sctx.translate(-off, off * 0.4);
+  sctx.drawImage(globalTintSrc, 0, 0);
+  sctx.restore();
+
+  sctx.save();
+  sctx.globalAlpha = 0.22;
+  sctx.fillStyle = getHalftonePattern(sctx);
+  sctx.fillRect(0, 0, width, height);
+  sctx.restore();
+
+  sctx.restore();
+}
 
 /** The universal analogue of Bloom's per-field boundary ring: wherever ANY
  * behavior's own reveal mask (always computed every frame, regardless of
@@ -207,7 +265,7 @@ export const BASE_REGISTRATION_AMOUNT = 0.1;
  * top of this, it never has to reintroduce it from zero. */
 export function paintPersistentRegistration(
   ctx: CanvasRenderingContext2D,
-  bLayer: HTMLCanvasElement,
+  _bLayer: HTMLCanvasElement,
   width: number,
   height: number,
   amount: number
@@ -222,7 +280,7 @@ export function paintPersistentRegistration(
   const ictx = globalInkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
   const off = 2 + amount * 5;
-  paintRegistrationInkContent(ictx, globalTintScratch, bLayer, { x: 0, y: 0, w: width, h: height }, off);
+  blitPreparedPrintInk(ictx, width, height, off);
 
   ctx.save();
   ctx.globalAlpha = amount;
@@ -238,7 +296,7 @@ export function paintPersistentRegistration(
  * whatever the persistent base already put there. */
 export function paintReactiveRegistration(
   ctx: CanvasRenderingContext2D,
-  bLayer: HTMLCanvasElement,
+  _bLayer: HTMLCanvasElement,
   maskLayer: HTMLCanvasElement,
   width: number,
   height: number,
@@ -256,7 +314,7 @@ export function paintReactiveRegistration(
   const ictx = globalInkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
   const off = 2 + amount * 5;
-  paintRegistrationInkContent(ictx, globalTintScratch, bLayer, { x: 0, y: 0, w: width, h: height }, off);
+  blitPreparedPrintInk(ictx, width, height, off);
 
   ictx.save();
   ictx.globalCompositeOperation = "destination-in";

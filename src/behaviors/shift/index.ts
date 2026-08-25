@@ -4,11 +4,19 @@ import { buildSliceState, renderSliceComposite, renderSlicePhaseField, type Slic
 import { buildDriftState, renderDriftComposite, renderDriftPhaseField, type DriftState } from "./drift";
 import { buildDiffuseState, renderDiffuseComposite, renderDiffusePhaseField, type DiffuseState } from "./diffuse";
 
+/** User-facing Shift expressions. Drift remains implemented and restorable
+ * from a saved state whose `params.treatment` is `"drift"`, but it is not
+ * offered in the selector. */
 const expressionOptions = [
-  { value: "slice", label: "Slice" },
-  { value: "drift", label: "Drift" },
   { value: "diffuse", label: "Diffuse" },
+  { value: "slice", label: "Slice" },
 ];
+
+export const SHIFT_EXPRESSION_COPY: Record<string, string> = {
+  diffuse: "One source breaks down materially into the other.",
+  slice: "Different moments occupy directional spatial intervals.",
+  drift: "Fragments displace spatially while one source becomes the other.",
+};
 
 const params: ParamDef[] = [
   { type: "range", key: "fragment", label: "Fragment", min: 0, max: 100, step: 1, default: 40 },
@@ -20,7 +28,7 @@ const params: ParamDef[] = [
   // Structural — not rendered in the generic sidebar panel; the UI gives
   // this its own segmented control (see visibleParams below), mirroring
   // how Bloom's own "treatment" select is handled.
-  { type: "select", key: "treatment", label: "Expression", default: "slice", options: expressionOptions },
+  { type: "select", key: "treatment", label: "Expression", default: "diffuse", options: expressionOptions },
 ];
 
 interface ShiftBehaviorState {
@@ -40,8 +48,8 @@ function structuralSeed(p: ParamValues): number {
 export const shiftBehavior: MaskBehavior<ShiftBehaviorState> = {
   id: "shift",
   name: "Shift",
-  index: "01",
-  description: "A photograph fractures into fragments that each carry their own moment of A becoming B, then reassembles into one whole — transformation through fragmentation.",
+  index: "02",
+  description: SHIFT_EXPRESSION_COPY.diffuse,
   params,
   createState(p: ParamValues): ShiftBehaviorState {
     const mode = p.treatment as string;

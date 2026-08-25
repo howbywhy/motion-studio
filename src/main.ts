@@ -1,11 +1,21 @@
 import "./style.css";
 import { Renderer, type DiagnosticMode, type MediaSlot } from "./core/renderer";
-import { placeholderA, placeholderB } from "./core/placeholder";
-import { wrapCanvasAsPlaceholder, type MediaAsset } from "./core/media";
-import { wireMediaDropZone } from "./ui/mediaInput";
+import { placeholderA } from "./core/placeholder";
+import { wrapCanvasAsPlaceholder, defaultTransform, type MediaAsset, type MediaKind } from "./core/media";
+import { loadMediaFile } from "./ui/mediaInput";
 import { buildControls } from "./ui/controls";
 import { buildXYPad } from "./ui/xyPad";
+import { buildPhaseControl } from "./ui/phaseControl";
+import { buildLoopLengthControl } from "./ui/loopLengthControl";
+import { buildSequenceStrip } from "./ui/sequenceStrip";
+import { buildSpreadControl } from "./ui/spreadControl";
+import { buildFragmentControl } from "./ui/fragmentControl";
+import { buildBloomFieldMap } from "./ui/bloomFieldMap";
+import { buildGraphicPanel, hideGraphicPanel } from "./ui/graphicPanel";
+import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
+import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS } from "./behaviors/index";
+import { SHIFT_EXPRESSION_COPY } from "./behaviors/shift";
 import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
 import {
@@ -24,11 +34,11 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
   <div class="app">
     <header class="topbar">
-      <div class="brand">Motion Studio <span class="brand-sub">— masking prototype</span></div>
+      <div class="brand">Motion Studio <span class="brand-sub">—</span></div>
       <div class="topbar-right">
         <div class="behavior-tabs" id="behavior-tabs"></div>
-        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global output layer: the Registration print-separation texture over the complete composition, whatever behaviour is active">
-          Registration
+        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global output layer: Print — the misregistered ink surface over the complete composition, whatever behaviour is active">
+          Print
         </button>
         <button type="button" class="diagnostic-toggle" id="bw-toggle" title="Global output layer: render the final composition in monochrome">
           B&amp;W
@@ -41,24 +51,19 @@ app.innerHTML = `
     </header>
     <main class="workspace">
       <section class="stage-panel">
-        <div class="media-panel">
-          <div class="media-slot" id="slot-a">
-            <div class="media-slot-row">
-              <span class="media-slot-badge">A</span>
-              <span class="media-slot-type" id="type-a">—</span>
+        <div class="sequence-panel">
+          <div id="sequence-strip" class="sequence-strip"></div>
+          <div class="source-inspector" id="source-inspector">
+            <div class="seg-toggle source-kind-toggle" id="source-kind">
+              <button type="button" data-value="media" class="active">Media</button>
+              <button type="button" data-value="field">Field</button>
             </div>
-            <button type="button" class="load-media-btn" id="btn-a">Load Media A</button>
-            <div class="media-slot-name" id="name-a">No file selected</div>
-            <div class="media-slot-hint">or drop an image / video here</div>
-          </div>
-          <div class="media-slot" id="slot-b">
-            <div class="media-slot-row">
-              <span class="media-slot-badge">B</span>
-              <span class="media-slot-type" id="type-b">—</span>
+            <button type="button" class="load-media-btn" id="btn-replace">Replace</button>
+            <div class="source-inspector-meta">
+              <span class="media-slot-name" id="source-name">—</span>
+              <span class="media-slot-type" id="source-type">—</span>
             </div>
-            <button type="button" class="load-media-btn" id="btn-b">Load Media B</button>
-            <div class="media-slot-name" id="name-b">No file selected</div>
-            <div class="media-slot-hint">or drop an image / video here</div>
+            <button type="button" class="reset-btn" id="source-remove" title="Remove this source">Remove</button>
           </div>
         </div>
         <div class="stage-toolbar">
@@ -70,28 +75,28 @@ app.innerHTML = `
             <button data-value="loop" class="active">Loop</button>
             <button data-value="pingpong">Ping-pong</button>
           </div>
+          <div id="loop-length"></div>
+          <div id="phase-control"></div>
         </div>
         <div class="stage-frame" id="stage-frame">
           <canvas id="canvas"></canvas>
         </div>
         <div class="stage-controls">
-          <button id="play-pause" class="primary">Pause</button>
-          <button id="swap">Swap A / B</button>
+          <button id="play-pause" class="primary" title="Pause or resume source video. Independent of Phase Auto/Hold.">Pause</button>
+          <button type="button" class="diagnostic-toggle" id="audio-toggle" title="Hear source video audio, or mute. Independent of HOLD.">Audio</button>
+          <button id="swap" title="Reverse the source sequence">Reverse</button>
           <button id="export-png" title="Save a PNG of the exact current frame — no UI, full render resolution">Export PNG</button>
         </div>
       </section>
       <aside class="control-panel">
-        <div class="composition-panel">
-          <div class="panel-label-row">
-            <label class="panel-label">Composition</label>
-            <div class="seg-toggle edit-target-toggle" id="edit-target-toggle">
-              <button data-value="A" class="active">A</button>
-              <button data-value="B">B</button>
+          <div class="composition-panel" id="composition-panel">
+            <div class="panel-label-row">
+              <label class="panel-label">Composition</label>
             </div>
+            <div id="composition-controls"></div>
+            <button type="button" class="reset-btn" id="composition-reset">Reset</button>
           </div>
-          <div id="composition-controls"></div>
-          <button type="button" class="reset-btn" id="composition-reset">Reset</button>
-        </div>
+        <div class="graphic-panel" id="graphic-panel" hidden></div>
         <div class="behavior-meta">
           <h2 id="behavior-title"></h2>
           <p id="behavior-desc" class="behavior-desc"></p>
@@ -115,6 +120,7 @@ app.innerHTML = `
           <div id="saved-states-list" class="saved-states-list"></div>
           <p class="saved-states-empty" id="saved-states-empty">No saved states yet.</p>
         </div>
+        <div id="bloom-field-map" hidden></div>
         <div id="controls"></div>
       </aside>
     </main>
@@ -128,15 +134,16 @@ const controlsEl = document.querySelector<HTMLDivElement>("#controls")!;
 const titleEl = document.querySelector<HTMLHeadingElement>("#behavior-title")!;
 const descEl = document.querySelector<HTMLParagraphElement>("#behavior-desc")!;
 const playPauseBtn = document.querySelector<HTMLButtonElement>("#play-pause")!;
+const audioBtn = document.querySelector<HTMLButtonElement>("#audio-toggle")!;
 const swapBtn = document.querySelector<HTMLButtonElement>("#swap")!;
 const aspectToggle = document.querySelector<HTMLDivElement>("#aspect-toggle")!;
 const playbackToggle = document.querySelector<HTMLDivElement>("#playback-toggle")!;
-const slotA = document.querySelector<HTMLDivElement>("#slot-a")!;
-const slotB = document.querySelector<HTMLDivElement>("#slot-b")!;
-const typeA = document.querySelector<HTMLSpanElement>("#type-a")!;
-const typeB = document.querySelector<HTMLSpanElement>("#type-b")!;
-const nameA = document.querySelector<HTMLDivElement>("#name-a")!;
-const nameB = document.querySelector<HTMLDivElement>("#name-b")!;
+const sourceInspector = document.querySelector<HTMLDivElement>("#source-inspector")!;
+const sourceKindToggle = document.querySelector<HTMLDivElement>("#source-kind")!;
+const replaceBtn = document.querySelector<HTMLButtonElement>("#btn-replace")!;
+const sourceName = document.querySelector<HTMLSpanElement>("#source-name")!;
+const sourceType = document.querySelector<HTMLSpanElement>("#source-type")!;
+const sourceRemoveBtn = document.querySelector<HTMLButtonElement>("#source-remove")!;
 const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
 const registrationBtn = document.querySelector<HTMLButtonElement>("#registration-toggle")!;
 const bwBtn = document.querySelector<HTMLButtonElement>("#bw-toggle")!;
@@ -144,9 +151,10 @@ const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel"
 const treatmentLabel = document.querySelector<HTMLLabelElement>("#treatment-label")!;
 const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggle")!;
 const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!;
-const editTargetToggle = document.querySelector<HTMLDivElement>("#edit-target-toggle")!;
+const compositionPanel = document.querySelector<HTMLDivElement>("#composition-panel")!;
 const compositionControlsEl = document.querySelector<HTMLDivElement>("#composition-controls")!;
 const compositionResetBtn = document.querySelector<HTMLButtonElement>("#composition-reset")!;
+const graphicPanelEl = document.querySelector<HTMLDivElement>("#graphic-panel")!;
 const presetPanel = document.querySelector<HTMLDivElement>("#preset-panel")!;
 const presetLabel = document.querySelector<HTMLLabelElement>("#preset-label")!;
 const presetToggle = document.querySelector<HTMLDivElement>("#preset-toggle")!;
@@ -157,56 +165,212 @@ const exportPngBtn = document.querySelector<HTMLButtonElement>("#export-png")!;
 
 const renderer = new Renderer(canvas);
 
-// --- default placeholder imagery so the mask is testable immediately ---
-renderer.setMedia("A", wrapCanvasAsPlaceholder(placeholderA(), "Placeholder A"));
-renderer.setMedia("B", wrapCanvasAsPlaceholder(placeholderB(), "Placeholder B"));
-
-function showSlotMeta(nameEl: HTMLDivElement, typeEl: HTMLSpanElement, label: string, kind: "image" | "video"): void {
-  nameEl.textContent = label;
-  nameEl.classList.remove("has-error");
-  typeEl.textContent = kind === "image" ? "IMAGE" : "VIDEO";
-  typeEl.classList.toggle("type-image", kind === "image");
-  typeEl.classList.toggle("type-video", kind === "video");
-}
-
-function showSlotError(nameEl: HTMLDivElement, message: string): void {
-  nameEl.textContent = message;
-  nameEl.classList.add("has-error");
-}
-
-/** Loads `asset` into `slot`, updating the slot's meta display. Checks
- * whether the OUTGOING asset is still referenced by a Saved State first —
- * if so, tells the renderer not to dispose it (see Renderer.setMedia),
- * since a saved state that still points at it needs to find it alive when
- * loaded later. */
-function loadMediaAsset(slot: MediaSlot, asset: MediaAsset, displayLabel?: string): void {
-  const prevAsset = renderer.getMedia(slot);
-  const disposePrevious = prevAsset ? !isAssetReferencedBySavedState(prevAsset) : true;
-  renderer.setMedia(slot, asset, { disposePrevious });
-  const nameEl = slot === "A" ? nameA : nameB;
-  const typeEl = slot === "A" ? typeA : typeB;
-  showSlotMeta(nameEl, typeEl, displayLabel ?? asset.label, asset.kind);
-}
-
-wireMediaDropZone(
-  slotA,
-  renderer.getVideoHost(),
-  (asset) => loadMediaAsset("A", asset),
-  (message) => showSlotError(nameA, message)
+const phaseUi = buildPhaseControl(
+  document.querySelector<HTMLDivElement>("#phase-control")!,
+  (mode) => {
+    renderer.setClockMode(mode);
+    phaseUi.setDisplayedPhase(renderer.getPhase());
+  },
+  (phase) => {
+    renderer.setHoldPhase(phase);
+  }
 );
 
-wireMediaDropZone(
-  slotB,
-  renderer.getVideoHost(),
-  (asset) => loadMediaAsset("B", asset),
-  (message) => showSlotError(nameB, message)
+const bloomFieldMap = buildBloomFieldMap(document.querySelector<HTMLDivElement>("#bloom-field-map")!);
+
+const lastMediaById = new Map<string, MediaAsset>();
+let currentAspect = "4:5";
+
+function aspectParts(): { w: number; h: number } {
+  const [w, h] = currentAspect.split(":").map(Number);
+  return { w: w || 4, h: h || 5 };
+}
+
+function selectedItem() {
+  return renderer.getSelectedItem();
+}
+
+function showSourceMeta(label: string, kind: MediaKind, error?: boolean): void {
+  sourceName.textContent = label;
+  sourceName.classList.toggle("has-error", Boolean(error));
+  sourceType.classList.toggle("type-image", kind === "image");
+  sourceType.classList.toggle("type-video", kind === "video");
+  sourceType.classList.toggle("type-graphic", kind === "graphic");
+  sourceType.textContent = kind === "graphic" ? "FIELD" : kind === "image" ? "IMAGE" : "VIDEO";
+}
+
+function syncSourceInspector(): void {
+  const item = selectedItem();
+  const graphic = asGraphic(item?.asset ?? null);
+  sourceInspector.classList.toggle("source-graphic", Boolean(graphic));
+  replaceBtn.hidden = Boolean(graphic);
+  sourceKindToggle.querySelectorAll("button").forEach((b) => {
+    const v = b.getAttribute("data-value");
+    b.classList.toggle("active", graphic ? v === "field" : v === "media");
+  });
+  if (!item) {
+    showSourceMeta("—", "image");
+    return;
+  }
+  showSourceMeta(item.asset.label, item.asset.kind);
+  sourceRemoveBtn.disabled = renderer.getSequence().length <= 1;
+}
+
+function rebuildGraphicPanel(): void {
+  const item = selectedItem();
+  const driver = asGraphic(item?.asset ?? null);
+  if (!driver) {
+    hideGraphicPanel(graphicPanelEl);
+    return;
+  }
+  buildGraphicPanel(graphicPanelEl, driver, () => {
+    if (item) {
+      item.asset.label = `Field ${String(renderer.getSequence().findIndex((s) => s.id === item.id) + 1).padStart(2, "0")}`;
+      showSourceMeta(item.asset.label, "graphic");
+    }
+    renderer.touchMedia();
+    sequenceStrip.refresh();
+  });
+}
+
+function setSourceKind(id: string, mode: "media" | "field"): void {
+  const item = renderer.getSequence().find((s) => s.id === id);
+  if (!item) return;
+  const current = item.asset;
+  if (mode === "field") {
+    if (current.kind !== "graphic") lastMediaById.set(id, current);
+    if (asGraphic(current)) {
+      syncSourceInspector();
+      rebuildGraphicPanel();
+      rebuildCompositionPanel();
+      return;
+    }
+    const { w, h } = aspectParts();
+    const index = renderer.getSequence().findIndex((s) => s.id === id);
+    const asset = createGraphicAsset(w, h, `Field ${String(index + 1).padStart(2, "0")}`, { ...DEFAULT_FIELD });
+    const disposePrevious = current.kind === "graphic" ? !isAssetReferencedBySavedState(current) : false;
+    renderer.replaceSource(id, asset, { disposePrevious });
+    syncSourceInspector();
+    rebuildGraphicPanel();
+    rebuildCompositionPanel();
+    sequenceStrip.refresh();
+    return;
+  }
+
+  const restored = lastMediaById.get(id) ?? wrapCanvasAsPlaceholder(placeholderA(), "Media");
+  const disposePrevious = current ? !isAssetReferencedBySavedState(current) : true;
+  renderer.replaceSource(id, restored, { disposePrevious });
+  syncSourceInspector();
+  rebuildGraphicPanel();
+  rebuildCompositionPanel();
+  sequenceStrip.refresh();
+}
+
+function loadSourceAsset(id: string, asset: MediaAsset, displayLabel?: string): void {
+  const prev = renderer.getSource(id);
+  const disposePrevious = prev ? !isAssetReferencedBySavedState(prev) : true;
+  renderer.replaceSource(id, asset, { disposePrevious });
+  if (displayLabel) asset.label = displayLabel;
+  if (asset.kind !== "graphic") lastMediaById.set(id, asset);
+  syncSourceInspector();
+  rebuildGraphicPanel();
+  rebuildCompositionPanel();
+  sequenceStrip.refresh();
+  syncAudioButton();
+}
+
+function addPlaceholderSource(): void {
+  const n = renderer.getSequence().length + 1;
+  const asset = wrapCanvasAsPlaceholder(placeholderA(), `Media ${String(n).padStart(2, "0")}`);
+  renderer.addSource(asset, { select: true });
+  syncSourceInspector();
+  rebuildGraphicPanel();
+  rebuildCompositionPanel();
+  sequenceStrip.refresh();
+}
+
+const replaceInput = document.createElement("input");
+replaceInput.type = "file";
+replaceInput.accept = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
+replaceInput.hidden = true;
+sourceInspector.appendChild(replaceInput);
+replaceBtn.addEventListener("click", () => replaceInput.click());
+replaceInput.addEventListener("change", () => {
+  const file = replaceInput.files?.[0];
+  const item = selectedItem();
+  if (file && item) {
+    loadMediaFile(
+      file,
+      renderer.getVideoHost(),
+      (asset) => loadSourceAsset(item.id, asset),
+      (message) => showSourceMeta(message, item.asset.kind, true),
+    );
+  }
+  replaceInput.value = "";
+});
+
+sourceKindToggle.addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest("button");
+  if (!b) return;
+  const item = selectedItem();
+  if (!item) return;
+  setSourceKind(item.id, b.getAttribute("data-value") as "media" | "field");
+});
+
+sourceRemoveBtn.addEventListener("click", () => {
+  const item = selectedItem();
+  if (!item || renderer.getSequence().length <= 1) return;
+  const dispose = !isAssetReferencedBySavedState(item.asset);
+  renderer.removeSource(item.id, { dispose });
+  syncSourceInspector();
+  rebuildGraphicPanel();
+  rebuildCompositionPanel();
+  sequenceStrip.refresh();
+  syncAudioButton();
+});
+
+const sequenceStrip = buildSequenceStrip(document.querySelector<HTMLDivElement>("#sequence-strip")!, {
+  getItems: () => renderer.getSequence(),
+  getSelectedId: () => renderer.getSelectedId(),
+  getActiveIds: () => {
+    const pair = renderer.getActivePair();
+    return { aId: pair.aId, bId: pair.bId };
+  },
+  onSelect: (id) => {
+    renderer.selectItem(id);
+    syncSourceInspector();
+    rebuildGraphicPanel();
+    rebuildCompositionPanel();
+    sequenceStrip.refresh();
+  },
+  onAdd: () => addPlaceholderSource(),
+  onReorder: (from, to) => {
+    renderer.moveSource(from, to);
+    sequenceStrip.refresh();
+  },
+  onDropMedia: (id, file) => {
+    renderer.selectItem(id);
+    loadMediaFile(
+      file,
+      renderer.getVideoHost(),
+      (asset) => loadSourceAsset(id, asset),
+      (message) => showSourceMeta(message, "image", true),
+    );
+  },
+});
+
+const loopLengthUi = buildLoopLengthControl(
+  document.querySelector<HTMLDivElement>("#loop-length")!,
+  (seconds) => renderer.setLoopSeconds(seconds),
 );
 
-// --- composition: per-media scale/position, independent of masking/
-// treatment entirely (see Renderer — it's baked into aLayer/bLayer before
-// anything else touches them). "A"/"B" here always mean the load slot,
-// never the swapped visual order — separate from Swap A/B on purpose. ---
-let editTarget: MediaSlot = "A";
+renderer.onFrame = () => {
+  if (renderer.getClockMode() === "auto") phaseUi.setDisplayedPhase(renderer.getPhase());
+  const pair = renderer.getActivePair();
+  phaseUi.setPairCount(Math.max(1, pair.pairCount));
+  sequenceStrip.syncMarks();
+  bloomFieldMap.sync();
+};
 
 const transformParamDefs: ParamDef[] = [
   { type: "range", key: "scale", label: "Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" },
@@ -214,18 +378,17 @@ const transformParamDefs: ParamDef[] = [
   { type: "range", key: "y", label: "Position Y", min: -100, max: 100, step: 1, default: 0, unit: "%" },
 ];
 
-function compositionValues(slot: MediaSlot): ParamValues {
-  const t = renderer.getTransform(slot);
+function compositionValues(): ParamValues {
+  const item = selectedItem();
+  const t = item ? renderer.getItemTransform(item.id) : { scale: 1, x: 0, y: 0 };
   return { scale: Math.round(t.scale * 100), x: Math.round(t.x * 100), y: Math.round(t.y * 100) };
 }
 
-// `patch` carries only the one key the control that fired actually owns
-// (see ui/controls.ts) — merge it against the renderer's own live
-// transform (the authoritative source, never a locally-cached copy) so an
-// edit to one control can never clobber another.
 function onCompositionChange(patch: ParamValues): void {
-  const merged = { ...compositionValues(editTarget), ...patch };
-  renderer.setTransform(editTarget, {
+  const item = selectedItem();
+  if (!item) return;
+  const merged = { ...compositionValues(), ...patch };
+  renderer.setItemTransform(item.id, {
     scale: (merged.scale as number) / 100,
     x: (merged.x as number) / 100,
     y: (merged.y as number) / 100,
@@ -233,34 +396,31 @@ function onCompositionChange(patch: ParamValues): void {
 }
 
 function rebuildCompositionPanel(): void {
-  buildControls(compositionControlsEl, transformParamDefs, compositionValues(editTarget), onCompositionChange);
+  const item = selectedItem();
+  const isField = Boolean(asGraphic(item?.asset ?? null));
+  compositionPanel.hidden = isField;
+  if (isField) return;
+  buildControls(compositionControlsEl, transformParamDefs, compositionValues(), onCompositionChange);
 }
 
-editTargetToggle.addEventListener("click", (e) => {
-  const target = (e.target as HTMLElement).closest("button");
-  if (!target) return;
-  editTarget = target.getAttribute("data-value") as MediaSlot;
-  editTargetToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === target));
-  rebuildCompositionPanel();
-});
-
 compositionResetBtn.addEventListener("click", () => {
-  renderer.resetTransform(editTarget);
+  const item = selectedItem();
+  if (!item) return;
+  renderer.resetItemTransform(item.id);
   rebuildCompositionPanel();
 });
 
 rebuildCompositionPanel();
 
-// --- direct manipulation on the canvas: drag to reposition the currently
-// selected edit target, ctrl/cmd + wheel (trackpad pinch synthesizes this)
-// to scale it. Compositing order (Swap A/B) is never touched here. ---
 canvas.style.cursor = "grab";
 canvas.style.touchAction = "none";
 
 let dragState: { pointerId: number; startClientX: number; startClientY: number; startX: number; startY: number } | null = null;
 
 canvas.addEventListener("pointerdown", (e) => {
-  const t = renderer.getTransform(editTarget);
+  const item = selectedItem();
+  if (!item || asGraphic(item.asset)) return;
+  const t = renderer.getItemTransform(item.id);
   dragState = { pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY, startX: t.x, startY: t.y };
   canvas.setPointerCapture(e.pointerId);
   canvas.style.cursor = "grabbing";
@@ -268,14 +428,13 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   if (!dragState || dragState.pointerId !== e.pointerId) return;
+  const item = selectedItem();
+  if (!item) return;
   const rect = canvas.getBoundingClientRect();
-  // Content follows the cursor (grab-and-drag), so a rightward drag must
-  // decrease x (which is defined as increasing the crop window's source
-  // position — see coverFitTransformedRect) to shift visible content right.
   const dxNorm = ((e.clientX - dragState.startClientX) / rect.width) * 2;
   const dyNorm = ((e.clientY - dragState.startClientY) / rect.height) * 2;
-  const t = renderer.getTransform(editTarget);
-  renderer.setTransform(editTarget, {
+  const t = renderer.getItemTransform(item.id);
+  renderer.setItemTransform(item.id, {
     scale: t.scale,
     x: Math.min(1, Math.max(-1, dragState.startX - dxNorm)),
     y: Math.min(1, Math.max(-1, dragState.startY - dyNorm)),
@@ -294,11 +453,13 @@ canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener(
   "wheel",
   (e) => {
-    if (!(e.ctrlKey || e.metaKey)) return; // require a modifier so page/trackpad scroll is untouched otherwise
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const item = selectedItem();
+    if (!item || asGraphic(item.asset)) return;
     e.preventDefault();
-    const t = renderer.getTransform(editTarget);
+    const t = renderer.getItemTransform(item.id);
     const nextScale = Math.min(2.5, Math.max(1, t.scale - e.deltaY * 0.003));
-    renderer.setTransform(editTarget, { ...t, scale: nextScale });
+    renderer.setItemTransform(item.id, { ...t, scale: nextScale });
     rebuildCompositionPanel();
   },
   { passive: false }
@@ -313,30 +474,57 @@ let visibleKeysCache = "";
 // see ui/xyPad.ts. This is the one prototype control group called for
 // before any wider propagation of the visual-control system; every other
 // behavior still renders through the plain generic panel.
+function appendFamily(parent: HTMLElement, title: string): HTMLElement {
+  const fam = document.createElement("div");
+  fam.className = "control-family";
+  const lab = document.createElement("div");
+  lab.className = "control-family-label";
+  lab.textContent = title;
+  fam.appendChild(lab);
+  const body = document.createElement("div");
+  fam.appendChild(body);
+  parent.appendChild(fam);
+  return body;
+}
+
 function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: ParamValues, onChange: (patch: ParamValues) => void): void {
   container.innerHTML = "";
-  if (currentBehavior.id !== "shift") {
-    buildControls(container, defs, values, onChange);
+  if (currentBehavior.id === "shift") {
+    const fragmentDef = defs.find((d) => d.key === "fragment");
+    const spreadDef = defs.find((d) => d.key === "spread");
+    const angleDef = defs.find((d) => d.key === "direction");
+    const radiusDef = defs.find((d) => d.key === "overlap");
+    const rest = defs.filter((d) => d.key !== "fragment" && d.key !== "spread" && d.key !== "direction" && d.key !== "overlap");
+
+    const structure = appendFamily(container, "Structure");
+    if (fragmentDef && fragmentDef.type === "range") buildFragmentControl(structure, fragmentDef, values, onChange);
+    if (spreadDef && spreadDef.type === "range") buildSpreadControl(structure, spreadDef, values, onChange);
+
+    if (angleDef && angleDef.type === "range" && radiusDef && radiusDef.type === "range") {
+      const displacement = appendFamily(container, "Displacement");
+      buildXYPad(displacement, angleDef, radiusDef, values, onChange);
+    }
+
+    const time = appendFamily(container, "Time");
+    buildControls(time, rest, values, onChange);
     return;
   }
-  const angleDef = defs.find((d) => d.key === "direction");
-  const radiusDef = defs.find((d) => d.key === "overlap");
-  if (!angleDef || angleDef.type !== "range" || !radiusDef || radiusDef.type !== "range") {
-    buildControls(container, defs, values, onChange);
+
+  if (currentBehavior.id === "bloom") {
+    const fieldKeys = new Set(["fieldCount", "fieldSize", "softness", "drift", "overlap"]);
+    const revealKeys = new Set(["revealAmount", "resolveAmount"]);
+    const fieldDefs = defs.filter((d) => fieldKeys.has(d.key));
+    const revealDefs = defs.filter((d) => revealKeys.has(d.key));
+    const rest = defs.filter((d) => !fieldKeys.has(d.key) && !revealKeys.has(d.key));
+    buildControls(container, fieldDefs, values, onChange);
+    const reveal = appendFamily(container, "Reveal");
+    buildControls(reveal, revealDefs, values, onChange);
+    const time = appendFamily(container, "Time");
+    buildControls(time, rest, values, onChange);
     return;
   }
-  const before = defs.filter((d) => d.key === "fragment");
-  const after = defs.filter((d) => d.key !== "direction" && d.key !== "overlap" && d.key !== "fragment");
-  // Each buildControls call clears its OWN container on entry, so the
-  // three groups need separate sub-containers -- sharing one would have
-  // the second/third call wipe out what the previous group just rendered.
-  const beforeEl = document.createElement("div");
-  const afterEl = document.createElement("div");
-  container.appendChild(beforeEl);
-  buildControls(beforeEl, before, values, onChange);
-  buildXYPad(container, angleDef, radiusDef, values, onChange);
-  container.appendChild(afterEl);
-  buildControls(afterEl, after, values, onChange);
+
+  buildControls(container, defs, values, onChange);
 }
 
 function rebuildControlsPanel(): void {
@@ -351,11 +539,12 @@ function rebuildControlsPanel(): void {
 // stale snapshot from elsewhere. Every caller (control panel, treatment
 // toggle, Image Aware button) goes through this same merge.
 function onParamsChange(patch: ParamValues): void {
+  if (currentBehavior.id === "shift" && patch.treatment !== undefined && patch.treatment !== currentParams.treatment) {
+    switchShiftExpression(String(patch.treatment));
+    return;
+  }
   currentParams = { ...currentParams, ...patch };
   renderer.setParams(currentParams);
-  // Only Bloom declares visibleParams, and only its own structural params
-  // (treatment) change which controls should be visible — a plain slider
-  // drag never changes the visible set, so this never rebuilds mid-drag.
   if (currentBehavior.visibleParams) {
     const defs = currentBehavior.visibleParams(currentParams);
     const key = defs.map((d) => d.key).join(",");
@@ -368,24 +557,67 @@ function onParamsChange(patch: ParamValues): void {
   syncPresetUI();
 }
 
+const SHIFT_EXPRESSIONS = new Set(["slice", "drift", "diffuse"]);
+const lastParamsByExpression = new Map<string, ParamValues>();
+
+function rememberCurrentExpression(): void {
+  if (currentBehavior.id !== "shift") return;
+  const treatment = currentParams.treatment as string;
+  if (SHIFT_EXPRESSIONS.has(treatment)) lastParamsByExpression.set(treatment, { ...currentParams });
+}
+
+function defaultsForShiftExpression(treatment: string): ParamValues {
+  const shift = BEHAVIORS.find((b) => b.id === "shift") ?? currentBehavior;
+  return { ...defaultParamValues(shift.params), treatment };
+}
+
+function switchShiftExpression(next: string): void {
+  rememberCurrentExpression();
+  currentParams = lastParamsByExpression.get(next) ?? defaultsForShiftExpression(next);
+  lastParamsByExpression.set(next, { ...currentParams });
+  renderer.setParams(currentParams);
+  rebuildControlsPanel();
+  syncTreatmentUI();
+  syncPresetUI();
+}
+
 /** Any behavior can offer a segmented "expression/treatment" selector by
  * declaring a `select`-typed param named "treatment" — Bloom's
- * Clean/Refraction/Registration and Shift's Slice/Drift/Diffuse both work
+ * Clean/Refraction/Registration and Shift's Diffuse/Slice both work
  * this way, so the panel itself needs no per-behavior knowledge. Image
- * Aware stays specific to Bloom (Shift's rebuild has no equivalent). */
+ * Aware stays specific to Bloom (Shift's rebuild has no equivalent).
+ * Drift is implemented but omitted from Shift's declared options; a saved
+ * state that still holds treatment=drift is restored without conversion,
+ * and Drift is injected into the toggle only while that state is active. */
 function findTreatmentDef(behavior: MaskBehavior<unknown>): SelectParamDef | null {
   const def = behavior.params.find((d) => d.key === "treatment");
   return def && def.type === "select" ? def : null;
 }
 
-function rebuildTreatmentToggle(def: SelectParamDef): void {
+function visibleTreatmentOptions(def: SelectParamDef, treatment: string): SelectParamDef["options"] {
+  const opts = [...def.options];
+  if (treatment === "drift" && !opts.some((o) => o.value === "drift")) {
+    opts.push({ value: "drift", label: "Drift" });
+  }
+  return opts;
+}
+
+function rebuildTreatmentToggle(def: SelectParamDef, treatment: string): void {
   treatmentToggle.innerHTML = "";
-  for (const opt of def.options) {
+  for (const opt of visibleTreatmentOptions(def, treatment)) {
     const btn = document.createElement("button");
     btn.textContent = opt.label;
     btn.setAttribute("data-value", opt.value);
     treatmentToggle.appendChild(btn);
   }
+}
+
+function behaviorCopy(behavior: MaskBehavior<unknown>, params: ParamValues): string {
+  if (behavior.id === "shift") {
+    const t = String(params.treatment ?? "diffuse");
+    return SHIFT_EXPRESSION_COPY[t] ?? SHIFT_EXPRESSION_COPY.diffuse;
+  }
+  return behavior.description;
 }
 
 function syncTreatmentUI(): void {
@@ -394,10 +626,12 @@ function syncTreatmentUI(): void {
   if (treatmentDef) {
     treatmentLabel.textContent = treatmentDef.label;
     const treatment = currentParams.treatment as string;
+    rebuildTreatmentToggle(treatmentDef, treatment);
     treatmentToggle.querySelectorAll("button").forEach((b) => {
       b.classList.toggle("active", b.getAttribute("data-value") === treatment);
     });
   }
+  descEl.textContent = behaviorCopy(currentBehavior, currentParams);
 
   const isBloom = currentBehavior.id === "bloom";
   imageAwareBtn.hidden = !isBloom;
@@ -441,6 +675,7 @@ function syncPresetUI(): void {
 
 function selectPreset(preset: Preset): void {
   currentParams = { ...currentParams, ...preset.values };
+  rememberCurrentExpression();
   renderer.setParams(currentParams);
   rebuildControlsPanel();
   syncTreatmentUI();
@@ -468,19 +703,23 @@ const lastParamsByBehavior = new Map<string, ParamValues>();
 function selectBehavior(id: string, paramsOverride?: ParamValues): void {
   const behavior = BEHAVIORS.find((b) => b.id === id) ?? BEHAVIORS[0];
   if (currentBehavior && Object.keys(currentParams).length > 0) {
+    rememberCurrentExpression();
     lastParamsByBehavior.set(currentBehavior.id, currentParams);
   }
   currentBehavior = behavior;
   currentParams = paramsOverride ?? lastParamsByBehavior.get(behavior.id) ?? defaultParamValues(behavior.params);
   if (paramsOverride) lastParamsByBehavior.set(behavior.id, currentParams);
+  if (behavior.id === "shift") {
+    const treatment = currentParams.treatment as string;
+    if (SHIFT_EXPRESSIONS.has(treatment)) lastParamsByExpression.set(treatment, { ...currentParams });
+  }
   renderer.setBehavior(behavior, currentParams);
+  bloomFieldMap.setVisible(behavior.id === "bloom");
 
   titleEl.textContent = `${behavior.index} — ${behavior.name}`;
-  descEl.textContent = behavior.description;
+  descEl.textContent = behaviorCopy(behavior, currentParams);
 
   rebuildControlsPanel();
-  const treatmentDef = findTreatmentDef(behavior);
-  if (treatmentDef) rebuildTreatmentToggle(treatmentDef);
   syncTreatmentUI();
   syncPresetUI();
 
@@ -517,10 +756,28 @@ function updatePlayPauseLabel(): void {
   playPauseBtn.textContent = renderer.isPlaying() ? "Pause" : "Play";
 }
 
+function syncAudioButton(): void {
+  const has = renderer.hasVideoSource();
+  audioBtn.disabled = !has;
+  audioBtn.classList.toggle("active", has && renderer.isAudioEnabled());
+  audioBtn.classList.toggle("demoted", !has);
+}
+
 playPauseBtn.addEventListener("click", () => {
   if (renderer.isPlaying()) renderer.pause();
-  else renderer.play();
+  else {
+    renderer.unlockAudio();
+    renderer.play();
+  }
   updatePlayPauseLabel();
+  syncAudioButton();
+});
+
+audioBtn.addEventListener("click", () => {
+  if (!renderer.hasVideoSource()) return;
+  renderer.unlockAudio();
+  renderer.setAudioEnabled(!renderer.isAudioEnabled());
+  syncAudioButton();
 });
 
 swapBtn.addEventListener("click", () => renderer.swap());
@@ -558,15 +815,16 @@ bwBtn.addEventListener("click", () => {
 });
 
 // --- aspect ratio ---
-let currentAspect = "4:5";
 
 function setAspect(value: string): void {
   currentAspect = value;
-  const [w, h] = value.split(":").map(Number);
-  stageFrame.style.aspectRatio = `${w} / ${h}`;
+  const [aw, ah] = value.split(":").map(Number);
+  stageFrame.style.aspectRatio = `${aw} / ${ah}`;
   aspectToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.getAttribute("data-value") === value);
   });
+  renderer.forEachSource((item) => item.asset.graphic?.setAspect(aw, ah));
+  renderer.touchMedia();
   // aspect-ratio change resizes the box synchronously in layout, but let the
   // browser settle one frame before we measure, so the resize observer
   // (below) doesn't grab a stale intermediate size.
@@ -603,23 +861,23 @@ playbackToggle.addEventListener("click", (e) => {
 // it — see core/savedStates.ts for how disposal safety is preserved when
 // an asset is still referenced by a saved state. ---
 function gatherCurrentSaveInput(name: string): SavedStateInput {
-  const mediaAAsset = renderer.getMedia("A");
-  const mediaBAsset = renderer.getMedia("B");
   return {
     name,
     behaviorId: currentBehavior.id,
     params: { ...currentParams },
     registrationOn: renderer.isRegistrationEnabled(),
     bwOn: renderer.isBWEnabled(),
-    swapped: renderer.isSwapped(),
     aspect: currentAspect,
     playbackMode: currentPlaybackMode,
-    mediaA: mediaAAsset
-      ? { asset: mediaAAsset, transform: { ...renderer.getTransform("A") }, label: nameA.textContent ?? mediaAAsset.label }
-      : null,
-    mediaB: mediaBAsset
-      ? { asset: mediaBAsset, transform: { ...renderer.getTransform("B") }, label: nameB.textContent ?? mediaBAsset.label }
-      : null,
+    loopSeconds: renderer.getLoopSeconds(),
+    selectedId: renderer.getSelectedId(),
+    audioEnabled: renderer.isAudioEnabled(),
+    sources: renderer.getSequence().map((item) => ({
+      id: item.id,
+      asset: item.asset,
+      transform: { ...item.asset.transform },
+      label: item.asset.label,
+    })),
   };
 }
 
@@ -631,20 +889,25 @@ function loadSavedState(state: SavedState): void {
   renderer.setBWEnabled(state.bwOn);
   bwBtn.classList.toggle("active", state.bwOn);
 
-  if (renderer.isSwapped() !== state.swapped) renderer.swap();
-
   setAspect(state.aspect);
   setPlaybackModeUI(state.playbackMode);
+  renderer.setLoopSeconds(state.loopSeconds);
+  loopLengthUi.setSeconds(renderer.getLoopSeconds());
 
-  if (state.mediaA) {
-    loadMediaAsset("A", state.mediaA.asset, state.mediaA.label);
-    renderer.setTransform("A", { ...state.mediaA.transform });
-  }
-  if (state.mediaB) {
-    loadMediaAsset("B", state.mediaB.asset, state.mediaB.label);
-    renderer.setTransform("B", { ...state.mediaB.transform });
-  }
+  renderer.setSequence(
+    state.sources.map((s) => {
+      s.asset.transform = { ...s.transform };
+      s.asset.label = s.label;
+      return { id: s.id, asset: s.asset };
+    }),
+    state.selectedId,
+  );
+  renderer.setAudioEnabled(state.audioEnabled !== false);
+  syncAudioButton();
+  syncSourceInspector();
+  rebuildGraphicPanel();
   rebuildCompositionPanel();
+  sequenceStrip.refresh();
 }
 
 function renderSavedStatesList(): void {
@@ -719,7 +982,7 @@ function renderSavedStatesList(): void {
 saveStateBtn.addEventListener("click", () => {
   const treatmentDef = findTreatmentDef(currentBehavior);
   const treatmentLabelText = treatmentDef
-    ? (treatmentDef.options.find((o) => o.value === currentParams.treatment)?.label ?? "")
+    ? (visibleTreatmentOptions(treatmentDef, String(currentParams.treatment)).find((o) => o.value === currentParams.treatment)?.label ?? "")
     : "";
   const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const name = `${currentBehavior.name}${treatmentLabelText ? " · " + treatmentLabelText : ""} · ${stamp}`;
@@ -834,3 +1097,249 @@ resizeToStage();
 
 renderer.play();
 updatePlayPauseLabel();
+syncAudioButton();
+
+/** Product default: Media A × Field Core B, Bloom restrained-to-medium,
+ * Print on, B&W off. Not an extreme showcase. */
+const BLOOM_OPENING: ParamValues = {
+  fieldCount: 3,
+  fieldSize: 38,
+  softness: 80,
+  drift: 8,
+  overlap: 52,
+  revealAmount: 62,
+  resolveAmount: 46,
+  speed: 0.85,
+  treatment: "clean",
+  imageAware: "off",
+};
+
+/** Product default: 01 Media × 02 Field Core, Bloom restrained-to-medium,
+ * Print on, B&W off. Shown as the first two sequence items. */
+function applyProductDefault(): void {
+  const bloom = BEHAVIORS.find((b) => b.id === "bloom")!;
+  selectBehavior("bloom", { ...defaultParamValues(bloom.params), ...BLOOM_OPENING });
+  const { w, h } = aspectParts();
+  const media = wrapCanvasAsPlaceholder(placeholderA(), "01");
+  const field = createGraphicAsset(w, h, "02 Field", { ...FIELD_TERRITORIES.core });
+  renderer.setSequence(
+    [
+      { id: renderer.nextSourceId(), asset: media },
+      { id: renderer.nextSourceId(), asset: field },
+    ],
+    undefined,
+  );
+  const fieldItem = renderer.getSourceAt(1);
+  if (fieldItem) renderer.selectItem(fieldItem.id);
+  renderer.setLoopSeconds(12);
+  loopLengthUi.setSeconds(12);
+  syncSourceInspector();
+  rebuildGraphicPanel();
+  rebuildCompositionPanel();
+  sequenceStrip.refresh();
+  renderer.setRegistrationEnabled(true);
+  registrationBtn.classList.toggle("active", true);
+  renderer.setBWEnabled(false);
+  bwBtn.classList.toggle("active", false);
+  renderer.setAudioEnabled(true);
+  syncAudioButton();
+}
+
+applyProductDefault();
+
+Object.assign(window, {
+  __motionStudio: {
+    setProfiling: (on: boolean) => renderer.setProfiling(on),
+    lastProfile: () => renderer.lastProfile,
+    getPhase: () => renderer.getPhase(),
+    setHoldPhase: (phase: number) => {
+      renderer.setHoldPhase(phase);
+      phaseUi.setMode("hold");
+      phaseUi.setDisplayedPhase(phase);
+    },
+    setClockMode: (mode: "auto" | "hold") => {
+      renderer.setClockMode(mode);
+      phaseUi.setMode(mode);
+      phaseUi.setDisplayedPhase(renderer.getPhase());
+    },
+    getClockMode: () => renderer.getClockMode(),
+    isPlaying: () => renderer.isPlaying(),
+    getParams: () => ({ ...currentParams }),
+    setParams: (patch: ParamValues) => onParamsChange(patch),
+    selectBehavior: (id: string) => selectBehavior(id),
+    treatmentOptions: () =>
+      [...treatmentToggle.querySelectorAll("button")].map((b) => ({
+        value: b.getAttribute("data-value"),
+        label: b.textContent?.trim() ?? "",
+        active: b.classList.contains("active"),
+      })),
+    setRegistration: (on: boolean) => {
+      renderer.setRegistrationEnabled(on);
+      registrationBtn.classList.toggle("active", on);
+    },
+    setBW: (on: boolean) => {
+      renderer.setBWEnabled(on);
+      bwBtn.classList.toggle("active", on);
+    },
+    mediaInfo: () => renderer.mediaInfo(),
+    getCanvasSize: () => renderer.getCanvasSize(),
+    getSequence: () =>
+      renderer.getSequence().map((item, index) => ({
+        id: item.id,
+        index,
+        kind: item.asset.kind,
+        label: item.asset.label,
+        selected: item.id === renderer.getSelectedId(),
+      })),
+    getActivePair: () => renderer.getActivePair(),
+    setAudio: (on: boolean) => {
+      renderer.unlockAudio();
+      renderer.setAudioEnabled(on);
+      syncAudioButton();
+    },
+    isAudioEnabled: () => renderer.isAudioEnabled(),
+    setSeamCandidate: (mode: "A" | "B" | "C") => renderer.setSeamCandidate(mode),
+    getSeamCandidate: () => renderer.getSeamCandidate(),
+    setPlaybackMode: (mode: "loop" | "pingpong") => renderer.setPlaybackMode(mode),
+    getPlaybackMode: () => renderer.getPlaybackMode(),
+    getLoopSeconds: () => renderer.getLoopSeconds(),
+    setLoopSeconds: (seconds: number) => {
+      renderer.setLoopSeconds(seconds);
+      loopLengthUi.setSeconds(renderer.getLoopSeconds());
+    },
+    selectSource: (index: number) => {
+      const item = renderer.getSourceAt(index);
+      if (!item) return;
+      renderer.selectItem(item.id);
+      syncSourceInspector();
+      rebuildGraphicPanel();
+      rebuildCompositionPanel();
+      sequenceStrip.refresh();
+    },
+    addSource: (mode: "media" | "field" = "media") => {
+      addPlaceholderSource();
+      const item = selectedItem();
+      if (item && mode === "field") setSourceKind(item.id, "field");
+    },
+    removeSource: (index: number) => {
+      const item = renderer.getSourceAt(index);
+      if (!item) return;
+      renderer.selectItem(item.id);
+      sourceRemoveBtn.click();
+    },
+    reverseSequence: () => {
+      renderer.reverseSequence();
+      sequenceStrip.refresh();
+    },
+    setSlotSource: (slot: MediaSlot, mode: "media" | "field") => {
+      const item = renderer.getSourceAt(slot === "A" ? 0 : 1);
+      if (!item) return;
+      renderer.selectItem(item.id);
+      setSourceKind(item.id, mode);
+    },
+    setSourceKind: (index: number, mode: "media" | "field") => {
+      const item = renderer.getSourceAt(index);
+      if (!item) return;
+      renderer.selectItem(item.id);
+      setSourceKind(item.id, mode);
+    },
+    patchField: (slot: MediaSlot | number, patch: Record<string, unknown>) => {
+      const index = slot === "A" ? 0 : slot === "B" ? 1 : slot;
+      const g = asGraphic(renderer.getSourceAt(index)?.asset ?? null);
+      if (!g) return;
+      g.patchField(patch as never);
+      renderer.touchMedia();
+      sequenceStrip.refresh();
+    },
+    setFieldTerritory: (slot: MediaSlot | number, name: "quiet" | "core" | "dense") => {
+      const index = slot === "A" ? 0 : slot === "B" ? 1 : slot;
+      const g = asGraphic(renderer.getSourceAt(index)?.asset ?? null);
+      if (!g) return;
+      g.patchField({ ...FIELD_TERRITORIES[name] });
+      renderer.touchMedia();
+      rebuildGraphicPanel();
+      sequenceStrip.refresh();
+    },
+    getGraphic: (slot: MediaSlot | number) => {
+      const index = slot === "A" ? 0 : slot === "B" ? 1 : slot;
+      const g = asGraphic(renderer.getSourceAt(index)?.asset ?? null);
+      if (!g) return null;
+      return { field: { ...g.getField() } };
+    },
+    loadImageDataUrl: (slot: MediaSlot | number, dataUrl: string, label: string) =>
+      new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const index = slot === "A" ? 0 : slot === "B" ? 1 : slot;
+          let item = renderer.getSourceAt(index);
+          if (!item) {
+            addPlaceholderSource();
+            item = selectedItem();
+          }
+          if (!item) {
+            reject(new Error("No sequence item"));
+            return;
+          }
+          loadSourceAsset(item.id, {
+            kind: "image",
+            source: img,
+            naturalW: img.naturalWidth,
+            naturalH: img.naturalHeight,
+            label,
+            transform: defaultTransform(),
+          });
+          resolve();
+        };
+        img.onerror = () => reject(new Error(`Could not decode ${label}`));
+        img.src = dataUrl;
+      }),
+    loadImageAt: (index: number, dataUrl: string, label: string) =>
+      (window as unknown as { __motionStudio: { loadImageDataUrl: (s: number, u: string, l: string) => Promise<void> } })
+        .__motionStudio.loadImageDataUrl(index, dataUrl, label),
+    loadVideoUrl: (index: number, url: string, label: string) =>
+      new Promise<void>((resolve, reject) => {
+        const video = document.createElement("video");
+        video.muted = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.volume = 1;
+        video.preload = "auto";
+        renderer.getVideoHost().appendChild(video);
+        video.addEventListener(
+          "loadeddata",
+          () => {
+            while (renderer.getSequence().length <= index) addPlaceholderSource();
+            const item = renderer.getSourceAt(index);
+            if (!item) {
+              reject(new Error("No sequence item"));
+              return;
+            }
+            loadSourceAsset(item.id, {
+              kind: "video",
+              source: video,
+              naturalW: video.videoWidth,
+              naturalH: video.videoHeight,
+              label,
+              videoEl: video,
+              objectUrl: url,
+              transform: defaultTransform(),
+            });
+            resolve();
+          },
+          { once: true },
+        );
+        video.addEventListener("error", () => reject(new Error(`Could not decode ${label}`)), { once: true });
+        video.src = url;
+      }),
+    play: () => {
+      renderer.unlockAudio();
+      renderer.play();
+      updatePlayPauseLabel();
+      syncAudioButton();
+    },
+    pause: () => {
+      renderer.pause();
+      updatePlayPauseLabel();
+    },
+  },
+});
