@@ -37,11 +37,6 @@ function structuralSeed(p: ParamValues): number {
   return (fragment * 97 + spread * 257 + rhythm * 503 + 17) >>> 0;
 }
 
-function directionalSeed(p: ParamValues): number {
-  const direction = Math.round(p.direction as number);
-  return (structuralSeed(p) + direction * 8171) >>> 0;
-}
-
 export const shiftBehavior: MaskBehavior<ShiftBehaviorState> = {
   id: "shift",
   name: "Shift",
@@ -51,24 +46,23 @@ export const shiftBehavior: MaskBehavior<ShiftBehaviorState> = {
   createState(p: ParamValues): ShiftBehaviorState {
     const mode = p.treatment as string;
     const fragment = p.fragment as number;
-    const direction = p.direction as number;
     const spread = p.spread as number;
     const rhythm = p.rhythm as number;
     return {
       mode,
       slice: mode === "slice" ? buildSliceState(fragment, spread, rhythm, structuralSeed(p)) : null,
       drift: mode === "drift" ? buildDriftState(fragment, spread, rhythm, structuralSeed(p)) : null,
-      diffuse: mode === "diffuse" ? buildDiffuseState(fragment, direction, spread, rhythm, directionalSeed(p)) : null,
+      diffuse: mode === "diffuse" ? buildDiffuseState(fragment, structuralSeed(p)) : null,
     };
   },
   needsNewState(prev: ParamValues, next: ParamValues): boolean {
     if (prev.treatment !== next.treatment) return true;
-    if (prev.fragment !== next.fragment || prev.spread !== next.spread || prev.rhythm !== next.rhythm) return true;
-    // Direction is applied live at render time for Slice/Drift (a pure
-    // rotation / translate bias — nudging it never needs to reshuffle
-    // geometry), but Diffuse bakes it into each cell's own reveal timing,
-    // so only Diffuse needs a rebuild when it changes.
-    if (next.treatment === "diffuse" && prev.direction !== next.direction) return true;
+    if (prev.fragment !== next.fragment) return true;
+    // Direction/Spread/Rhythm are all applied live at render time for
+    // Diffuse now (its density field is a single continuous thing, not N
+    // independently-timed cells) — only Slice/Drift's fragment timings
+    // need a rebuild when Spread/Rhythm change.
+    if (next.treatment !== "diffuse" && (prev.spread !== next.spread || prev.rhythm !== next.rhythm)) return true;
     return false;
   },
   visibleParams(): ParamDef[] {
@@ -77,6 +71,8 @@ export const shiftBehavior: MaskBehavior<ShiftBehaviorState> = {
   renderMask(ctx, width, height, time, p, state): void {
     const globalPhase = computeGlobalPhase(time, p);
     const overlapFrac = Math.min(1, Math.max(0, (p.overlap as number) / 100));
+    const spreadFrac = Math.min(1, Math.max(0, (p.spread as number) / 100));
+    const rhythmFrac = Math.min(1, Math.max(0, (p.rhythm as number) / 100));
     const blurPx = 2 + overlapFrac * Math.min(width, height) * 0.03;
     const direction = p.direction as number;
     if (state.mode === "slice" && state.slice) {
@@ -84,7 +80,12 @@ export const shiftBehavior: MaskBehavior<ShiftBehaviorState> = {
     } else if (state.mode === "drift" && state.drift) {
       renderDriftPhaseField(ctx, width, height, state.drift, globalPhase, blurPx);
     } else if (state.mode === "diffuse" && state.diffuse) {
-      renderDiffusePhaseField(ctx, width, height, state.diffuse, globalPhase, overlapFrac, blurPx * 1.7 + 5);
+      // Deliberately a much gentler finishing blur than Slice/Drift use --
+      // the granular breakup here comes from the noise field's own
+      // resolution and contrast; a heavy blur pass would smooth that
+      // graininess right back into a soft blob, which is exactly the look
+      // this rebuild moved away from.
+      renderDiffusePhaseField(ctx, width, height, state.diffuse, globalPhase, direction, spreadFrac, rhythmFrac, overlapFrac, blurPx * 0.25 + 1.5, time);
     }
   },
   renderComposite(ctx, aLayer, bLayer, maskLayer, _boundaryLayer, width, height, time, p, state): void {

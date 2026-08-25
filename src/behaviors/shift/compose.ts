@@ -87,6 +87,24 @@ export function drawOverscanStretched(
   ctx.restore();
 }
 
+/** Scales `layer` about frame center by `scale` (which CAN be < 1) and
+ * draws it at `alpha`. Unlike drawOverscanTranslated/drawOverscanStretched,
+ * this does NOT guarantee full-frame coverage when scale < 1 — shrinking a
+ * layer inward necessarily leaves its outer edges empty. Only safe to use
+ * where the caller has already painted a correctly-registered fallback
+ * underneath (e.g. the shared full-bleed A base every Shift composite
+ * draws first), so the gap reveals real, correctly-aligned photographic
+ * content instead of a transparent hole. */
+export function drawScaled(ctx: CanvasRenderingContext2D, layer: CanvasImageSource, width: number, height: number, scale: number, alpha: number): void {
+  if (alpha <= 0.003) return;
+  ctx.save();
+  if (alpha < 1) ctx.globalAlpha = alpha;
+  ctx.translate(width / 2, height / 2);
+  ctx.scale(scale, scale);
+  ctx.drawImage(layer, -width / 2, -height / 2);
+  ctx.restore();
+}
+
 /** Draws `source` into `targetCtx` with a single blur pass — the one place
  * every expression softens its fragment/field edges, so there is exactly
  * one feathering knob (blur radius) shared across all three rather than

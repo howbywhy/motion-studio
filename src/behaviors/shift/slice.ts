@@ -1,29 +1,56 @@
-/** SLICE: not "A -> a moving band -> B" but multiple moments of the same
- * photograph coexisting spatially at once — the chronophotography
- * principle. A frozen frame at maximum transformation should read as a
- * genuinely new composition, not a transition caught mid-flight: one band
- * already predominantly B, its neighbour a 70/30 A/B state, another still
- * mostly A but visibly displaced, another carrying a faint trailing echo
- * of a less-transformed version of itself underneath its current state.
+/** SLICE: one photograph containing incompatible moments of the same
+ * subject — the chronophotography principle, pushed decisively rather than
+ * treated as displacement/glitch. A frozen frame at maximum transformation
+ * should read as an unusual PHOTOGRAPHIC TECHNIQUE (multiple-exposure,
+ * strobe photography), not a transition effect caught mid-flight.
  *
- * Each band therefore renders as a short stack of 2-3 progressively more
- * offset, progressively more B-blended copies of itself (not one flat
- * alpha fill) — the earliest, faintest copy near rest position and barely
- * blended, the last copy fully at the band's current blend ratio and
- * offset. Displacement and blend are driven by two DIFFERENT envelopes
- * sharing a center but not a width, so a band can be substantially
- * displaced while still mostly A, or nearly resolved while still faintly
- * displaced — the two never move in lockstep. Bands run at an arbitrary
- * angle (Direction, via one canvas rotation), stay in coherent spatial
- * order (a directional sweep, not a scattered stagger — see timing.ts),
- * and their boundaries undulate continuously so none of it reads as a
- * ruled line or a moving window. */
+ * Every band is permanently assigned one of four roles at build time, so
+ * "incompatible moments coexisting" actually varies band to band instead of
+ * being one uniform echo formula stamped across the whole frame:
+ *   held    - retains its original position; a legible, undisplaced
+ *             temporal state (this piece of the photo hasn't gone
+ *             anywhere, only WHEN it is has changed).
+ *   advance - decisively sampled from further along Direction: this band
+ *             shows a LATER position of the subject.
+ *   retreat - decisively sampled from earlier along Direction: this band
+ *             shows an EARLIER position of the subject.
+ *   overlap - two decisive moments visibly coexisting in the same band at
+ *             once, an impossible double exposure.
+ * Each role paints at most two fairly OPAQUE layers, never a fading stack
+ * of three-plus soft echoes — that reads as motion blur/glitch rather than
+ * distinct coexisting exposures, and it muddies the photographic
+ * information the brief asks to preserve. Bands run at an arbitrary angle
+ * (Direction, via one canvas rotation), stay in coherent spatial order (a
+ * directional sweep, not a scattered stagger — see timing.ts), and their
+ * boundaries undulate continuously so none of it reads as a ruled line or
+ * a moving window. */
 import { mulberry32 } from "../../core/rng";
 import { applyGrain, blurInto, drawOverscanTranslated, getScratch } from "./compose";
 import { distributeFragmentTimings, fragmentContinuum, fragmentPhase, type FragmentTiming, type GlobalPhase } from "./timing";
 import { clipToSequentialBand, randomWave, type WaveParams, type WavyCut } from "./wavy";
 
+export type SliceBandRole = "held" | "advance" | "retreat" | "overlap";
+
+const ROLE_WEIGHTS: [SliceBandRole, number][] = [
+  ["held", 0.3],
+  ["advance", 0.25],
+  ["retreat", 0.25],
+  ["overlap", 0.2],
+];
+
+function pickRole(rand: () => number): SliceBandRole {
+  const total = ROLE_WEIGHTS.reduce((s, [, w]) => s + w, 0);
+  let r = rand() * total;
+  for (const [role, w] of ROLE_WEIGHTS) {
+    if (r < w) return role;
+    r -= w;
+  }
+  return ROLE_WEIGHTS[ROLE_WEIGHTS.length - 1][0];
+}
+
 export interface SliceBand {
+  role: SliceBandRole;
+  magnitudeFrac: number; // per-band variation in how far advance/retreat/overlap reach
   alphaTiming: FragmentTiming; // drives the A->B blend ratio
   dispTiming: FragmentTiming; // same center, wider width -- displacement is active before/after the blend itself is
 }
@@ -60,7 +87,9 @@ export function buildSliceState(fragment: number, spread: number, rhythm: number
   const bands: SliceBand[] = alphaTimings.map((alphaTiming) => {
     const dispWidthMul = 1.35 + timingsRand() * 0.95; // 1.35..2.3 -- variable per-band lag/lead
     const dispTiming: FragmentTiming = { center: alphaTiming.center, width: Math.min(0.55, alphaTiming.width * dispWidthMul) };
-    return { alphaTiming, dispTiming };
+    const role = pickRole(timingsRand);
+    const magnitudeFrac = 0.65 + timingsRand() * 0.85;
+    return { role, magnitudeFrac, alphaTiming, dispTiming };
   });
   return { cuts, bands };
 }
@@ -126,13 +155,55 @@ export function renderSlicePhaseField(
   applyGrain(targetCtx, width, height);
 }
 
-const ECHO_OFFSET_FRACS = [0.3, 0.6, 1.0];
-const ECHO_OPACITIES = [0.22, 0.42, 0.82];
+/** Paints one band's content according to its role — this is where the
+ * four roles actually diverge. At most two fairly opaque layers each, so a
+ * paused frame reads as distinct coexisting exposures, not a fading
+ * motion-blur trail. */
+function paintBandContent(
+  cctx: CanvasRenderingContext2D,
+  aLayer: HTMLCanvasElement,
+  bLayer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  band: SliceBand,
+  alphaPhase: number,
+  dx: number,
+  dy: number
+): void {
+  switch (band.role) {
+    case "held": {
+      // Retains its original position -- a legible, undisplaced moment.
+      drawOverscanTranslated(cctx, aLayer, width, height, 0, 0, 1);
+      drawOverscanTranslated(cctx, bLayer, width, height, 0, 0, alphaPhase);
+      break;
+    }
+    case "advance": {
+      // Sampled decisively forward along Direction -- a LATER position.
+      drawOverscanTranslated(cctx, aLayer, width, height, dx, dy, 1);
+      drawOverscanTranslated(cctx, bLayer, width, height, dx, dy, alphaPhase);
+      break;
+    }
+    case "retreat": {
+      // Sampled decisively backward along Direction -- an EARLIER position.
+      drawOverscanTranslated(cctx, aLayer, width, height, -dx, -dy, 1);
+      drawOverscanTranslated(cctx, bLayer, width, height, -dx, -dy, alphaPhase);
+      break;
+    }
+    case "overlap": {
+      // Two decisive moments visibly coexisting -- an impossible double
+      // exposure, not a fading echo trail.
+      drawOverscanTranslated(cctx, aLayer, width, height, 0, 0, 1);
+      drawOverscanTranslated(cctx, bLayer, width, height, 0, 0, alphaPhase * 0.55);
+      drawOverscanTranslated(cctx, bLayer, width, height, dx, dy, alphaPhase * 0.9);
+      break;
+    }
+  }
+}
 
-/** The real composite: every band is a short stack of progressively more
- * offset, more B-blended copies rather than one flat reveal, so freezing
- * the frame at maximum transformation shows several distinct interpolation
- * states layered together with soft trailing echoes between them. */
+/** The real composite: every band renders its role's content once masked,
+ * so freezing the frame at maximum transformation shows several distinct,
+ * decisive interpolation states layered together rather than a blurred
+ * stack of soft echoes. */
 export function renderSliceComposite(
   ctx: CanvasRenderingContext2D,
   aLayer: HTMLCanvasElement,
@@ -151,7 +222,9 @@ export function renderSliceComposite(
   const dirRad = (directionDeg * Math.PI) / 180;
   const dirX = Math.cos(dirRad);
   const dirY = Math.sin(dirRad);
-  const maxDispPx = Math.min(width, height) * (0.035 + overlapFrac * 0.07);
+  // Meaningfully larger than a subtle nudge -- decisive temporal
+  // separation is the whole point of this behaviour.
+  const maxDispPx = Math.min(width, height) * (0.06 + overlapFrac * 0.16);
 
   const content = getScratch("slice-content", width, height);
   const cctx = content.getContext("2d")!;
@@ -163,19 +236,12 @@ export function renderSliceComposite(
     if (alphaPhase <= 0.003 && dispPhase <= 0.003) continue;
 
     const mask = buildBandMask(width, height, directionDeg, state.cuts, i, blurPx);
+    const disp = maxDispPx * band.magnitudeFrac * dispPhase;
+    const dx = dirX * disp;
+    const dy = dirY * disp;
 
     cctx.clearRect(0, 0, width, height);
-    for (let k = 0; k < ECHO_OFFSET_FRACS.length; k++) {
-      const f = ECHO_OFFSET_FRACS[k];
-      const dx = dirX * maxDispPx * dispPhase * f;
-      const dy = dirY * maxDispPx * dispPhase * f;
-      // Earlier (smaller-offset) copies are also less blended toward B —
-      // they read as fainter, less-transformed moments trailing behind
-      // the band's current state, not just a translated duplicate of it.
-      const echoBlend = Math.min(1, alphaPhase * (0.45 + f * 0.55));
-      drawOverscanTranslated(cctx, aLayer, width, height, dx, dy, ECHO_OPACITIES[k]);
-      drawOverscanTranslated(cctx, bLayer, width, height, dx, dy, ECHO_OPACITIES[k] * echoBlend);
-    }
+    paintBandContent(cctx, aLayer, bLayer, width, height, band, alphaPhase, dx, dy);
 
     cctx.save();
     cctx.globalCompositeOperation = "destination-in";
