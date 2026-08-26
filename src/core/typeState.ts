@@ -16,6 +16,7 @@ export interface TypeState {
   rhythm: number;
   weight: number;
   color: string;
+  opacity: number;
   x: number;
   y: number;
   inMotion: TypeInMotion;
@@ -40,10 +41,11 @@ export function defaultTypeState(): TypeState {
     valign: "center",
     mode: "responsive",
     scale: 50,
-    spread: 70,
+    spread: 50,
     rhythm: 28,
     weight: TYPE_WEIGHT_DEFAULT,
     color: "#f3efe6",
+    opacity: 100,
     x: 0,
     y: 0,
     inMotion: "rise",
@@ -90,6 +92,7 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
     rhythm: num(raw.rhythm, 0, 100, d.rhythm),
     weight: num(raw.weight, TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, d.weight),
     color,
+    opacity: num(raw.opacity, 0, 100, d.opacity),
     x: num(raw.x, -50, 50, d.x),
     y: num(raw.y, -50, 50, d.y),
     inMotion,

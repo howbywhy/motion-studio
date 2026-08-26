@@ -13,8 +13,9 @@
  *   COMPAT: Bloom treatment=registration still uses ring-clipped
  *   `paintRegistrationInkContent` for old saved states.
  *
- *   Type-only ink may reuse `paintRegistrationInkContent` on glyphs.
- *   It must not replace the photographic surface.
+ *   Typography is a clean silhouette. Global Registration is applied
+ *   after type, from plates prepared on the Bloom-only composed frame.
+ *   There is no type-only registration path.
  */
 import { sampleAverageColor, type RGB } from "./media";
 import { paintFieldPersistent, paintFieldReactive, prepareFieldPrintInk } from "./registrationFieldInk";
@@ -117,7 +118,7 @@ export function paintRegistrationInkContent(
 }
 
 /** Historical Bloom Registration treatment default (registrationAmount=40%).
- *  Used by the dormant treatment=registration path and by type-only ink. */
+ *  Used by the dormant treatment=registration COMPAT path only. */
 export const BLOOM_REGISTRATION_AMOUNT = 0.4;
 
 /** Reactive peak — matches historical Bloom Registration treatment default. */

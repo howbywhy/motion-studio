@@ -2,7 +2,7 @@ import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
-import { BASE_REGISTRATION_AMOUNT, BLOOM_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, getRegistrationStrategy, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
+import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, getRegistrationStrategy, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypography } from "./typeLayout";
 import { evaluateTypeMotion } from "./typeMotion";
@@ -1396,18 +1396,6 @@ export class Renderer {
       }
     }
     const tPrep = mark();
-    if (this.registrationOn) {
-      paintPersistentRegistration(composedCtx, this.composedLayer, width, height, BASE_REGISTRATION_AMOUNT);
-      paintReactiveRegistration(
-        composedCtx,
-        this.composedLayer,
-        this.maskLayer,
-        width,
-        height,
-        REACTIVE_REGISTRATION_AMOUNT,
-      );
-    }
-    const tReg = mark();
 
     const type = this.typeState;
     const layout = layoutTypography(type, width, height);
@@ -1420,9 +1408,22 @@ export class Renderer {
         layout.fontSize,
         width,
       );
-      paintTypeLayer(composedCtx, layout, motion, type.color, this.bLayer, this.registrationOn, BLOOM_REGISTRATION_AMOUNT);
+      paintTypeLayer(composedCtx, layout, motion, type.color, layout.opacity);
     }
     const tType = mark();
+
+    if (this.registrationOn) {
+      paintPersistentRegistration(composedCtx, this.composedLayer, width, height, BASE_REGISTRATION_AMOUNT);
+      paintReactiveRegistration(
+        composedCtx,
+        this.composedLayer,
+        this.maskLayer,
+        width,
+        height,
+        REACTIVE_REGISTRATION_AMOUNT,
+      );
+    }
+    const tReg = mark();
 
     this.ctx.clearRect(0, 0, width, height);
     this.ctx.drawImage(this.composedLayer, 0, 0);
@@ -1437,10 +1438,10 @@ export class Renderer {
         compositeMs: tComposite - tMask,
         resolveMs: tResolve - tComposite,
         printPrepMs: tPrep - tPrep0,
-        registrationMs: tReg - tPrep,
-        typeMs: tType - tReg,
+        typeMs: tType - tPrep,
+        registrationMs: tReg - tType,
         bwMs: tBw - tMedia,
-        outputMs: tOut - tType,
+        outputMs: tOut - tReg,
         totalMs: tOut - t0,
       };
     }

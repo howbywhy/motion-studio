@@ -21,6 +21,10 @@ export function loadSwitzer(): Promise<boolean> {
       document.fonts.add(ok);
       await document.fonts.load(`500 48px "${SWITZER_FAMILY}"`);
       loaded = document.fonts.check(`500 48px "${SWITZER_FAMILY}"`);
+      if (loaded) {
+        const { invalidateTypeLayout } = await import("./typeLayout");
+        invalidateTypeLayout();
+      }
       return loaded;
     } catch {
       loaded = false;

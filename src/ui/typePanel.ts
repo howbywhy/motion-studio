@@ -249,6 +249,7 @@ export function buildTypePanel(
 
   const type = group(container, "Type", true);
   const weight = slider(type, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, "", (v) => onChange({ weight: v }));
+  const opacity = slider(type, "Opacity", 0, 100, 1, initial.opacity, "", (v) => onChange({ opacity: v }));
   const colorRow = document.createElement("div");
   colorRow.className = "control-row bg-colour-row";
   const colorLab = document.createElement("label");
@@ -313,6 +314,8 @@ export function buildTypePanel(
       xy.set(s.x, s.y);
       weight.input.value = String(s.weight);
       weight.valueEl.textContent = String(s.weight);
+      opacity.input.value = String(s.opacity);
+      opacity.valueEl.textContent = String(s.opacity);
       color.value = s.color;
       markSeg(inSeg, s.inMotion);
       markSeg(outSeg, s.outMotion);

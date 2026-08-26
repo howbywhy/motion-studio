@@ -16,6 +16,7 @@ import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, defaultTypeState } from "./core/typeState";
+import { debugLinePlan, layoutTypography } from "./core/typeLayout";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
@@ -1452,6 +1453,22 @@ Object.assign(window, {
     setTypeState: (patch: Record<string, unknown>) => {
       renderer.patchTypeState(clampTypeState({ ...renderer.getTypeState(), ...patch }));
       typeUi.sync(renderer.getTypeState());
+    },
+    debugTypeLayout: (w?: number, h?: number) => {
+      const size = renderer.getCanvasSize();
+      const cw = w ?? size.width;
+      const ch = h ?? size.height;
+      const state = renderer.getTypeState();
+      const layout = layoutTypography(state, cw, ch);
+      return {
+        lines: debugLinePlan(state, cw, ch),
+        fontSize: layout?.fontSize ?? 0,
+        canvas: { w: cw, h: ch },
+        opacity: layout?.opacity ?? 0,
+        offsetX: layout?.offsetX ?? 0,
+        offsetY: layout?.offsetY ?? 0,
+        placed: layout?.lines.map((l) => ({ text: l.text, x: l.x, y: l.y, width: l.width, height: l.height })) ?? [],
+      };
     },
     lastFieldInk: () => renderer.lastFieldInk(),
     setAspect: (value: string) => setAspect(value),
