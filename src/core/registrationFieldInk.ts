@@ -1,14 +1,16 @@
 /** FIELD-informed global Registration.
  *
- * Coverage is derived from the photograph at low resolution: luminance,
- * edges, and a stable two-scale irregular grain — not a regular screen,
- * not per-frame noise, not black FIELD marks.
+ * Historical Print surface (e9e49f9): two related binary occupancy plates
+ * from coarse luminance, then a 140px image-derived tonal impression
+ * destination-in through those plates, source-over onto the photograph.
  *
- * Paint is a micro spatial slip of the photograph through that coverage,
- * so the impression is photographic information with imperfect ink, not a
- * clean displaced copy and not a colour filter.
+ * That is the printed/screened texture — not a photo blit through irregular
+ * coverage, not per-frame grain, not the Bloom halftone tile.
+ *
+ * Optional micro slip (strategy "offset") adds a restrained photographic
+ * plate disagreement on top of that historical surface.
  */
-import { hash2 } from "../sources/field";
+import { hash2, markCellPx } from "../sources/field";
 
 function makeCanvas(): HTMLCanvasElement {
   return document.createElement("canvas");
@@ -21,50 +23,108 @@ function sizeCanvas(c: HTMLCanvasElement, w: number, h: number): void {
   }
 }
 
+function clampByte(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
 const LUMA_W = 140;
+const REG_FREQ_A = 82;
+const REG_FREQ_B = 74;
 const SEED_A = 71;
 const SEED_B = 88;
+/** Per-frame follow for live/video colour. ~5 frames to settle. */
+const COLOR_FOLLOW = 0.2;
+/** Current-build micro slip, CSS pixels. Only used by strategy "offset". */
+const MICRO_SLIP_CSS = 1.6;
+const MICRO_SLIP_MIX_A = 0.12;
+const MICRO_SLIP_MIX_B = 0.08;
 
 let lumaCanvas: HTMLCanvasElement | null = null;
-let coverA: HTMLCanvasElement | null = null;
-let coverB: HTMLCanvasElement | null = null;
 let plateA: HTMLCanvasElement | null = null;
 let plateB: HTMLCanvasElement | null = null;
+let colorA: HTMLCanvasElement | null = null;
+let colorB: HTMLCanvasElement | null = null;
 let inkScratch: HTMLCanvasElement | null = null;
 let toneScratch: HTMLCanvasElement | null = null;
-let coverDataA: ImageData | null = null;
-let coverDataB: ImageData | null = null;
+let photoScratch: HTMLCanvasElement | null = null;
+let markScratch: HTMLCanvasElement | null = null;
+let stampData: ImageData | null = null;
+let colorDataA: ImageData | null = null;
+let colorDataB: ImageData | null = null;
+let smoothRgb: Float32Array | null = null;
 let prepared = false;
 let preparedW = 0;
 let preparedH = 0;
-let lastLivePrep = 0;
+let persistentCache: HTMLCanvasElement | null = null;
+let persistentCacheKey = "";
 
-/** Retained so older eval hooks do not throw. Production has one surface. */
+/** tonal = historical exact. offset = historical + micro photo slip. */
 export type RegistrationStrategy = "tonal" | "offset" | "edge";
-export function setRegistrationStrategy(_next: RegistrationStrategy): void {
+let strategy: RegistrationStrategy = "offset";
+
+export function setRegistrationStrategy(next: RegistrationStrategy): void {
+  if (next !== "tonal" && next !== "offset" && next !== "edge") return;
+  const mapped: RegistrationStrategy = next === "edge" ? "offset" : next;
+  if (mapped === strategy) return;
+  strategy = mapped;
   prepared = false;
+  persistentCacheKey = "";
 }
+
 export function getRegistrationStrategy(): RegistrationStrategy {
-  return "edge";
+  return strategy;
 }
 
-function grain(x: number, y: number, seed: number): number {
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const fx = x - x0;
-  const fy = y - y0;
-  const u = fx * fx * (3 - 2 * fx);
-  const v = fy * fy * (3 - 2 * fy);
-  const a = hash2(x0, y0, seed);
-  const b = hash2(x0 + 1, y0, seed);
-  const c = hash2(x0, y0 + 1, seed);
-  const d = hash2(x0 + 1, y0 + 1, seed);
-  return a + (b - a) * u + (c - a) * v + (d - b - c + a) * u * v;
+function neighbor4(on: Uint8Array, cols: number, rows: number, x: number, y: number): number {
+  let n = 0;
+  if (x > 0 && on[y * cols + x - 1]) n++;
+  if (x < cols - 1 && on[y * cols + x + 1]) n++;
+  if (y > 0 && on[(y - 1) * cols + x]) n++;
+  if (y < rows - 1 && on[(y + 1) * cols + x]) n++;
+  return n;
 }
 
-function luma(data: Uint8ClampedArray, w: number, x: number, y: number): number {
-  const i = (y * w + x) * 4;
-  return data[i]! * 0.2126 + data[i + 1]! * 0.7152 + data[i + 2]! * 0.0722;
+function buildMarks(cols: number, rows: number, occ: Float32Array, seed: number): Uint8Array {
+  const n = cols * rows;
+  const on = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (hash2(i % cols, (i / cols) | 0, seed) < occ[i]!) on[i] = 1;
+  }
+  const next = new Uint8Array(n);
+  next.set(on);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = y * cols + x;
+      if (on[i]) continue;
+      if (neighbor4(on, cols, rows, x, y) !== 1) continue;
+      if (hash2(x, y, seed + 17) < occ[i]! * 0.5) next[i] = 1;
+    }
+  }
+  return next;
+}
+
+/** Lattice occupancy scaled with nearest-neighbour — same solid cells as the
+ * historical full-resolution stamp, without a full-frame putImageData. */
+function stampMarks(canvas: HTMLCanvasElement, on: Uint8Array, cols: number, rows: number, cell: number): void {
+  if (!markScratch) markScratch = makeCanvas();
+  sizeCanvas(markScratch, cols, rows);
+  const mctx = markScratch.getContext("2d")!;
+  if (!stampData || stampData.width !== cols || stampData.height !== rows) {
+    stampData = mctx.createImageData(cols, rows);
+  } else {
+    stampData.data.fill(0);
+  }
+  const d = stampData.data;
+  for (let i = 0; i < on.length; i++) {
+    if (!on[i]) continue;
+    const o = i * 4;
+    d[o + 3] = 255;
+  }
+  mctx.putImageData(stampData, 0, 0);
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(markScratch, 0, 0, cols * cell, rows * cell);
 }
 
 function readLocal(source: HTMLCanvasElement): { data: Uint8ClampedArray; w: number; h: number } {
@@ -77,85 +137,161 @@ function readLocal(source: HTMLCanvasElement): { data: Uint8ClampedArray; w: num
   return { data: lctx.getImageData(0, 0, LUMA_W, smallH).data, w: LUMA_W, h: smallH };
 }
 
-function writeCoverage(
+function occupancyFromLocal(
   local: { data: Uint8ClampedArray; w: number; h: number },
-  canvas: HTMLCanvasElement,
-  cache: ImageData | null,
-  seed: number,
-  mass: number,
-): ImageData {
-  const { data, w, h } = local;
-  sizeCanvas(canvas, w, h);
-  const ctx = canvas.getContext("2d")!;
-  let img = cache;
-  if (!img || img.width !== w || img.height !== h) img = ctx.createImageData(w, h);
-  const d = img.data;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const yv = luma(data, w, x, y) / 255;
-      const x0 = Math.max(0, x - 1);
-      const x1 = Math.min(w - 1, x + 1);
-      const y0 = Math.max(0, y - 1);
-      const y1 = Math.min(h - 1, y + 1);
-      const edge =
-        (Math.abs(luma(data, w, x1, y) - luma(data, w, x0, y)) + Math.abs(luma(data, w, x, y1) - luma(data, w, x, y0))) /
-        510;
-      const mid = 4 * yv * (1 - yv);
-      const shadow = yv < 0.07 ? yv / 0.07 : 1;
-      const highlight = yv > 0.9 ? (1 - yv) / 0.1 : 1;
-      const structure = Math.min(1, (1 - yv) * 0.38 + edge * 0.82 + mid * 0.2);
-      const g1 = grain(x * 0.68, y * 0.68, seed);
-      const g2 = grain(x * 2.05, y * 2.05, seed + 17);
-      const irregular = 0.38 + 0.62 * (g1 * 0.58 + g2 * 0.42);
-      const a = Math.min(0.8, (0.035 + structure * mass * irregular) * shadow * highlight);
-      const i = (y * w + x) * 4;
-      d[i] = 255;
-      d[i + 1] = 255;
-      d[i + 2] = 255;
-      d[i + 3] = Math.round(a * 255);
+  cols: number,
+  rows: number,
+  scale: number,
+): Float32Array {
+  const occ = new Float32Array(cols * rows);
+  for (let y = 0; y < rows; y++) {
+    const sy = Math.min(local.h - 1, Math.floor(((y + 0.5) / rows) * local.h));
+    for (let x = 0; x < cols; x++) {
+      const sx = Math.min(local.w - 1, Math.floor(((x + 0.5) / cols) * local.w));
+      const i = (sy * local.w + sx) * 4;
+      const yv = (local.data[i]! * 0.2126 + local.data[i + 1]! * 0.7152 + local.data[i + 2]! * 0.0722) / 255;
+      const dark = 1 - yv;
+      const raw = Math.min(0.62, 0.018 + dark * scale);
+      occ[y * cols + x] = Math.round(raw * 40) / 40;
     }
   }
-  ctx.putImageData(img, 0, 0);
-  return img;
+  return occ;
 }
 
-function upscalePlate(src: HTMLCanvasElement, dest: HTMLCanvasElement, width: number, height: number): void {
-  sizeCanvas(dest, width, height);
-  const ctx = dest.getContext("2d")!;
-  ctx.clearRect(0, 0, width, height);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "medium";
-  ctx.drawImage(src, 0, 0, width, height);
+function protectMid(y: number): number {
+  const mid = 4 * y * (1 - y);
+  const shadow = y < 0.12 ? y / 0.12 : 1;
+  const highlight = y > 0.88 ? (1 - y) / 0.12 : 1;
+  return mid * shadow * highlight;
+}
+
+function writeToneMaps(
+  local: { data: Uint8ClampedArray; w: number; h: number },
+  live: boolean,
+  bw: boolean,
+): void {
+  const { w, h, data } = local;
+  const n = w * h;
+  if (!colorA) colorA = makeCanvas();
+  if (!colorB) colorB = makeCanvas();
+  sizeCanvas(colorA, w, h);
+  sizeCanvas(colorB, w, h);
+  const actx = colorA.getContext("2d")!;
+  const bctx = colorB.getContext("2d")!;
+  if (!colorDataA || colorDataA.width !== w || colorDataA.height !== h) {
+    colorDataA = actx.createImageData(w, h);
+    colorDataB = bctx.createImageData(w, h);
+    smoothRgb = new Float32Array(n * 3);
+    live = false;
+  }
+  const da = colorDataA.data;
+  const db = colorDataB!.data;
+  const sm = smoothRgb!;
+  const follow = live ? COLOR_FOLLOW : 1;
+  const keep = 1 - follow;
+
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    let r = data[i]!;
+    let g = data[i + 1]!;
+    let b = data[i + 2]!;
+    const s = p * 3;
+    sm[s] = sm[s]! * keep + r * follow;
+    sm[s + 1] = sm[s + 1]! * keep + g * follow;
+    sm[s + 2] = sm[s + 2]! * keep + b * follow;
+    r = sm[s]!;
+    g = sm[s + 1]!;
+    b = sm[s + 2]!;
+
+    const y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255;
+    const protect = protectMid(y);
+    const gray = y * 255;
+    const sat = bw ? 0 : 0.78;
+    const cr = gray + (r - gray) * sat;
+    const cg = gray + (g - gray) * sat;
+    const cb = gray + (b - gray) * sat;
+    const chroma = (Math.abs(r - g) + Math.abs(g - b) + Math.abs(b - r)) / 3;
+    const chromaGate = bw ? 0 : Math.min(1, chroma / 36) * protect;
+
+    const dA = -15.5 * protect;
+    const dB = 8.5 * protect;
+    const warm = 2.2 * chromaGate;
+    const cool = 1.6 * chromaGate;
+
+    da[i] = clampByte(cr + dA + warm, 10, 245);
+    da[i + 1] = clampByte(cg + dA + warm * 0.35, 10, 245);
+    da[i + 2] = clampByte(cb + dA - cool, 10, 245);
+    da[i + 3] = 255;
+
+    db[i] = clampByte(cr + dB - cool * 0.6, 10, 245);
+    db[i + 1] = clampByte(cg + dB, 10, 245);
+    db[i + 2] = clampByte(cb + dB + cool, 10, 245);
+    db[i + 3] = 255;
+  }
+  actx.putImageData(colorDataA, 0, 0);
+  bctx.putImageData(colorDataB!, 0, 0);
 }
 
 export function prepareFieldPrintInk(
   composed: HTMLCanvasElement,
   width: number,
   height: number,
-  _dpr: number,
+  dpr: number,
   live = false,
-  _bw = false,
+  bw = false,
 ): void {
-  if (live && prepared && preparedW === width && preparedH === height && performance.now() - lastLivePrep < 90) {
-    return;
-  }
-  if (!coverA) coverA = makeCanvas();
-  if (!coverB) coverB = makeCanvas();
   if (!plateA) plateA = makeCanvas();
   if (!plateB) plateB = makeCanvas();
+  sizeCanvas(plateA, width, height);
+  sizeCanvas(plateB, width, height);
+
+  const cellA = markCellPx(REG_FREQ_A, dpr);
+  const cellB = markCellPx(REG_FREQ_B, dpr);
+  const colsA = Math.ceil(width / cellA);
+  const rowsA = Math.ceil(height / cellA);
+  const colsB = Math.ceil(width / cellB);
+  const rowsB = Math.ceil(height / cellB);
 
   const local = readLocal(composed);
-  coverDataA = writeCoverage(local, coverA, coverDataA, SEED_A, 0.92);
-  coverDataB = writeCoverage(local, coverB, coverDataB, SEED_B, 0.62);
-  upscalePlate(coverA, plateA, width, height);
-  upscalePlate(coverB, plateB, width, height);
+  const occA = occupancyFromLocal(local, colsA, rowsA, 0.2);
+  const occB = occupancyFromLocal(local, colsB, rowsB, 0.12);
+  stampMarks(plateA, buildMarks(colsA, rowsA, occA, SEED_A), colsA, rowsA, cellA);
+  stampMarks(plateB, buildMarks(colsB, rowsB, occB, SEED_B), colsB, rowsB, cellB);
+  writeToneMaps(local, live, bw);
   prepared = true;
   preparedW = width;
   preparedH = height;
-  lastLivePrep = live ? performance.now() : 0;
+  persistentCacheKey = "";
 }
 
-function blitPhotoPlate(
+function blitTonalPlate(
+  dest: CanvasRenderingContext2D,
+  plate: HTMLCanvasElement,
+  color: HTMLCanvasElement,
+  width: number,
+  height: number,
+  dx: number,
+  dy: number,
+  mix: number,
+): void {
+  if (!toneScratch) toneScratch = makeCanvas();
+  sizeCanvas(toneScratch, width, height);
+  const tctx = toneScratch.getContext("2d")!;
+  tctx.clearRect(0, 0, width, height);
+  tctx.imageSmoothingEnabled = true;
+  tctx.drawImage(color, 0, 0, width, height);
+  tctx.globalCompositeOperation = "destination-in";
+  tctx.imageSmoothingEnabled = false;
+  tctx.drawImage(plate, dx, dy);
+  tctx.globalCompositeOperation = "source-over";
+  dest.save();
+  dest.globalAlpha = mix;
+  dest.globalCompositeOperation = "source-over";
+  dest.drawImage(toneScratch, 0, 0);
+  dest.restore();
+}
+
+function blitPhotoSlip(
   dest: CanvasRenderingContext2D,
   source: HTMLCanvasElement,
   plate: HTMLCanvasElement,
@@ -166,42 +302,48 @@ function blitPhotoPlate(
   mix: number,
 ): void {
   if (mix <= 0.001) return;
-  if (!toneScratch) toneScratch = makeCanvas();
-  sizeCanvas(toneScratch, width, height);
-  const tctx = toneScratch.getContext("2d")!;
+  if (!photoScratch) photoScratch = makeCanvas();
+  sizeCanvas(photoScratch, width, height);
+  const tctx = photoScratch.getContext("2d")!;
   tctx.clearRect(0, 0, width, height);
   tctx.imageSmoothingEnabled = true;
   tctx.drawImage(source, dx, dy);
   tctx.globalCompositeOperation = "destination-in";
+  tctx.imageSmoothingEnabled = false;
   tctx.drawImage(plate, dx, dy);
   tctx.globalCompositeOperation = "source-over";
   dest.save();
   dest.globalAlpha = mix;
   dest.globalCompositeOperation = "source-over";
-  dest.drawImage(toneScratch, 0, 0);
+  dest.drawImage(photoScratch, 0, 0);
   dest.restore();
 }
 
-function offsetPx(amount: number, dpr: number, reactive: boolean): number {
-  const css = reactive ? 1.8 + amount * 2.0 : 1.4 + amount * 4.2;
-  return css * Math.max(1, dpr);
+function blitTonalPlates(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  off: number,
+  mixA: number,
+  mixB: number,
+): void {
+  if (!prepared || !plateA || !plateB || !colorA || !colorB || preparedW !== width || preparedH !== height) return;
+  blitTonalPlate(ctx, plateA, colorA, width, height, off, -off * 0.35, mixA);
+  blitTonalPlate(ctx, plateB, colorB, width, height, -off, off * 0.35, mixB);
 }
 
-function blitPlates(
+function blitMicroSlip(
   ctx: CanvasRenderingContext2D,
   source: HTMLCanvasElement,
   width: number,
   height: number,
-  amount: number,
   dpr: number,
-  reactive: boolean,
 ): void {
-  if (!prepared || !plateA || !plateB || preparedW !== width || preparedH !== height) return;
-  const off = offsetPx(amount, dpr, reactive);
-  const mixA = reactive ? 0.55 : 0.42;
-  const mixB = reactive ? 0.38 : 0.26;
-  blitPhotoPlate(ctx, source, plateA, width, height, off, -off * 0.35, mixA);
-  blitPhotoPlate(ctx, source, plateB, width, height, -off, off * 0.35, mixB);
+  if (strategy !== "offset") return;
+  if (!prepared || !plateA || !plateB) return;
+  const off = MICRO_SLIP_CSS * Math.max(1, dpr);
+  blitPhotoSlip(ctx, source, plateA, width, height, off, -off * 0.35, MICRO_SLIP_MIX_A);
+  blitPhotoSlip(ctx, source, plateB, width, height, -off, off * 0.35, MICRO_SLIP_MIX_B);
 }
 
 export function paintFieldPersistent(
@@ -211,13 +353,30 @@ export function paintFieldPersistent(
   height: number,
   amount: number,
   dpr = 1,
+  live = false,
 ): void {
   if (amount <= 0.001) return;
+  const key = `${width}x${height}:${amount}:${preparedW}x${preparedH}:${strategy}:${dpr}`;
+  if (!live && persistentCache && persistentCacheKey === key) {
+    ctx.drawImage(persistentCache, 0, 0);
+    return;
+  }
   if (!inkScratch) inkScratch = makeCanvas();
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
-  blitPlates(ictx, source, width, height, amount, dpr, false);
+  blitTonalPlates(ictx, width, height, 0.7 + amount * 3, 0.34, 0.2);
+  blitMicroSlip(ictx, source, width, height, dpr);
+  if (!live) {
+    if (!persistentCache) persistentCache = makeCanvas();
+    sizeCanvas(persistentCache, width, height);
+    const pctx = persistentCache.getContext("2d")!;
+    pctx.clearRect(0, 0, width, height);
+    pctx.drawImage(inkScratch, 0, 0);
+    persistentCacheKey = key;
+  } else {
+    persistentCacheKey = "";
+  }
   ctx.drawImage(inkScratch, 0, 0);
 }
 
@@ -235,7 +394,8 @@ export function paintFieldReactive(
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
-  blitPlates(ictx, source, width, height, amount, dpr, true);
+  blitTonalPlates(ictx, width, height, 1.8 + amount * 5, 0.72, 0.48);
+  blitMicroSlip(ictx, source, width, height, dpr);
 
   ictx.save();
   ictx.globalCompositeOperation = "destination-in";

@@ -4,9 +4,9 @@
  *   states that still store treatment=registration. It is not exposed in
  *   the production UI.
  *
- *   The global layer is a photographic impression through image-derived
- *   irregular coverage, with a micro spatial offset. Persistent base,
- *   then reactive tent. */
+ *   The global layer is the historical Print surface: binary occupancy
+ *   plates + image-derived tonal impression, with an optional micro
+ *   photographic slip. Persistent base, then reactive tent. */
 import { sampleAverageColor, type RGB } from "./media";
 import { paintFieldPersistent, paintFieldReactive, prepareFieldPrintInk } from "./registrationFieldInk";
 
@@ -140,9 +140,8 @@ let globalBoundarySmall: HTMLCanvasElement | null = null;
 
 const BOUNDARY_SMALL_W = 200;
 
-/** Build FIELD registration plates from the composed frame. Occupancy is
- * cached until still media / pair changes; rebuilt every frame for live/video.
- * The photograph is blitted through those plates at paint time. */
+/** Build occupancy plates and local tone maps from the composed frame.
+ * Cached until still media / pair changes; rebuilt every frame for live/video. */
 export function prepareGlobalPrintInk(
   bLayer: HTMLCanvasElement,
   width: number,
@@ -211,8 +210,9 @@ export function paintPersistentRegistration(
   height: number,
   amount: number,
   dpr = 1,
+  live = false,
 ): void {
-  paintFieldPersistent(ctx, source, width, height, amount, dpr);
+  paintFieldPersistent(ctx, source, width, height, amount, dpr, live);
 }
 
 /** The reactive layer: the same ink formula, confined to wherever the

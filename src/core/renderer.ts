@@ -1382,7 +1382,15 @@ export class Renderer {
         this.behavior?.id === "shift" && this.params.treatment === "diffuse"
           ? REACTIVE_REGISTRATION_AMOUNT * 0.55
           : REACTIVE_REGISTRATION_AMOUNT;
-      paintPersistentRegistration(composedCtx, this.composedLayer, width, height, BASE_REGISTRATION_AMOUNT, this.dpr);
+      paintPersistentRegistration(
+        composedCtx,
+        this.composedLayer,
+        width,
+        height,
+        BASE_REGISTRATION_AMOUNT,
+        this.dpr,
+        this.hasLiveSource(),
+      );
       paintReactiveRegistration(composedCtx, this.composedLayer, this.maskLayer, width, height, reactive, this.dpr);
     }
     const tReg = mark();
