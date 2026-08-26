@@ -2,9 +2,7 @@ import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
-import { BLOOM_REGISTRATION_AMOUNT, getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
-import { paintRegistrationSurface } from "../behaviors/bloom/treatments";
-import { lastBloomFieldMap } from "../behaviors/bloom/index";
+import { BASE_REGISTRATION_AMOUNT, BLOOM_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, getRegistrationStrategy, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypography } from "./typeLayout";
 import { evaluateTypeMotion } from "./typeMotion";
@@ -169,6 +167,7 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
+  private printInkDirty = true;
   private typeState: TypeState = defaultTypeState();
   private bwMode: BwMode = "off";
   private previewDprCap = DEFAULT_PREVIEW_DPR_CAP;
@@ -912,7 +911,15 @@ export class Renderer {
     for (const item of this.items) fn(item);
   }
 
-  private invalidatePrintInk(): void {}
+  private invalidatePrintInk(): void {
+    this.printInkDirty = true;
+  }
+
+  private hasLiveSource(): boolean {
+    return [this.mediaA, this.mediaB].some(
+      (a) => Boolean(a?.videoEl) || a?.graphic?.getMotion() === "live",
+    );
+  }
 
   private hasAnyGraphic(): boolean {
     return this.items.some((item) => item.asset.kind === "graphic");
@@ -940,6 +947,7 @@ export class Renderer {
     const key = `${mapping.aIndex}/${mapping.bIndex}/${mapping.untreated ? "u" : "p"}`;
     if (key !== this.lastPairKey) {
       this.lastPairKey = key;
+      this.printInkDirty = true;
       if (!this.exporting) this.syncActiveVideos();
     }
   }
@@ -1009,6 +1017,7 @@ export class Renderer {
       g.paint(t);
       g.paintedAt = t;
       g.dirty = false;
+      this.printInkDirty = true;
     }
   }
 
@@ -1372,17 +1381,30 @@ export class Renderer {
     const mark = (): number => (this.profiling ? performance.now() : 0);
 
     const tPrep0 = mark();
+    if (this.registrationOn) {
+      if (this.hasLiveSource() || this.printInkDirty) {
+        prepareGlobalPrintInk(
+          this.bLayer,
+          width,
+          height,
+          this.dpr,
+          this.composedLayer,
+          this.hasLiveSource(),
+          this.bwMode === "both",
+        );
+        if (!this.hasLiveSource()) this.printInkDirty = false;
+      }
+    }
     const tPrep = mark();
     if (this.registrationOn) {
-      const map = lastBloomFieldMap();
-      paintRegistrationSurface(
+      paintPersistentRegistration(composedCtx, this.composedLayer, width, height, BASE_REGISTRATION_AMOUNT);
+      paintReactiveRegistration(
         composedCtx,
-        this.bLayer,
-        map?.fields ?? [],
+        this.composedLayer,
+        this.maskLayer,
         width,
         height,
-        BLOOM_REGISTRATION_AMOUNT,
-        this.bwMode === "both",
+        REACTIVE_REGISTRATION_AMOUNT,
       );
     }
     const tReg = mark();

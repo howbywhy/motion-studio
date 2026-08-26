@@ -1,16 +1,23 @@
 /** Registration: one product-facing global surface.
  *
- *   The ink formula is historical Bloom Registration
- *   (`paintRegistrationInkContent`): a high-contrast grayscale impression
- *   of B, a second impression tinted from B's average colour and offset
- *   the other way, plus a faint 8px halftone tile.
+ *   PRODUCT (global toggle) is the historical deployment's Registration
+ *   layer — the same mechanism the approved preview showed with Bloom
+ *   Clean + Registration ON:
+ *     prepareFieldPrintInk (occupancy plates + local tone maps)
+ *     → paintPersistent (full-frame, ~10%)
+ *     → paintReactive (mask-transition tent, ~40%)
  *
- *   Bloom composite stays Clean. Global Registration applies that ink on
- *   Bloom's sharp field rings after the Clean composite.
+ *   That is a continuous printed photographic impression, not Bloom's
+ *   per-field ring treatment.
  *
- *   Bloom treatment=registration remains a dormant saved-state path only.
+ *   COMPAT: Bloom treatment=registration still uses ring-clipped
+ *   `paintRegistrationInkContent` for old saved states.
+ *
+ *   Type-only ink may reuse `paintRegistrationInkContent` on glyphs.
+ *   It must not replace the photographic surface.
  */
 import { sampleAverageColor, type RGB } from "./media";
+import { paintFieldPersistent, paintFieldReactive, prepareFieldPrintInk } from "./registrationFieldInk";
 
 // --- shared halftone pattern + tint cache --------------------------------
 let halftonePattern: CanvasPattern | null = null;
@@ -109,13 +116,92 @@ export function paintRegistrationInkContent(
   sctx.restore();
 }
 
-/** Historical Bloom Registration treatment default (registrationAmount=40%). */
+/** Historical Bloom Registration treatment default (registrationAmount=40%).
+ *  Used by the dormant treatment=registration path and by type-only ink. */
 export const BLOOM_REGISTRATION_AMOUNT = 0.4;
 
-/** Retained so older eval hooks do not throw. Production is rings only. */
+/** Reactive peak — matches historical Bloom Registration treatment default. */
+export const REACTIVE_REGISTRATION_AMOUNT = 0.4;
+
+/** Persistent base — full-frame printed impression at rest (~20–30% of peak). */
+export const BASE_REGISTRATION_AMOUNT = 0.1;
+
+/** Retained so older eval hooks do not throw. Product global path is the
+ *  historical persistent+reactive surface, not a strategy selector. */
 export type RegistrationStrategy = "tonal" | "offset" | "edge" | "rings" | "tent";
 export function setRegistrationStrategy(_next: RegistrationStrategy): void {}
 export function getRegistrationStrategy(): RegistrationStrategy {
   return "rings";
+}
+
+function makeCanvas(): HTMLCanvasElement {
+  return document.createElement("canvas");
+}
+
+function sizeCanvas(c: HTMLCanvasElement, w: number, h: number): void {
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
+}
+
+let globalBoundarySmall: HTMLCanvasElement | null = null;
+const BOUNDARY_SMALL_W = 200;
+
+export function prepareGlobalPrintInk(
+  bLayer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  dpr = 1,
+  composed?: HTMLCanvasElement,
+  live = false,
+  bw = false,
+): void {
+  prepareFieldPrintInk(composed ?? bLayer, width, height, dpr, live, bw);
+}
+
+function buildBoundaryAlpha(maskLayer: HTMLCanvasElement, width: number, height: number): HTMLCanvasElement {
+  if (!globalBoundarySmall) globalBoundarySmall = makeCanvas();
+  const smallW = BOUNDARY_SMALL_W;
+  const smallH = Math.max(1, Math.round(smallW * (height / width)));
+  sizeCanvas(globalBoundarySmall, smallW, smallH);
+  const sctx = globalBoundarySmall.getContext("2d", { willReadFrequently: true })!;
+  sctx.clearRect(0, 0, smallW, smallH);
+  sctx.drawImage(maskLayer, 0, 0, smallW, smallH);
+  const img = sctx.getImageData(0, 0, smallW, smallH);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3] / 255;
+    const tent = 4 * a * (1 - a);
+    d[i] = 255;
+    d[i + 1] = 255;
+    d[i + 2] = 255;
+    d[i + 3] = Math.round(tent * 255);
+  }
+  sctx.putImageData(img, 0, 0);
+  return globalBoundarySmall;
+}
+
+export function paintPersistentRegistration(
+  ctx: CanvasRenderingContext2D,
+  _bLayer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  amount: number,
+): void {
+  paintFieldPersistent(ctx, width, height, amount);
+}
+
+export function paintReactiveRegistration(
+  ctx: CanvasRenderingContext2D,
+  _bLayer: HTMLCanvasElement,
+  maskLayer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  amount: number,
+): void {
+  if (amount <= 0.001) return;
+  const boundarySmall = buildBoundaryAlpha(maskLayer, width, height);
+  paintFieldReactive(ctx, maskLayer, boundarySmall, width, height, amount);
 }
 
