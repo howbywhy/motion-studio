@@ -3,6 +3,7 @@ import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk } from "./registrationInk";
+import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationFieldInk";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -137,6 +138,8 @@ export class Renderer {
   private readonly boundaryLayer = makeCanvas();
   private readonly bMasked = makeCanvas();
   private readonly composedLayer = makeCanvas();
+  private readonly resolveSmall = makeCanvas();
+  private readonly resolveGrow = makeCanvas();
 
   private width = 0;
   private height = 0;
@@ -482,6 +485,16 @@ export class Renderer {
    * whichever behavior has already composed the frame, identically
    * whatever behavior/treatment/media combination is active. Neither
    * touches media, mask, or behavior state in any way. */
+  setRegistrationStrategy(mode: RegistrationStrategy): void {
+    setGlobalRegistrationStrategy(mode);
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  getRegistrationStrategy(): RegistrationStrategy {
+    return getRegistrationStrategy();
+  }
+
   setRegistrationEnabled(on: boolean): void {
     this.registrationOn = on;
     this.invalidatePrintInk();
@@ -1204,6 +1217,15 @@ export class Renderer {
       maskCtx.save();
       this.behavior.renderMask(maskCtx, width, height, time, this.params, this.state, this.bLayer, this.aLayer);
       maskCtx.restore();
+      const intro = mapping.localPhase < 0.1 ? mapping.localPhase / 0.1 : 1;
+      if (intro < 0.999) {
+        const g = intro * intro * (3 - 2 * intro);
+        maskCtx.save();
+        maskCtx.globalCompositeOperation = "destination-in";
+        maskCtx.fillStyle = `rgba(255,255,255,${g})`;
+        maskCtx.fillRect(0, 0, width, height);
+        maskCtx.restore();
+      }
     }
 
     const hasBoundary = !!this.behavior?.renderBoundary;
@@ -1265,25 +1287,55 @@ export class Renderer {
     this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tMask, tComposite, tResolve);
   }
 
-  /** Sequence-only: expand B through a dilation of the existing behaviour
-   * mask. Isolated from Bloom's HOLD language. Not a full-frame opacity
-   * crossfade. */
+  /** Sequence-only: grow B through the existing behaviour mask so the pair
+   *  can arrive at whole B. Low-res blur approximates dilation — the
+   *  photograph stays sharp. Not a full-frame opacity crossfade. */
   private applySequenceResolve(composedCtx: CanvasRenderingContext2D, resolve: number): void {
     if (resolve < 0.008) return;
     const { width, height } = this;
-    const radius = resolve * 0.2 * Math.min(width, height);
+    const smallW = 160;
+    const smallH = Math.max(1, Math.round(smallW * (height / Math.max(1, width))));
+    if (this.resolveSmall.width !== smallW || this.resolveSmall.height !== smallH) {
+      this.resolveSmall.width = smallW;
+      this.resolveSmall.height = smallH;
+      this.resolveGrow.width = smallW;
+      this.resolveGrow.height = smallH;
+    }
+    const sctx = this.resolveSmall.getContext("2d", { willReadFrequently: true })!;
+    const gctx = this.resolveGrow.getContext("2d")!;
+    sctx.clearRect(0, 0, smallW, smallH);
+    sctx.imageSmoothingEnabled = true;
+    sctx.globalCompositeOperation = "source-over";
+    sctx.drawImage(this.maskLayer, 0, 0, smallW, smallH);
+    sctx.drawImage(this.maskLayer, 0, 0, smallW, smallH);
+
+    const grow = resolve * resolve;
+    const blurPx = grow * 48;
+    if (blurPx > 0.45) {
+      gctx.clearRect(0, 0, smallW, smallH);
+      gctx.filter = `blur(${blurPx.toFixed(2)}px)`;
+      gctx.drawImage(this.resolveSmall, 0, 0);
+      gctx.filter = "none";
+      sctx.drawImage(this.resolveGrow, 0, 0);
+    }
+
+    const img = sctx.getImageData(0, 0, smallW, smallH);
+    const data = img.data;
+    const cut = Math.round(Math.max(0, 1 - resolve * resolve * resolve) * 220);
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i]! > cut) data[i] = 255;
+    }
+    sctx.putImageData(img, 0, 0);
+
     const dctx = this.bMasked.getContext("2d")!;
     dctx.clearRect(0, 0, width, height);
     dctx.globalCompositeOperation = "source-over";
-    dctx.drawImage(this.maskLayer, 0, 0);
-    const steps = 8;
-    for (let i = 0; i < steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      dctx.drawImage(this.maskLayer, Math.cos(a) * radius, Math.sin(a) * radius);
-    }
-    dctx.globalCompositeOperation = "source-in";
     dctx.drawImage(this.bLayer, 0, 0);
+    dctx.globalCompositeOperation = "destination-in";
+    dctx.imageSmoothingEnabled = true;
+    dctx.drawImage(this.resolveSmall, 0, 0, width, height);
     dctx.globalCompositeOperation = "source-over";
+    dctx.imageSmoothingEnabled = false;
     composedCtx.drawImage(this.bMasked, 0, 0);
   }
 
@@ -1323,8 +1375,8 @@ export class Renderer {
         this.behavior?.id === "shift" && this.params.treatment === "diffuse"
           ? REACTIVE_REGISTRATION_AMOUNT * 0.55
           : REACTIVE_REGISTRATION_AMOUNT;
-      paintPersistentRegistration(composedCtx, this.bLayer, width, height, BASE_REGISTRATION_AMOUNT, this.hasLiveSource());
-      paintReactiveRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, reactive);
+      paintPersistentRegistration(composedCtx, this.composedLayer, width, height, BASE_REGISTRATION_AMOUNT, this.dpr);
+      paintReactiveRegistration(composedCtx, this.composedLayer, this.maskLayer, width, height, reactive, this.dpr);
     }
     const tReg = mark();
 

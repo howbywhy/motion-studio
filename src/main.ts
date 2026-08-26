@@ -1417,6 +1417,8 @@ Object.assign(window, {
       renderer.setRegistrationEnabled(on);
       registrationBtn.classList.toggle("active", on);
     },
+    setRegistrationStrategy: (mode: "tonal" | "offset" | "edge") => renderer.setRegistrationStrategy(mode),
+    getRegistrationStrategy: () => renderer.getRegistrationStrategy(),
     setBW: (on: boolean) => {
       renderer.setBwMode(on ? "both" : "off");
       syncBwToggle();

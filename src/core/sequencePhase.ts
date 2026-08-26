@@ -11,7 +11,7 @@
  *
  * Phase 10 candidates (switchable for eval, one production default):
  *   A  terminal-resolve — Bloom owns 0–0.70, then mask-expand toward B
- *   B  peak-hold-settle — peak by 0.58, hold, then authored mask settle
+ *   B  peak-hold-settle — peak by 0.52, hold to 0.72, then authored mask settle
  *   C  peak-hold-cut    — peak by 0.62, hold to the boundary, editorial cut
  *
  * Ping-pong reverses source order. Behaviour phase is never run backwards.
@@ -79,9 +79,10 @@ export function sequenceEnvelope(
     return { behaviorPhase: 0.5, resolve: 0 };
   }
 
-  // B — default: peak, hold, settle through the existing mask.
-  const peakAt = 0.58;
-  const holdUntil = 0.78;
+  // B — default: peak earlier, then authored mask settle that can
+  // actually reach whole B before the next pair's A takes over.
+  const peakAt = 0.52;
+  const holdUntil = 0.72;
   if (p <= peakAt) return { behaviorPhase: oneWayToPeak(p / peakAt), resolve: 0 };
   if (p <= holdUntil) return { behaviorPhase: 0.5, resolve: 0 };
   return { behaviorPhase: 0.5, resolve: smoothstep((p - holdUntil) / (1 - holdUntil)) };

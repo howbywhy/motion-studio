@@ -4,12 +4,11 @@
  *   in this file (paintRegistrationInkContent) — black + tinted separations
  *   plus a faint halftone, confined to each field's ring. Unchanged.
  *
- *   The global Print layer is FIELD-informed: two related mark plates as
- *   alpha, occupancy from coarse luminance, small spatial disagreement.
- *   Paint is an image-derived tonal impression (local colour, slightly
- *   displaced), not a black overlay. Persistent base, then reactive tent.
+ *   The global layer is FIELD-informed plates as occupancy, then a small
+ *   spatial slip of the photograph itself through those plates. Persistent
+ *   base, then reactive tent. Not a colour filter and not a black overlay.
  *
- * One product-facing Print toggle. No language selector. */
+ * One product-facing Registration toggle. No language selector. */
 import { sampleAverageColor, type RGB } from "./media";
 import { paintFieldPersistent, paintFieldReactive, prepareFieldPrintInk } from "./registrationFieldInk";
 
@@ -143,8 +142,9 @@ let globalBoundarySmall: HTMLCanvasElement | null = null;
 
 const BOUNDARY_SMALL_W = 200;
 
-/** Build FIELD registration plates and local tone maps from the composed
- * frame. Cached until still media changes; rebuilt every frame for live/video. */
+/** Build FIELD registration plates from the composed frame. Occupancy is
+ * cached until still media / pair changes; rebuilt every frame for live/video.
+ * The photograph is blitted through those plates at paint time. */
 export function prepareGlobalPrintInk(
   bLayer: HTMLCanvasElement,
   width: number,
@@ -208,13 +208,13 @@ export const BASE_REGISTRATION_AMOUNT = 0.1;
  * top of this, it never has to reintroduce it from zero. */
 export function paintPersistentRegistration(
   ctx: CanvasRenderingContext2D,
-  _bLayer: HTMLCanvasElement,
+  source: HTMLCanvasElement,
   width: number,
   height: number,
   amount: number,
-  live = false,
+  dpr = 1,
 ): void {
-  paintFieldPersistent(ctx, width, height, amount, live);
+  paintFieldPersistent(ctx, source, width, height, amount, dpr);
 }
 
 /** The reactive layer: the same ink formula, confined to wherever the
@@ -225,13 +225,14 @@ export function paintPersistentRegistration(
  * whatever the persistent base already put there. */
 export function paintReactiveRegistration(
   ctx: CanvasRenderingContext2D,
-  _bLayer: HTMLCanvasElement,
+  source: HTMLCanvasElement,
   maskLayer: HTMLCanvasElement,
   width: number,
   height: number,
-  amount: number
+  amount: number,
+  dpr = 1,
 ): void {
   if (amount <= 0.001) return;
   const boundarySmall = buildBoundaryAlpha(maskLayer, width, height);
-  paintFieldReactive(ctx, maskLayer, boundarySmall, width, height, amount);
+  paintFieldReactive(ctx, source, boundarySmall, width, height, amount, dpr);
 }
