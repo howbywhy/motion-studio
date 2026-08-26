@@ -2,8 +2,9 @@ import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
-import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk } from "./registrationInk";
-import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationFieldInk";
+import { BLOOM_REGISTRATION_AMOUNT, getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
+import { paintRegistrationSurface } from "../behaviors/bloom/treatments";
+import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -174,7 +175,6 @@ export class Renderer {
   private holdPhase = 0;
   private profiling = false;
   private loopActive = false;
-  private printInkDirty = true;
   private audioEnabled = true;
   /** Set by a user Play / Audio click. Boot autoplay stays muted so the
    * browser does not block video.play() before a gesture. */
@@ -892,9 +892,7 @@ export class Renderer {
     for (const item of this.items) fn(item);
   }
 
-  private invalidatePrintInk(): void {
-    this.printInkDirty = true;
-  }
+  private invalidatePrintInk(): void {}
 
   private hasAnyGraphic(): boolean {
     return this.items.some((item) => item.asset.kind === "graphic");
@@ -922,7 +920,6 @@ export class Renderer {
     const key = `${mapping.aIndex}/${mapping.bIndex}/${mapping.untreated ? "u" : "p"}`;
     if (key !== this.lastPairKey) {
       this.lastPairKey = key;
-      this.printInkDirty = true;
       if (!this.exporting) this.syncActiveVideos();
     }
   }
@@ -978,12 +975,6 @@ export class Renderer {
     }
   }
 
-  private hasLiveSource(): boolean {
-    return [this.mediaA, this.mediaB].some(
-      (a) => Boolean(a?.videoEl) || a?.graphic?.getMotion() === "live",
-    );
-  }
-
   private paintGraphics(): void {
     const selected = this.getSelectedItem()?.asset ?? null;
     const seen = new Set<MediaAsset>();
@@ -998,7 +989,6 @@ export class Renderer {
       g.paint(t);
       g.paintedAt = t;
       g.dirty = false;
-      this.printInkDirty = true;
     }
   }
 
@@ -1362,36 +1352,18 @@ export class Renderer {
     const mark = (): number => (this.profiling ? performance.now() : 0);
 
     const tPrep0 = mark();
-    if (this.registrationOn) {
-      if (this.hasLiveSource() || this.printInkDirty) {
-        prepareGlobalPrintInk(
-          this.bLayer,
-          width,
-          height,
-          this.dpr,
-          this.composedLayer,
-          this.hasLiveSource(),
-          this.bwMode === "both",
-        );
-        if (!this.hasLiveSource()) this.printInkDirty = false;
-      }
-    }
     const tPrep = mark();
     if (this.registrationOn) {
-      const reactive =
-        this.behavior?.id === "shift" && this.params.treatment === "diffuse"
-          ? REACTIVE_REGISTRATION_AMOUNT * 0.55
-          : REACTIVE_REGISTRATION_AMOUNT;
-      paintPersistentRegistration(
+      const map = lastBloomFieldMap();
+      paintRegistrationSurface(
         composedCtx,
-        this.composedLayer,
+        this.bLayer,
+        map?.fields ?? [],
         width,
         height,
-        BASE_REGISTRATION_AMOUNT,
-        this.dpr,
-        this.hasLiveSource(),
+        BLOOM_REGISTRATION_AMOUNT,
+        this.bwMode === "both",
       );
-      paintReactiveRegistration(composedCtx, this.composedLayer, this.maskLayer, width, height, reactive, this.dpr);
     }
     const tReg = mark();
 

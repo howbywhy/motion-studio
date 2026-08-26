@@ -1,3 +1,4 @@
+import { paintRegistrationInkContent } from "../../core/registrationInk";
 import type { ResolvedField } from "./fields";
 
 // --- pooled scratch canvases -------------------------------------------
@@ -187,11 +188,39 @@ export function paintRefraction(
 
 // --- REGISTRATION ---------------------------------------------------------
 
-/** Bloom-local plate slip: at each field's reveal ring, the two photographs
- * displace a few pixels in opposite directions. Confined to the ring, so
- * it belongs to Bloom's transformation — not a stronger global Registration,
- * not RGB split, not a full-frame print effect. Global Registration then
- * sits on top of this composite as the shared surface language. */
+/** Historical Bloom Registration ink, confined to each field's sharp reveal
+ * ring. Used by the global Registration toggle (Bloom stays Clean) and by
+ * the dormant treatment=registration saved-state path. */
+export function paintRegistrationSurface(
+  ctx: CanvasRenderingContext2D,
+  bLayer: HTMLCanvasElement,
+  fields: ResolvedField[],
+  width: number,
+  height: number,
+  amount: number,
+  bw = false,
+): void {
+  if (amount <= 0.001) return;
+  const { contentScratch: scratch, tintScratch } = getScratches(width, height);
+  const off = 2 + amount * 5;
+  for (const field of fields) {
+    const bbox = fieldBBox(field, 1.35, width, height);
+    if (bbox.w <= 1 || bbox.h <= 1) continue;
+    paintRingClipped(
+      ctx,
+      scratch,
+      field,
+      width,
+      height,
+      amount,
+      (sctx, ringBbox) => paintRegistrationInkContent(sctx, tintScratch, bLayer, ringBbox, off, bw),
+      true,
+    );
+  }
+}
+
+/** Dormant composite path for saved states that still store
+ * treatment=registration. Product UI does not expose this. */
 export function paintRegistration(
   ctx: CanvasRenderingContext2D,
   aLayer: HTMLCanvasElement,
@@ -203,27 +232,5 @@ export function paintRegistration(
   amount: number
 ): void {
   paintClean(ctx, aLayer, bLayer, maskLayer, width, height);
-  if (amount <= 0.001) return;
-
-  const { contentScratch: scratch } = getScratches(width, height);
-  const off = 0.8 + amount * 2.4;
-
-  for (const field of fields) {
-    paintRingClipped(
-      ctx,
-      scratch,
-      field,
-      width,
-      height,
-      amount,
-      (sctx) => {
-        sctx.drawImage(bLayer, off, -off * 0.35);
-        sctx.save();
-        sctx.globalAlpha = 0.55;
-        sctx.drawImage(aLayer, -off, off * 0.35);
-        sctx.restore();
-      },
-      true,
-    );
-  }
+  paintRegistrationSurface(ctx, bLayer, fields, width, height, amount);
 }
