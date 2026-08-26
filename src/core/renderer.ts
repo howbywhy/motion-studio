@@ -4,6 +4,12 @@ import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidat
 import { clampTransform, disposeMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk } from "./registrationInk";
 import {
+  applyFieldInk,
+  deriveFieldInk,
+  lastFieldInk,
+  type FieldInk,
+} from "./fieldInk";
+import {
   clampLoopPhase,
   clampLoopSeconds,
   LOOP_SECONDS_DEFAULT,
@@ -23,6 +29,7 @@ export type DiagnosticMode = "off" | "mask" | "boundary";
 export interface FrameProfile {
   graphicMs: number;
   mediaMs: number;
+  fieldInkMs: number;
   maskMs: number;
   compositeMs: number;
   resolveMs: number;
@@ -399,6 +406,10 @@ export class Renderer {
     return this.bwOn;
   }
 
+  lastFieldInk(): FieldInk | null {
+    return lastFieldInk();
+  }
+
   setBehavior<T>(behavior: MaskBehavior<T>, params: ParamValues): void {
     this.behavior = behavior as MaskBehavior<unknown>;
     this.params = params;
@@ -756,6 +767,27 @@ export class Renderer {
     }
   }
 
+  private photoInkKey(asset: MediaAsset): string {
+    const t = asset.transform;
+    return `${asset.kind}:${asset.label}:${t.scale}:${t.x}:${t.y}:${this.bwOn ? "bw" : "c"}`;
+  }
+
+  private applyPhotographicFieldInk(): void {
+    const a = this.mediaA;
+    const b = this.mediaB;
+    if (!a || !b) return;
+    const aField = a.kind === "graphic";
+    const bField = b.kind === "graphic";
+    const aPhoto = a.kind !== "graphic";
+    const bPhoto = b.kind !== "graphic";
+    if (aField && bPhoto) {
+      applyFieldInk(this.aLayer, deriveFieldInk(this.bLayer, this.photoInkKey(b), Boolean(b.videoEl), this.bwOn));
+    }
+    if (bField && aPhoto) {
+      applyFieldInk(this.bLayer, deriveFieldInk(this.aLayer, this.photoInkKey(a), Boolean(a.videoEl), this.bwOn));
+    }
+  }
+
   private drawMediaLayer(ctx: CanvasRenderingContext2D, asset: MediaAsset | null): void {
     ctx.clearRect(0, 0, this.width, this.height);
     if (asset) {
@@ -785,6 +817,8 @@ export class Renderer {
     this.drawMediaLayer(this.aLayer.getContext("2d")!, this.mediaA);
     this.drawMediaLayer(this.bLayer.getContext("2d")!, this.mediaB);
     const tMedia = mark();
+    this.applyPhotographicFieldInk();
+    const tInk = mark();
 
     if (mapping.untreated) {
       const maskCtx = this.maskLayer.getContext("2d")!;
@@ -792,7 +826,7 @@ export class Renderer {
       const composedCtx = this.composedLayer.getContext("2d")!;
       composedCtx.clearRect(0, 0, width, height);
       composedCtx.drawImage(this.aLayer, 0, 0);
-      this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tMedia, mark());
+      this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tInk, tInk, tInk, mark());
       return;
     }
 
@@ -861,7 +895,7 @@ export class Renderer {
     );
     this.applySequenceResolve(composedCtx, env.resolve);
     const tResolve = mark();
-    this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tMask, tComposite, tResolve);
+    this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tInk, tMask, tComposite, tResolve);
   }
 
   /** Sequence-only: expand B through a dilation of the existing behaviour
@@ -893,6 +927,7 @@ export class Renderer {
     t0: number,
     tGraphic: number,
     tMedia: number,
+    tInk: number,
     tMask: number,
     tComposite: number,
     tResolve = tComposite,
@@ -939,7 +974,8 @@ export class Renderer {
       this.lastProfile = {
         graphicMs: tGraphic - t0,
         mediaMs: tMedia - tGraphic,
-        maskMs: tMask - tMedia,
+        fieldInkMs: tInk - tMedia,
+        maskMs: tMask - tInk,
         compositeMs: tComposite - tMask,
         resolveMs: tResolve - tComposite,
         printPrepMs: tPrep - tPrep0,

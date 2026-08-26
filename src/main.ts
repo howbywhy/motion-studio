@@ -1181,6 +1181,7 @@ Object.assign(window, {
       renderer.setBWEnabled(on);
       bwBtn.classList.toggle("active", on);
     },
+    lastFieldInk: () => renderer.lastFieldInk(),
     mediaInfo: () => renderer.mediaInfo(),
     getCanvasSize: () => renderer.getCanvasSize(),
     getSequence: () =>
