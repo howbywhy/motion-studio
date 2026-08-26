@@ -47,6 +47,8 @@ let smoothRgb: Float32Array | null = null;
 let prepared = false;
 let preparedW = 0;
 let preparedH = 0;
+let persistentCache: HTMLCanvasElement | null = null;
+let persistentCacheKey = "";
 
 function neighbor4(on: Uint8Array, cols: number, rows: number, x: number, y: number): number {
   let n = 0;
@@ -242,6 +244,7 @@ export function prepareFieldPrintInk(
   prepared = true;
   preparedW = width;
   preparedH = height;
+  persistentCacheKey = "";
 }
 
 function blitTonalPlate(
@@ -289,13 +292,29 @@ export function paintFieldPersistent(
   width: number,
   height: number,
   amount: number,
+  live = false,
 ): void {
   if (amount <= 0.001) return;
+  const key = `${width}x${height}:${amount}:${preparedW}x${preparedH}`;
+  if (!live && persistentCache && persistentCacheKey === key) {
+    ctx.drawImage(persistentCache, 0, 0);
+    return;
+  }
   if (!inkScratch) inkScratch = makeCanvas();
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
   blitTonalPlates(ictx, width, height, 0.7 + amount * 3, 0.34, 0.2);
+  if (!live) {
+    if (!persistentCache) persistentCache = makeCanvas();
+    sizeCanvas(persistentCache, width, height);
+    const pctx = persistentCache.getContext("2d")!;
+    pctx.clearRect(0, 0, width, height);
+    pctx.drawImage(inkScratch, 0, 0);
+    persistentCacheKey = key;
+  } else {
+    persistentCacheKey = "";
+  }
   ctx.drawImage(inkScratch, 0, 0);
 }
 

@@ -40,6 +40,9 @@ export interface SavedState {
   frozen?: boolean;
   playing?: boolean;
   randomisationSeed?: number;
+  /** Selective B&W. Older saves used `bwOn` as a global output grayscale. */
+  bwMode?: "off" | "A" | "B" | "both";
+  placeholderBg?: string;
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;

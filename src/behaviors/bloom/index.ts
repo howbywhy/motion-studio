@@ -6,7 +6,6 @@ import { getImageAwareAttractors } from "./imageAware";
 
 const treatmentOptions = [
   { value: "clean", label: "Clean" },
-  { value: "refraction", label: "Refraction" },
   { value: "registration", label: "Registration" },
 ];
 

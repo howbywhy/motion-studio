@@ -26,6 +26,7 @@ import type { MaskBehavior, ParamValues } from "./types";
 export type { PlaybackMode, SequenceItem };
 export type MediaSlot = "A" | "B";
 export type DiagnosticMode = "off" | "mask" | "boundary";
+export type BwMode = "off" | "A" | "B" | "both";
 
 export interface FrameProfile {
   graphicMs: number;
@@ -36,11 +37,14 @@ export interface FrameProfile {
   resolveMs: number;
   printPrepMs: number;
   registrationMs: number;
+  bwMs: number;
   outputMs: number;
   totalMs: number;
 }
 
 const MAX_DPR = 2;
+/** Live preview cap. Export uses resizeExact at dpr 1 independently. */
+const DEFAULT_PREVIEW_DPR_CAP = 1.5;
 
 function makeCanvas(): HTMLCanvasElement {
   const c = document.createElement("canvas");
@@ -107,7 +111,8 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * and any area the mask doesn't touch simply shows A (never black, since A
  * always fully covers the frame).
  *
- * Sequence → active pair A/B → existing behaviour → Print → B&W → Output.
+ * Sequence → active pair A/B → Bloom → Registration → Output.
+ * Selective B&W is applied to A/B layers before Bloom.
  * Behaviours never see the sequence array. They still receive two layers.
  *
  * Whichever behavior produces the composite, it always renders into
@@ -155,7 +160,10 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
-  private bwOn = false;
+  private bwMode: BwMode = "off";
+  private previewDprCap = DEFAULT_PREVIEW_DPR_CAP;
+  private readonly bwScratch = makeCanvas();
+  private readonly bwCaches = new Map<string, HTMLCanvasElement>();
 
   onFrame: (() => void) | null = null;
 
@@ -224,7 +232,7 @@ export class Renderer {
   }
 
   resize(cssWidth: number, cssHeight: number): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.previewDprCap, MAX_DPR);
     const w = Math.max(1, Math.round(cssWidth * dpr));
     const h = Math.max(1, Math.round(cssHeight * dpr));
     if (w === this.width && h === this.height && dpr === this.dpr) return;
@@ -242,6 +250,7 @@ export class Renderer {
 
     this.syncGraphicRasters();
     this.invalidatePrintInk();
+    this.clearBwCache();
     this.renderFrame(); // repaint immediately so resize never shows a stale/blank frame
   }
 
@@ -331,6 +340,7 @@ export class Renderer {
     this.syncGraphicRasters();
     this.syncOneVideo(asset);
     this.bindActivePair();
+    this.clearBwCache();
     this.invalidatePrintInk();
     this.renderFrame();
     const shouldDispose = options?.disposePrevious ?? true;
@@ -398,6 +408,7 @@ export class Renderer {
     const asset = slot === "A" ? this.mediaA : this.mediaB;
     if (!asset) return;
     asset.transform = clampTransform(transform);
+    this.clearBwCache();
     this.invalidatePrintInk();
     this.renderFrame();
   }
@@ -411,6 +422,7 @@ export class Renderer {
     const asset = this.getSource(id);
     if (!asset) return;
     asset.transform = clampTransform(transform);
+    this.clearBwCache();
     this.invalidatePrintInk();
     this.renderFrame();
   }
@@ -447,6 +459,25 @@ export class Renderer {
     return this.diagnostic;
   }
 
+  setDiagnostic(mode: DiagnosticMode): void {
+    this.diagnostic = mode;
+    this.renderFrame();
+  }
+
+  setPreviewDprCap(cap: number): void {
+    const next = Math.min(MAX_DPR, Math.max(1, cap));
+    if (next === this.previewDprCap) return;
+    this.previewDprCap = next;
+    const cssW = parseFloat(this.visible.style.width) || this.width / Math.max(1, this.dpr);
+    const cssH = parseFloat(this.visible.style.height) || this.height / Math.max(1, this.dpr);
+    this.width = 0;
+    this.resize(cssW, cssH);
+  }
+
+  getPreviewDprCap(): number {
+    return this.previewDprCap;
+  }
+
   /** Global output-layer states — applied in `finalizeOutput` after
    * whichever behavior has already composed the frame, identically
    * whatever behavior/treatment/media combination is active. Neither
@@ -462,13 +493,23 @@ export class Renderer {
   }
 
   setBWEnabled(on: boolean): void {
-    this.bwOn = on;
+    this.setBwMode(on ? "both" : "off");
+  }
+
+  setBwMode(mode: BwMode): void {
+    if (this.bwMode === mode) return;
+    this.bwMode = mode;
+    this.clearBwCache();
     this.invalidatePrintInk();
     this.renderFrame();
   }
 
+  getBwMode(): BwMode {
+    return this.bwMode;
+  }
+
   isBWEnabled(): boolean {
-    return this.bwOn;
+    return this.bwMode !== "off";
   }
 
   lastFieldInk(): FieldInk | null {
@@ -842,8 +883,12 @@ export class Renderer {
     this.printInkDirty = true;
   }
 
+  private hasAnyGraphic(): boolean {
+    return this.items.some((item) => item.asset.kind === "graphic");
+  }
+
   private syncGraphicRasters(): void {
-    if (this.width < 1 || this.height < 1) return;
+    if (this.width < 1 || this.height < 1 || !this.hasAnyGraphic()) return;
     for (const item of this.items) {
       const g = item.asset.graphic;
       if (!g) continue;
@@ -866,6 +911,57 @@ export class Renderer {
       this.lastPairKey = key;
       this.printInkDirty = true;
       if (!this.exporting) this.syncActiveVideos();
+    }
+  }
+
+  private hasLiveGraphic(): boolean {
+    return [this.mediaA, this.mediaB].some((a) => a?.graphic?.getMotion() === "live");
+  }
+
+  private hasGraphicInPair(): boolean {
+    return [this.mediaA, this.mediaB].some((a) => a?.kind === "graphic");
+  }
+
+  private clearBwCache(): void {
+    this.bwCaches.clear();
+  }
+
+  private wantsBw(slot: "A" | "B"): boolean {
+    return this.bwMode === "both" || this.bwMode === slot;
+  }
+
+  private applySourceBw(layer: HTMLCanvasElement, asset: MediaAsset | null, slot: "A" | "B"): void {
+    if (!asset || !this.wantsBw(slot)) return;
+    const still = !asset.videoEl && asset.graphic?.getMotion() !== "live";
+    const key = still ? `${slot}:${this.photoInkKey(asset)}:${this.width}x${this.height}` : "";
+    if (still && key) {
+      const cached = this.bwCaches.get(key);
+      if (cached) {
+        const ctx = layer.getContext("2d")!;
+        ctx.clearRect(0, 0, this.width, this.height);
+        ctx.drawImage(cached, 0, 0);
+        return;
+      }
+    }
+    const scratch = this.bwScratch;
+    if (scratch.width !== this.width || scratch.height !== this.height) {
+      scratch.width = this.width;
+      scratch.height = this.height;
+    }
+    const sctx = scratch.getContext("2d")!;
+    sctx.filter = "grayscale(1)";
+    sctx.clearRect(0, 0, this.width, this.height);
+    sctx.drawImage(layer, 0, 0);
+    sctx.filter = "none";
+    const lctx = layer.getContext("2d")!;
+    lctx.clearRect(0, 0, this.width, this.height);
+    lctx.drawImage(scratch, 0, 0);
+    if (still && key) {
+      const cached = makeCanvas();
+      cached.width = this.width;
+      cached.height = this.height;
+      cached.getContext("2d")!.drawImage(scratch, 0, 0);
+      this.bwCaches.set(key, cached);
     }
   }
 
@@ -904,10 +1000,14 @@ export class Renderer {
    * pause/play, which clicks and can reset decoder state. */
   private syncActiveVideos(): void {
     const want = this.videosWantPlay();
+    const keep = new Set<HTMLVideoElement>();
+    if (this.mediaA?.videoEl) keep.add(this.mediaA.videoEl);
+    if (this.mediaB?.videoEl) keep.add(this.mediaB.videoEl);
+    if (this.audioAsset?.videoEl) keep.add(this.audioAsset.videoEl);
     for (const item of this.items) {
       const video = item.asset.videoEl;
       if (!video) continue;
-      if (want) void video.play().catch(() => undefined);
+      if (want && keep.has(video)) void video.play().catch(() => undefined);
       else video.pause();
     }
   }
@@ -929,7 +1029,7 @@ export class Renderer {
     this.lastTs = ts;
     if (!this.frozen) {
       if (this.clockMode === "auto") this.elapsed += dt;
-      this.graphicElapsed += dt;
+      if (this.hasLiveGraphic()) this.graphicElapsed += dt;
       this.renderFrame();
       this.syncAudio();
     }
@@ -1032,10 +1132,11 @@ export class Renderer {
 
   private photoInkKey(asset: MediaAsset): string {
     const t = asset.transform;
-    return `${asset.kind}:${asset.label}:${t.scale}:${t.x}:${t.y}:${this.bwOn ? "bw" : "c"}`;
+    return `${asset.kind}:${asset.label}:${t.scale}:${t.x}:${t.y}`;
   }
 
   private applyPhotographicFieldInk(): void {
+    if (!this.hasGraphicInPair()) return;
     const a = this.mediaA;
     const b = this.mediaB;
     if (!a || !b) return;
@@ -1044,10 +1145,10 @@ export class Renderer {
     const aPhoto = a.kind !== "graphic";
     const bPhoto = b.kind !== "graphic";
     if (aField && bPhoto) {
-      applyFieldInk(this.aLayer, deriveFieldInk(this.bLayer, this.photoInkKey(b), Boolean(b.videoEl), this.bwOn));
+      applyFieldInk(this.aLayer, deriveFieldInk(this.bLayer, this.photoInkKey(b), Boolean(b.videoEl), this.wantsBw("B")));
     }
     if (bField && aPhoto) {
-      applyFieldInk(this.bLayer, deriveFieldInk(this.aLayer, this.photoInkKey(a), Boolean(a.videoEl), this.bwOn));
+      applyFieldInk(this.bLayer, deriveFieldInk(this.aLayer, this.photoInkKey(a), Boolean(a.videoEl), this.wantsBw("A")));
     }
   }
 
@@ -1073,13 +1174,16 @@ export class Renderer {
     const mark = (): number => (this.profiling ? performance.now() : 0);
 
     this.bindActivePair();
-    this.paintGraphics();
+    if (this.hasAnyGraphic()) this.paintGraphics();
     const tGraphic = mark();
 
     const mapping = this.pairMapping();
     this.drawMediaLayer(this.aLayer.getContext("2d")!, this.mediaA);
     this.drawMediaLayer(this.bLayer.getContext("2d")!, this.mediaB);
     const tMedia = mark();
+    this.applySourceBw(this.aLayer, this.mediaA, "A");
+    this.applySourceBw(this.bLayer, this.mediaB, "B");
+    const tBw = mark();
     this.applyPhotographicFieldInk();
     const tInk = mark();
 
@@ -1089,7 +1193,7 @@ export class Renderer {
       const composedCtx = this.composedLayer.getContext("2d")!;
       composedCtx.clearRect(0, 0, width, height);
       composedCtx.drawImage(this.aLayer, 0, 0);
-      this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tInk, tInk, tInk, mark());
+      this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tInk, tInk, mark());
       return;
     }
 
@@ -1158,7 +1262,7 @@ export class Renderer {
     );
     this.applySequenceResolve(composedCtx, env.resolve);
     const tResolve = mark();
-    this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tInk, tMask, tComposite, tResolve);
+    this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tMask, tComposite, tResolve);
   }
 
   /** Sequence-only: expand B through a dilation of the existing behaviour
@@ -1190,6 +1294,7 @@ export class Renderer {
     t0: number,
     tGraphic: number,
     tMedia: number,
+    tBw: number,
     tInk: number,
     tMask: number,
     tComposite: number,
@@ -1207,7 +1312,7 @@ export class Renderer {
           this.dpr,
           this.composedLayer,
           this.hasLiveSource(),
-          this.bwOn,
+          this.bwMode === "both",
         );
         if (!this.hasLiveSource()) this.printInkDirty = false;
       }
@@ -1218,31 +1323,26 @@ export class Renderer {
         this.behavior?.id === "shift" && this.params.treatment === "diffuse"
           ? REACTIVE_REGISTRATION_AMOUNT * 0.55
           : REACTIVE_REGISTRATION_AMOUNT;
-      paintPersistentRegistration(composedCtx, this.bLayer, width, height, BASE_REGISTRATION_AMOUNT);
+      paintPersistentRegistration(composedCtx, this.bLayer, width, height, BASE_REGISTRATION_AMOUNT, this.hasLiveSource());
       paintReactiveRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, reactive);
     }
     const tReg = mark();
 
     this.ctx.clearRect(0, 0, width, height);
-    if (this.bwOn) {
-      this.ctx.filter = "grayscale(1)";
-      this.ctx.drawImage(this.composedLayer, 0, 0);
-      this.ctx.filter = "none";
-    } else {
-      this.ctx.drawImage(this.composedLayer, 0, 0);
-    }
+    this.ctx.drawImage(this.composedLayer, 0, 0);
     const tOut = mark();
 
     if (this.profiling) {
       this.lastProfile = {
         graphicMs: tGraphic - t0,
         mediaMs: tMedia - tGraphic,
-        fieldInkMs: tInk - tMedia,
+        fieldInkMs: tInk - tBw,
         maskMs: tMask - tInk,
         compositeMs: tComposite - tMask,
         resolveMs: tResolve - tComposite,
         printPrepMs: tPrep - tPrep0,
         registrationMs: tReg - tPrep,
+        bwMs: tBw - tMedia,
         outputMs: tOut - tReg,
         totalMs: tOut - t0,
       };

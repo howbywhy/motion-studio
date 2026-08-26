@@ -1,4 +1,3 @@
-import { paintRegistrationInkContent } from "../../core/registrationInk";
 import type { ResolvedField } from "./fields";
 
 // --- pooled scratch canvases -------------------------------------------
@@ -188,15 +187,11 @@ export function paintRefraction(
 
 // --- REGISTRATION ---------------------------------------------------------
 
-/** Print/graphic: right at each field's boundary ring, the emerging photo
- * momentarily separates into two mis-registered "inks" — a hard black
- * contrast pass and a pass tinted from the photograph's own average color
- * — plus a faint halftone screen, all confined to the ring and fading out
- * as the field matures, so it reads as a transitional print-reproduction
- * state rather than a permanent filter. The ink itself (what it looks
- * like) is shared with the global Registration output-layer toggle — see
- * core/registrationInk.ts; only the per-field ring confinement is Bloom's
- * own, since it comes from field geometry the global layer doesn't have. */
+/** Bloom-local plate slip: at each field's reveal ring, the two photographs
+ * displace a few pixels in opposite directions. Confined to the ring, so
+ * it belongs to Bloom's transformation — not a stronger global Registration,
+ * not RGB split, not a full-frame print effect. Global Registration then
+ * sits on top of this composite as the shared surface language. */
 export function paintRegistration(
   ctx: CanvasRenderingContext2D,
   aLayer: HTMLCanvasElement,
@@ -210,13 +205,10 @@ export function paintRegistration(
   paintClean(ctx, aLayer, bLayer, maskLayer, width, height);
   if (amount <= 0.001) return;
 
-  const { contentScratch: scratch, tintScratch } = getScratches(width, height);
-  const off = 2 + amount * 5;
+  const { contentScratch: scratch } = getScratches(width, height);
+  const off = 0.8 + amount * 2.4;
 
   for (const field of fields) {
-    const bbox = fieldBBox(field, 1.35, width, height);
-    if (bbox.w <= 1 || bbox.h <= 1) continue;
-
     paintRingClipped(
       ctx,
       scratch,
@@ -224,8 +216,14 @@ export function paintRegistration(
       width,
       height,
       amount,
-      (sctx, ringBbox) => paintRegistrationInkContent(sctx, tintScratch, bLayer, ringBbox, off),
-      true
+      (sctx) => {
+        sctx.drawImage(bLayer, off, -off * 0.35);
+        sctx.save();
+        sctx.globalAlpha = 0.55;
+        sctx.drawImage(aLayer, -off, off * 0.35);
+        sctx.restore();
+      },
+      true,
     );
   }
 }

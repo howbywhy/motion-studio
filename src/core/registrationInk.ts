@@ -211,9 +211,10 @@ export function paintPersistentRegistration(
   _bLayer: HTMLCanvasElement,
   width: number,
   height: number,
-  amount: number
+  amount: number,
+  live = false,
 ): void {
-  paintFieldPersistent(ctx, width, height, amount);
+  paintFieldPersistent(ctx, width, height, amount, live);
 }
 
 /** The reactive layer: the same ink formula, confined to wherever the

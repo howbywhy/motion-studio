@@ -56,6 +56,8 @@ export interface MediaAsset {
   objectUrl?: string;
   transform: MediaTransform;
   graphic?: GraphicDriver;
+  /** True while this asset is still the generated placeholder drawing. */
+  placeholder?: boolean;
   /** Sticky soundtrack probe. Videos start unknown so they can own
    *  audio immediately; silent files flip to "no" after a short play. */
   soundtrack?: "unknown" | "yes" | "no";
@@ -188,5 +190,13 @@ export function disposeMediaAsset(asset: MediaAsset | null | undefined): void {
 }
 
 export function wrapCanvasAsPlaceholder(canvas: HTMLCanvasElement, label: string): MediaAsset {
-  return { kind: "image", source: canvas, naturalW: canvas.width, naturalH: canvas.height, label, transform: defaultTransform() };
+  return {
+    kind: "image",
+    source: canvas,
+    naturalW: canvas.width,
+    naturalH: canvas.height,
+    label,
+    transform: defaultTransform(),
+    placeholder: true,
+  };
 }

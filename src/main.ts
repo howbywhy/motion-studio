@@ -1,6 +1,6 @@
 import "./style.css";
-import { Renderer, type DiagnosticMode, type MediaSlot } from "./core/renderer";
-import { placeholderA } from "./core/placeholder";
+import { Renderer, type BwMode, type DiagnosticMode, type MediaSlot } from "./core/renderer";
+import { isDefaultPlaceholderBg, placeholderA, PLACEHOLDER_DEFAULT_BG } from "./core/placeholder";
 import { wrapCanvasAsPlaceholder, defaultTransform, type MediaAsset, type MediaKind } from "./core/media";
 import { loadMediaFile } from "./ui/mediaInput";
 import type { ExportFormat, ExportFps, ExportQuality, ExportSize } from "./core/exportTypes";
@@ -12,14 +12,14 @@ import { buildSequenceStrip } from "./ui/sequenceStrip";
 import { buildSpreadControl } from "./ui/spreadControl";
 import { buildFragmentControl } from "./ui/fragmentControl";
 import { buildBloomFieldMap } from "./ui/bloomFieldMap";
-import { buildGraphicPanel, hideGraphicPanel } from "./ui/graphicPanel";
+import { hideGraphicPanel } from "./ui/graphicPanel";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
-import { BEHAVIORS } from "./behaviors/index";
+import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
 import { SHIFT_EXPRESSION_COPY } from "./behaviors/shift";
 import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
-import { generateRandomisation, newRandomisationSeed, type FieldExploreState } from "./core/randomise";
+import { generateRandomisation, newRandomisationSeed } from "./core/randomise";
 import type { ClockMode } from "./core/phaseClock";
 import {
   createSavedState,
@@ -40,16 +40,16 @@ app.innerHTML = `
       <div class="brand">Motion Studio <span class="brand-sub">—</span></div>
       <div class="topbar-right">
         <div class="behavior-tabs" id="behavior-tabs"></div>
-        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global output layer: Print — the misregistered ink surface over the complete composition, whatever behaviour is active">
-          Print
+        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global surface language: Registration — a quiet material impression over the complete composition">
+          Registration
         </button>
-        <button type="button" class="diagnostic-toggle" id="bw-toggle" title="Global output layer: render the final composition in monochrome">
-          B&amp;W
-        </button>
-        <span class="topbar-divider" aria-hidden="true"></span>
-        <button type="button" class="diagnostic-toggle demoted" id="show-mask" title="Diagnostic: display the raw alpha mask instead of the composited media">
-          Show Mask
-        </button>
+        <div class="seg-toggle bw-toggle" id="bw-toggle" title="Selective B&amp;W on the active pair, applied before Bloom">
+          <span class="bw-label">B&amp;W</span>
+          <button type="button" data-value="off" class="active">Off</button>
+          <button type="button" data-value="A">A</button>
+          <button type="button" data-value="B">B</button>
+          <button type="button" data-value="both">Both</button>
+        </div>
       </div>
     </header>
     <main class="workspace">
@@ -57,10 +57,6 @@ app.innerHTML = `
         <div class="sequence-panel">
           <div id="sequence-strip" class="sequence-strip"></div>
           <div class="source-inspector" id="source-inspector">
-            <div class="seg-toggle source-kind-toggle" id="source-kind">
-              <button type="button" data-value="media" class="active">Media</button>
-              <button type="button" data-value="field">Field</button>
-            </div>
             <button type="button" class="load-media-btn" id="btn-replace">Replace</button>
             <div class="source-inspector-meta">
               <span class="media-slot-name" id="source-name">—</span>
@@ -89,7 +85,7 @@ app.innerHTML = `
           <button id="play-pause" class="primary" title="Pause or resume source video. Independent of Phase Auto/Hold.">Pause</button>
           <button type="button" class="diagnostic-toggle" id="audio-toggle" title="Hear source video audio, or mute. Independent of HOLD.">Audio</button>
           <button id="swap" title="Reverse the source sequence">Reverse</button>
-          <button type="button" id="randomise" title="Curated variation of the current behaviour, frozen as a still">Randomise</button>
+          <button type="button" id="randomise" title="Curated Bloom variation, frozen as a still">Randomise</button>
           <button type="button" id="randomise-undo" disabled title="Restore the previous composition">Undo</button>
         </div>
         <div class="export-panel" id="export-panel">
@@ -130,6 +126,11 @@ app.innerHTML = `
             </div>
             <div id="composition-controls"></div>
             <button type="button" class="reset-btn" id="composition-reset">Reset</button>
+            <div class="bg-colour-row" id="bg-colour-row">
+              <label for="bg-colour">Background</label>
+              <input type="color" id="bg-colour" value="#8a5a3a" title="Placeholder background colour" />
+              <button type="button" class="reset-btn" id="bg-colour-reset" title="Restore the default background colour">Reset</button>
+            </div>
           </div>
         <div class="graphic-panel" id="graphic-panel" hidden></div>
         <div class="behavior-meta">
@@ -177,21 +178,20 @@ const swapBtn = document.querySelector<HTMLButtonElement>("#swap")!;
 const aspectToggle = document.querySelector<HTMLDivElement>("#aspect-toggle")!;
 const playbackToggle = document.querySelector<HTMLDivElement>("#playback-toggle")!;
 const sourceInspector = document.querySelector<HTMLDivElement>("#source-inspector")!;
-const sourceKindToggle = document.querySelector<HTMLDivElement>("#source-kind")!;
 const replaceBtn = document.querySelector<HTMLButtonElement>("#btn-replace")!;
 const sourceName = document.querySelector<HTMLSpanElement>("#source-name")!;
 const sourceType = document.querySelector<HTMLSpanElement>("#source-type")!;
 const sourceRemoveBtn = document.querySelector<HTMLButtonElement>("#source-remove")!;
-const showMaskBtn = document.querySelector<HTMLButtonElement>("#show-mask")!;
 const registrationBtn = document.querySelector<HTMLButtonElement>("#registration-toggle")!;
-const bwBtn = document.querySelector<HTMLButtonElement>("#bw-toggle")!;
+const bwToggle = document.querySelector<HTMLDivElement>("#bw-toggle")!;
 const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
 const treatmentLabel = document.querySelector<HTMLLabelElement>("#treatment-label")!;
 const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggle")!;
 const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!;
-const compositionPanel = document.querySelector<HTMLDivElement>("#composition-panel")!;
 const compositionControlsEl = document.querySelector<HTMLDivElement>("#composition-controls")!;
 const compositionResetBtn = document.querySelector<HTMLButtonElement>("#composition-reset")!;
+const bgColourInput = document.querySelector<HTMLInputElement>("#bg-colour")!;
+const bgColourResetBtn = document.querySelector<HTMLButtonElement>("#bg-colour-reset")!;
 const graphicPanelEl = document.querySelector<HTMLDivElement>("#graphic-panel")!;
 const presetPanel = document.querySelector<HTMLDivElement>("#preset-panel")!;
 const presetLabel = document.querySelector<HTMLLabelElement>("#preset-label")!;
@@ -209,6 +209,7 @@ const exportSizeToggle = document.querySelector<HTMLDivElement>("#export-size")!
 const exportQualityToggle = document.querySelector<HTMLDivElement>("#export-quality")!;
 
 const renderer = new Renderer(canvas);
+let placeholderBg = PLACEHOLDER_DEFAULT_BG;
 
 const phaseUi = buildPhaseControl(
   document.querySelector<HTMLDivElement>("#phase-control")!,
@@ -246,13 +247,7 @@ function showSourceMeta(label: string, kind: MediaKind, error?: boolean): void {
 
 function syncSourceInspector(): void {
   const item = selectedItem();
-  const graphic = asGraphic(item?.asset ?? null);
-  sourceInspector.classList.toggle("source-graphic", Boolean(graphic));
-  replaceBtn.hidden = Boolean(graphic);
-  sourceKindToggle.querySelectorAll("button").forEach((b) => {
-    const v = b.getAttribute("data-value");
-    b.classList.toggle("active", graphic ? v === "field" : v === "media");
-  });
+  sourceInspector.classList.toggle("source-graphic", item?.asset.kind === "graphic");
   if (!item) {
     showSourceMeta("—", "image");
     return;
@@ -262,20 +257,7 @@ function syncSourceInspector(): void {
 }
 
 function rebuildGraphicPanel(): void {
-  const item = selectedItem();
-  const driver = asGraphic(item?.asset ?? null);
-  if (!driver) {
-    hideGraphicPanel(graphicPanelEl);
-    return;
-  }
-  buildGraphicPanel(graphicPanelEl, driver, () => {
-    if (item) {
-      item.asset.label = `Field ${String(renderer.getSequence().findIndex((s) => s.id === item.id) + 1).padStart(2, "0")}`;
-      showSourceMeta(item.asset.label, "graphic");
-    }
-    renderer.touchMedia();
-    sequenceStrip.refresh();
-  });
+  hideGraphicPanel(graphicPanelEl);
 }
 
 function setSourceKind(id: string, mode: "media" | "field"): void {
@@ -302,7 +284,7 @@ function setSourceKind(id: string, mode: "media" | "field"): void {
     return;
   }
 
-  const restored = lastMediaById.get(id) ?? wrapCanvasAsPlaceholder(placeholderA(), "Media");
+  const restored = lastMediaById.get(id) ?? makePlaceholder("Media");
   const disposePrevious = current ? !isAssetReferencedBySavedState(current) : true;
   renderer.replaceSource(id, restored, { disposePrevious });
   syncSourceInspector();
@@ -324,9 +306,28 @@ function loadSourceAsset(id: string, asset: MediaAsset, displayLabel?: string): 
   syncAudioButton();
 }
 
+function makePlaceholder(label: string): MediaAsset {
+  return wrapCanvasAsPlaceholder(placeholderA(placeholderBg), label);
+}
+
+function syncBgColourUi(): void {
+  bgColourInput.value = isDefaultPlaceholderBg(placeholderBg) ? PLACEHOLDER_DEFAULT_BG : placeholderBg;
+}
+
+function rebuildPlaceholderAssets(): void {
+  for (const item of renderer.getSequence()) {
+    if (!item.asset.placeholder) continue;
+    const next = makePlaceholder(item.asset.label);
+    next.transform = { ...item.asset.transform };
+    const disposePrevious = !isAssetReferencedBySavedState(item.asset);
+    renderer.replaceSource(item.id, next, { disposePrevious });
+  }
+  sequenceStrip.refresh();
+}
+
 function addPlaceholderSource(): void {
   const n = renderer.getSequence().length + 1;
-  const asset = wrapCanvasAsPlaceholder(placeholderA(), `Media ${String(n).padStart(2, "0")}`);
+  const asset = makePlaceholder(`Media ${String(n).padStart(2, "0")}`);
   renderer.addSource(asset, { select: true });
   syncSourceInspector();
   rebuildGraphicPanel();
@@ -352,14 +353,6 @@ replaceInput.addEventListener("change", () => {
     );
   }
   replaceInput.value = "";
-});
-
-sourceKindToggle.addEventListener("click", (e) => {
-  const b = (e.target as HTMLElement).closest("button");
-  if (!b) return;
-  const item = selectedItem();
-  if (!item) return;
-  setSourceKind(item.id, b.getAttribute("data-value") as "media" | "field");
 });
 
 sourceRemoveBtn.addEventListener("click", () => {
@@ -447,7 +440,8 @@ function onCompositionChange(patch: ParamValues): void {
 function rebuildCompositionPanel(): void {
   const item = selectedItem();
   const isField = Boolean(asGraphic(item?.asset ?? null));
-  compositionPanel.hidden = isField;
+  compositionControlsEl.hidden = isField;
+  compositionResetBtn.hidden = isField;
   if (isField) return;
   buildControls(compositionControlsEl, transformParamDefs, compositionValues(), onCompositionChange);
 }
@@ -457,6 +451,17 @@ compositionResetBtn.addEventListener("click", () => {
   if (!item) return;
   renderer.resetItemTransform(item.id);
   rebuildCompositionPanel();
+});
+
+bgColourInput.addEventListener("input", () => {
+  placeholderBg = bgColourInput.value;
+  rebuildPlaceholderAssets();
+});
+
+bgColourResetBtn.addEventListener("click", () => {
+  placeholderBg = PLACEHOLDER_DEFAULT_BG;
+  syncBgColourUi();
+  rebuildPlaceholderAssets();
 });
 
 rebuildCompositionPanel();
@@ -577,6 +582,11 @@ function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: Par
 }
 
 function rebuildControlsPanel(): void {
+  if (currentBehavior.id !== "bloom") {
+    controlsEl.innerHTML = "";
+    visibleKeysCache = "";
+    return;
+  }
   const defs = currentBehavior.visibleParams ? currentBehavior.visibleParams(currentParams) : currentBehavior.params;
   visibleKeysCache = defs.map((d) => d.key).join(",");
   renderControlDefs(controlsEl, defs, currentParams, onParamsChange);
@@ -648,6 +658,9 @@ function visibleTreatmentOptions(def: SelectParamDef, treatment: string): Select
   if (treatment === "drift" && !opts.some((o) => o.value === "drift")) {
     opts.push({ value: "drift", label: "Drift" });
   }
+  if (treatment === "refraction" && !opts.some((o) => o.value === "refraction")) {
+    opts.push({ value: "refraction", label: "Refraction" });
+  }
   return opts;
 }
 
@@ -670,9 +683,10 @@ function behaviorCopy(behavior: MaskBehavior<unknown>, params: ParamValues): str
 }
 
 function syncTreatmentUI(): void {
+  const productBloom = currentBehavior.id === "bloom";
   const treatmentDef = findTreatmentDef(currentBehavior);
-  treatmentPanel.hidden = !treatmentDef;
-  if (treatmentDef) {
+  treatmentPanel.hidden = !productBloom || !treatmentDef;
+  if (productBloom && treatmentDef) {
     treatmentLabel.textContent = treatmentDef.label;
     const treatment = currentParams.treatment as string;
     rebuildTreatmentToggle(treatmentDef, treatment);
@@ -711,8 +725,9 @@ function rebuildPresetToggle(treatment: string): void {
 
 function syncPresetUI(): void {
   const treatmentDef = findTreatmentDef(currentBehavior);
-  presetPanel.hidden = !treatmentDef;
-  if (!treatmentDef) return;
+  const productBloom = currentBehavior.id === "bloom";
+  presetPanel.hidden = !productBloom || !treatmentDef;
+  if (!productBloom || !treatmentDef) return;
   const treatment = currentParams.treatment as string;
   if (treatment !== presetTreatmentCache) rebuildPresetToggle(treatment);
   const matched = matchingPreset(treatment, currentParams);
@@ -773,21 +788,21 @@ function selectBehavior(id: string, paramsOverride?: ParamValues): void {
   syncPresetUI();
 
   const activeDiagnostic = renderer.getDiagnostic();
-  updateDiagnosticLabel(activeDiagnostic === "boundary" && !behavior.renderBoundary ? "mask" : activeDiagnostic);
+  if (activeDiagnostic === "boundary" && !behavior.renderBoundary) renderer.setDiagnostic("mask");
 
   behaviorTabs.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.getAttribute("data-value") === id);
   });
 }
 
-for (const behavior of BEHAVIORS) {
+for (const behavior of PRODUCT_BEHAVIORS) {
   const btn = document.createElement("button");
   btn.textContent = `${behavior.index} ${behavior.name}`;
   btn.setAttribute("data-value", behavior.id);
   btn.addEventListener("click", () => selectBehavior(behavior.id));
   behaviorTabs.appendChild(btn);
 }
-selectBehavior(BEHAVIORS[0].id);
+selectBehavior("bloom");
 
 treatmentToggle.addEventListener("click", (e) => {
   const target = (e.target as HTMLElement).closest("button");
@@ -833,7 +848,6 @@ swapBtn.addEventListener("click", () => renderer.swap());
 
 interface ExploreSnapshot {
   params: ParamValues;
-  fields: FieldExploreState[];
   clockMode: ClockMode;
   holdPhase: number;
   elapsed: number;
@@ -846,29 +860,9 @@ interface ExploreSnapshot {
 let randomisationSeed = 0;
 let undoSnapshot: ExploreSnapshot | null = null;
 
-function collectFieldStates(): FieldExploreState[] {
-  const out: FieldExploreState[] = [];
-  for (const item of renderer.getSequence()) {
-    const g = asGraphic(item.asset);
-    if (!g) continue;
-    out.push({ id: item.id, field: { ...g.getField() } });
-  }
-  return out;
-}
-
-function applyFieldStates(fields: FieldExploreState[]): void {
-  for (const entry of fields) {
-    const item = renderer.getSequence().find((s) => s.id === entry.id);
-    const g = asGraphic(item?.asset ?? null);
-    if (!g) continue;
-    g.patchField({ ...entry.field });
-  }
-}
-
 function captureExploreSnapshot(): ExploreSnapshot {
   return {
     params: { ...currentParams },
-    fields: collectFieldStates(),
     clockMode: renderer.getClockMode(),
     holdPhase: renderer.getLoopPhase(),
     elapsed: renderer.getElapsed(),
@@ -892,7 +886,6 @@ function applyExploreSnapshot(snap: ExploreSnapshot): void {
   currentParams = { ...snap.params };
   lastParamsByBehavior.set(currentBehavior.id, currentParams);
   rememberCurrentExpression();
-  applyFieldStates(snap.fields);
   renderer.setBehavior(currentBehavior, currentParams);
   renderer.setGraphicElapsed(snap.graphicElapsed);
   renderer.restoreClock(snap.clockMode, snap.holdPhase, snap.elapsed);
@@ -911,6 +904,7 @@ function applyExploreSnapshot(snap: ExploreSnapshot): void {
 }
 
 function applyRandomise(): void {
+  if (currentBehavior.id !== "bloom") return;
   undoSnapshot = captureExploreSnapshot();
   randomiseUndoBtn.disabled = false;
   const seed = newRandomisationSeed();
@@ -918,18 +912,14 @@ function applyRandomise(): void {
   const pair = renderer.getActivePair();
   const result = generateRandomisation({
     seed,
-    behaviorId: currentBehavior.id,
-    treatment: String(currentParams.treatment ?? ""),
     params: currentParams,
     loopSeconds: renderer.getLoopSeconds(),
     pairIndex: pair.pairIndex,
     pairCount: Math.max(1, pair.pairCount),
-    fields: collectFieldStates(),
   });
   currentParams = result.params;
   lastParamsByBehavior.set(currentBehavior.id, currentParams);
   rememberCurrentExpression();
-  applyFieldStates(result.fields);
   renderer.setBehavior(currentBehavior, currentParams);
   renderer.setGraphicElapsed(result.graphicElapsed);
   renderer.setHoldPhase(result.holdPhase);
@@ -965,36 +955,36 @@ randomiseUndoBtn.addEventListener("click", () => {
   undoRandomise();
 });
 
-// --- diagnostic: cycle off -> mask -> boundary -> off. Boundary is only
-// meaningful for a behavior that defines renderBoundary (Bloom); for one
-// that doesn't (Shift) that state is skipped entirely. ---
-function updateDiagnosticLabel(mode: DiagnosticMode): void {
-  showMaskBtn.classList.toggle("active", mode !== "off");
-  showMaskBtn.textContent = mode === "off" ? "Show Mask" : mode === "mask" ? "Showing Mask" : "Showing Boundary";
+function parseBwMode(value: string | null): BwMode {
+  if (value === "A" || value === "B" || value === "both" || value === "off") return value;
+  return "off";
 }
 
-showMaskBtn.addEventListener("click", () => {
-  let mode = renderer.cycleDiagnostic();
-  if (mode === "boundary" && !currentBehavior.renderBoundary) {
-    mode = renderer.cycleDiagnostic();
-  }
-  updateDiagnosticLabel(mode);
-});
+function syncBwToggle(): void {
+  const mode = renderer.getBwMode();
+  bwToggle.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.getAttribute("data-value") === mode);
+  });
+}
 
-// --- global output-layer toggles: Print, B&W. Deliberately binary
-// (no strength slider), applied after whatever behavior/treatment is
-// active, unaffected by behavior switching, media type, or Reverse — see
-// Renderer.finalizeOutput. ---
+function resolveSavedBwMode(state: { bwMode?: BwMode; bwOn: boolean }): BwMode {
+  if (state.bwMode) return state.bwMode;
+  return state.bwOn ? "both" : "off";
+}
+
+// --- global output-layer toggles: Registration, selective B&W. ---
 registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
 registrationBtn.addEventListener("click", () => {
   renderer.setRegistrationEnabled(!renderer.isRegistrationEnabled());
   registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
 });
 
-bwBtn.classList.toggle("active", renderer.isBWEnabled());
-bwBtn.addEventListener("click", () => {
-  renderer.setBWEnabled(!renderer.isBWEnabled());
-  bwBtn.classList.toggle("active", renderer.isBWEnabled());
+syncBwToggle();
+bwToggle.addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest("button");
+  if (!b || !bwToggle.contains(b)) return;
+  renderer.setBwMode(parseBwMode(b.getAttribute("data-value")));
+  syncBwToggle();
 });
 
 // --- aspect ratio ---
@@ -1049,7 +1039,9 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     behaviorId: currentBehavior.id,
     params: { ...currentParams },
     registrationOn: renderer.isRegistrationEnabled(),
-    bwOn: renderer.isBWEnabled(),
+    bwOn: renderer.getBwMode() === "both",
+    bwMode: renderer.getBwMode(),
+    placeholderBg,
     aspect: currentAspect,
     playbackMode: currentPlaybackMode,
     loopSeconds: renderer.getLoopSeconds(),
@@ -1076,8 +1068,12 @@ function loadSavedState(state: SavedState): void {
 
   renderer.setRegistrationEnabled(state.registrationOn);
   registrationBtn.classList.toggle("active", state.registrationOn);
-  renderer.setBWEnabled(state.bwOn);
-  bwBtn.classList.toggle("active", state.bwOn);
+  renderer.setBwMode(resolveSavedBwMode(state));
+  syncBwToggle();
+  if (state.placeholderBg) {
+    placeholderBg = state.placeholderBg;
+    syncBgColourUi();
+  }
 
   setAspect(state.aspect);
   setPlaybackModeUI(state.playbackMode);
@@ -1323,8 +1319,8 @@ updatePlayPauseLabel();
 syncAudioButton();
 syncFreezeButton();
 
-/** Product default: Media A × Field Core B, Bloom restrained-to-medium,
- * Print on, B&W off. Not an extreme showcase. */
+/** Product default: two media placeholders, Bloom restrained-to-medium,
+ * Registration on, B&W off. Not an extreme showcase. */
 const BLOOM_OPENING: ParamValues = {
   fieldCount: 3,
   fieldSize: 38,
@@ -1338,23 +1334,18 @@ const BLOOM_OPENING: ParamValues = {
   imageAware: "off",
 };
 
-/** Product default: 01 Media × 02 Field Core, Bloom restrained-to-medium,
- * Print on, B&W off. Shown as the first two sequence items. */
 function applyProductDefault(): void {
   const bloom = BEHAVIORS.find((b) => b.id === "bloom")!;
   selectBehavior("bloom", { ...defaultParamValues(bloom.params), ...BLOOM_OPENING });
-  const { w, h } = aspectParts();
-  const media = wrapCanvasAsPlaceholder(placeholderA(), "01");
-  const field = createGraphicAsset(w, h, "02 Field", { ...FIELD_TERRITORIES.core });
+  const mediaA = makePlaceholder("01");
+  const mediaB = makePlaceholder("02");
   renderer.setSequence(
     [
-      { id: renderer.nextSourceId(), asset: media },
-      { id: renderer.nextSourceId(), asset: field },
+      { id: renderer.nextSourceId(), asset: mediaA },
+      { id: renderer.nextSourceId(), asset: mediaB },
     ],
     undefined,
   );
-  const fieldItem = renderer.getSourceAt(1);
-  if (fieldItem) renderer.selectItem(fieldItem.id);
   renderer.setLoopSeconds(12);
   loopLengthUi.setSeconds(12);
   syncExportDuration();
@@ -1364,8 +1355,10 @@ function applyProductDefault(): void {
   sequenceStrip.refresh();
   renderer.setRegistrationEnabled(true);
   registrationBtn.classList.toggle("active", true);
-  renderer.setBWEnabled(false);
-  bwBtn.classList.toggle("active", false);
+  renderer.setBwMode("off");
+  syncBwToggle();
+  placeholderBg = PLACEHOLDER_DEFAULT_BG;
+  syncBgColourUi();
   renderer.setAudioEnabled(true);
   syncAudioButton();
 }
@@ -1425,9 +1418,24 @@ Object.assign(window, {
       registrationBtn.classList.toggle("active", on);
     },
     setBW: (on: boolean) => {
-      renderer.setBWEnabled(on);
-      bwBtn.classList.toggle("active", on);
+      renderer.setBwMode(on ? "both" : "off");
+      syncBwToggle();
     },
+    setBwMode: (mode: BwMode) => {
+      renderer.setBwMode(mode);
+      syncBwToggle();
+    },
+    getBwMode: () => renderer.getBwMode(),
+    setDiagnostic: (mode: DiagnosticMode) => renderer.setDiagnostic(mode),
+    getDiagnostic: () => renderer.getDiagnostic(),
+    setPreviewDprCap: (cap: number) => renderer.setPreviewDprCap(cap),
+    getPreviewDprCap: () => renderer.getPreviewDprCap(),
+    setPlaceholderBg: (hex: string) => {
+      placeholderBg = hex;
+      syncBgColourUi();
+      rebuildPlaceholderAssets();
+    },
+    getPlaceholderBg: () => placeholderBg,
     lastFieldInk: () => renderer.lastFieldInk(),
     setAspect: (value: string) => setAspect(value),
     lastExportResult: () => lastExportResult,

@@ -94,10 +94,22 @@ body {
   background: var(--panel-border);
 }
 
-/* Show Mask is a diagnostic tool, not a creative control — visually
-   demoted below Registration/B&W (which stay at full prominence as the
-   primary global output-layer controls) rather than removed, since it
-   stays useful for understanding what a behavior is doing. */
+.bw-toggle .bw-label {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-right: 1px solid var(--panel-border);
+}
+
+.bw-toggle button {
+  font-size: 9px;
+  padding: 3px 7px;
+}
+
 .diagnostic-toggle:disabled {
   opacity: 0.28;
   cursor: default;
@@ -494,6 +506,29 @@ body {
   margin-bottom: 20px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--panel-border);
+}
+
+.bg-colour-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.bg-colour-row label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.bg-colour-row input[type="color"] {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  cursor: pointer;
 }
 
 .composition-panel[hidden],
