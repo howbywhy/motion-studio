@@ -536,6 +536,94 @@ body {
   display: none;
 }
 
+.type-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.type-panel .control-row {
+  margin-bottom: 10px;
+}
+
+.type-panel .type-seg {
+  width: 100%;
+}
+
+.type-panel .type-seg button {
+  flex: 1;
+  font-size: 10px;
+  padding: 5px 3px;
+}
+
+.type-text {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 8px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.type-group {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 6px;
+}
+
+.type-group > summary {
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  list-style: none;
+  margin-bottom: 8px;
+}
+
+.type-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.type-disabled .type-group {
+  display: none;
+}
+
+.type-xy-svg {
+  display: block;
+  border-radius: 4px;
+}
+
+.type-xy-frame {
+  fill: var(--bg);
+  stroke: var(--panel-border);
+}
+
+.type-xy-cross {
+  stroke: var(--panel-border);
+  stroke-width: 1;
+}
+
+.type-xy-puck {
+  fill: var(--text);
+}
+
+@font-face {
+  font-family: "Switzer";
+  src: url("/fonts/Switzer-Variable.woff2") format("woff2"),
+    url("/fonts/Switzer-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
 .graphic-panel {
   display: flex;
   flex-direction: column;

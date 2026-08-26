@@ -1,5 +1,6 @@
 import type { MediaAsset, MediaTransform } from "./media";
 import type { ParamValues } from "./types";
+import type { TypeState } from "./typeState";
 
 /** A lightweight, in-memory (session-only) capture of enough state to
  * recreate the exact output: behavior, expression/treatment (folded into
@@ -43,6 +44,7 @@ export interface SavedState {
   /** Selective B&W. Older saves used `bwOn` as a global output grayscale. */
   bwMode?: "off" | "A" | "B" | "both";
   placeholderBg?: string;
+  type?: TypeState;
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;
@@ -73,6 +75,7 @@ export function duplicateSavedState(id: string): SavedState | null {
     name: `${found.name} copy`,
     createdAt: Date.now(),
     params: { ...found.params },
+    type: found.type ? { ...found.type } : undefined,
     sources: found.sources.map((s) => ({ ...s, transform: { ...s.transform } })),
   };
   states = [...states, copy];

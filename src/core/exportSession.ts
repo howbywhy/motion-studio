@@ -9,6 +9,8 @@ import {
   canEncodeAudio,
   canEncodeVideo,
 } from "mediabunny";
+import { loadSwitzer, switzerReady } from "./typeFont";
+import { typeHasCopy } from "./typeLayout";
 import type { Renderer } from "./renderer";
 import { mixExportAudio, clearExportAudioCache } from "./exportAudio";
 import { encodeCanvasWebP, frameDurationMs, muxAnimatedWebP } from "./webpAnim";
@@ -56,6 +58,14 @@ export async function runExport(
 
   const t0 = performance.now();
   let encodeMs = 0;
+
+  onProgress({ ratio: 0.02, label: "PREPARING" });
+  throwIfAborted();
+  if (typeHasCopy(renderer.getTypeState())) {
+    const ok = await loadSwitzer();
+    if (!ok || !switzerReady()) throw new Error("Switzer Variable failed to load; export aborted before a fallback font could appear.");
+    renderer.renderFrame();
+  }
 
   if (request.format === "png" && request.size === "preview") {
     onProgress({ ratio: 0.15, label: "EXPORTING 15%" });
@@ -113,12 +123,13 @@ export async function runExport(
         const t = i / fps;
         await renderer.renderExportFrame(t);
         frames.push({ bytes: await encodeCanvasWebP(renderer.getVisibleCanvas(), q), durationMs: frameDurationMs(i, fps) });
-        if (i % 2 === 0) {
-          onProgress({ ratio: (i + 1) / frameCount, label: `EXPORTING ${Math.round(((i + 1) / frameCount) * 100)}%` });
+        if (i % 4 === 0) {
+          onProgress({ ratio: (i + 1) / frameCount, label: `RENDERING ${Math.round(((i + 1) / frameCount) * 100)}%` });
           await yieldUi();
         }
       }
       const tEnc = performance.now();
+      onProgress({ ratio: 0.97, label: "ENCODING" });
       const bytes = muxAnimatedWebP(width, height, frames);
       encodeMs = performance.now() - tEnc;
       const blob = new Blob([new Uint8Array(bytes)], { type: "image/webp" });
@@ -194,15 +205,17 @@ export async function runExport(
         const t = i / fps;
         await renderer.renderExportFrame(t);
         await videoSource.add(t, 1 / fps);
-        if (i % 2 === 0) {
-          onProgress({ ratio: (i + 1) / frameCount, label: `EXPORTING ${Math.round(((i + 1) / frameCount) * 100)}%` });
+        if (i % 4 === 0) {
+          onProgress({ ratio: (i + 1) / frameCount, label: `RENDERING ${Math.round(((i + 1) / frameCount) * 100)}%` });
           await yieldUi();
         }
       }
       videoSource.close();
+      onProgress({ ratio: 0.97, label: "ENCODING" });
       const tEnc = performance.now();
       await output.finalize();
       encodeMs = performance.now() - tEnc;
+      onProgress({ ratio: 0.99, label: "FINALISING" });
       const buffer = target.buffer;
       if (!buffer) throw new Error("MP4 mux produced no data");
       const blob = new Blob([buffer], { type: "video/mp4" });

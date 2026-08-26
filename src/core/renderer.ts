@@ -5,6 +5,10 @@ import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, ty
 import { BLOOM_REGISTRATION_AMOUNT, getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { paintRegistrationSurface } from "../behaviors/bloom/treatments";
 import { lastBloomFieldMap } from "../behaviors/bloom/index";
+import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
+import { layoutTypography } from "./typeLayout";
+import { evaluateTypeMotion } from "./typeMotion";
+import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -39,6 +43,7 @@ export interface FrameProfile {
   resolveMs: number;
   printPrepMs: number;
   registrationMs: number;
+  typeMs: number;
   bwMs: number;
   outputMs: number;
   totalMs: number;
@@ -78,13 +83,13 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
         window.setTimeout(() => {
           rvfc.cancelVideoFrameCallback?.(id);
           resolve();
-        }, 90);
+        }, 24);
         return;
       }
       resolve();
     };
     const onSeeked = (): void => finish();
-    const timer = window.setTimeout(finish, 1800);
+    const timer = window.setTimeout(finish, 900);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onSeeked);
     try {
@@ -164,6 +169,7 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
+  private typeState: TypeState = defaultTypeState();
   private bwMode: BwMode = "off";
   private previewDprCap = DEFAULT_PREVIEW_DPR_CAP;
   private readonly bwScratch = makeCanvas();
@@ -505,6 +511,19 @@ export class Renderer {
     return this.registrationOn;
   }
 
+  setTypeState(next: TypeState | Partial<TypeState>): void {
+    this.typeState = clampTypeState({ ...this.typeState, ...next });
+    this.renderFrame();
+  }
+
+  patchTypeState(patch: Partial<TypeState>): void {
+    this.setTypeState({ ...this.typeState, ...patch });
+  }
+
+  getTypeState(): TypeState {
+    return this.typeState;
+  }
+
   setBWEnabled(on: boolean): void {
     this.setBwMode(on ? "both" : "off");
   }
@@ -768,6 +787,7 @@ export class Renderer {
     this.syncActiveVideos();
     this.syncAudio();
     this.renderFrame();
+    disposeTypeScratch();
   }
 
   async renderExportFrame(timeSec: number, opts?: { graphicTime?: number }): Promise<void> {
@@ -1367,6 +1387,21 @@ export class Renderer {
     }
     const tReg = mark();
 
+    const type = this.typeState;
+    const layout = layoutTypography(type, width, height);
+    if (layout) {
+      const motion = evaluateTypeMotion(
+        type,
+        this.getLoopPhase(),
+        this.loopSeconds,
+        layout.lines.length,
+        layout.fontSize,
+        width,
+      );
+      paintTypeLayer(composedCtx, layout, motion, type.color, this.bLayer, this.registrationOn, BLOOM_REGISTRATION_AMOUNT);
+    }
+    const tType = mark();
+
     this.ctx.clearRect(0, 0, width, height);
     this.ctx.drawImage(this.composedLayer, 0, 0);
     const tOut = mark();
@@ -1381,8 +1416,9 @@ export class Renderer {
         resolveMs: tResolve - tComposite,
         printPrepMs: tPrep - tPrep0,
         registrationMs: tReg - tPrep,
+        typeMs: tType - tReg,
         bwMs: tBw - tMedia,
-        outputMs: tOut - tReg,
+        outputMs: tOut - tType,
         totalMs: tOut - t0,
       };
     }

@@ -13,6 +13,9 @@ import { buildSpreadControl } from "./ui/spreadControl";
 import { buildFragmentControl } from "./ui/fragmentControl";
 import { buildBloomFieldMap } from "./ui/bloomFieldMap";
 import { hideGraphicPanel } from "./ui/graphicPanel";
+import { buildTypePanel } from "./ui/typePanel";
+import { loadSwitzer } from "./core/typeFont";
+import { clampTypeState, defaultTypeState } from "./core/typeState";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
@@ -132,6 +135,7 @@ app.innerHTML = `
               <button type="button" class="reset-btn" id="bg-colour-reset" title="Restore the default background colour">Reset</button>
             </div>
           </div>
+        <div id="type-panel" class="type-panel"></div>
         <div class="graphic-panel" id="graphic-panel" hidden></div>
         <div class="behavior-meta">
           <h2 id="behavior-title"></h2>
@@ -190,6 +194,7 @@ const treatmentToggle = document.querySelector<HTMLDivElement>("#treatment-toggl
 const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!;
 const compositionControlsEl = document.querySelector<HTMLDivElement>("#composition-controls")!;
 const compositionResetBtn = document.querySelector<HTMLButtonElement>("#composition-reset")!;
+const typePanelEl = document.querySelector<HTMLDivElement>("#type-panel")!;
 const bgColourInput = document.querySelector<HTMLInputElement>("#bg-colour")!;
 const bgColourResetBtn = document.querySelector<HTMLButtonElement>("#bg-colour-reset")!;
 const graphicPanelEl = document.querySelector<HTMLDivElement>("#graphic-panel")!;
@@ -210,6 +215,11 @@ const exportQualityToggle = document.querySelector<HTMLDivElement>("#export-qual
 
 const renderer = new Renderer(canvas);
 let placeholderBg = PLACEHOLDER_DEFAULT_BG;
+void loadSwitzer().then(() => renderer.renderFrame());
+
+const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
+  renderer.patchTypeState(patch);
+});
 
 const phaseUi = buildPhaseControl(
   document.querySelector<HTMLDivElement>("#phase-control")!,
@@ -777,7 +787,7 @@ function selectBehavior(id: string, paramsOverride?: ParamValues): void {
     if (SHIFT_EXPRESSIONS.has(treatment)) lastParamsByExpression.set(treatment, { ...currentParams });
   }
   renderer.setBehavior(behavior, currentParams);
-  bloomFieldMap.setVisible(behavior.id === "bloom");
+  bloomFieldMap.setVisible(false);
 
   titleEl.textContent = `${behavior.index} — ${behavior.name}`;
   descEl.textContent = behaviorCopy(behavior, currentParams);
@@ -1053,6 +1063,7 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     frozen: renderer.isFrozen(),
     playing: renderer.isPlaying(),
     randomisationSeed,
+    type: { ...renderer.getTypeState() },
     sources: renderer.getSequence().map((item) => ({
       id: item.id,
       asset: item.asset,
@@ -1067,6 +1078,8 @@ function loadSavedState(state: SavedState): void {
 
   renderer.setRegistrationEnabled(state.registrationOn);
   registrationBtn.classList.toggle("active", state.registrationOn);
+  renderer.setTypeState(clampTypeState(state.type));
+  typeUi.sync(renderer.getTypeState());
   renderer.setBwMode(resolveSavedBwMode(state));
   syncBwToggle();
   if (state.placeholderBg) {
@@ -1356,6 +1369,8 @@ function applyProductDefault(): void {
   syncBgColourUi();
   renderer.setAudioEnabled(true);
   syncAudioButton();
+  renderer.setTypeState(defaultTypeState());
+  typeUi.sync(renderer.getTypeState());
 }
 
 applyProductDefault();
@@ -1433,6 +1448,11 @@ Object.assign(window, {
       rebuildPlaceholderAssets();
     },
     getPlaceholderBg: () => placeholderBg,
+    getTypeState: () => ({ ...renderer.getTypeState() }),
+    setTypeState: (patch: Record<string, unknown>) => {
+      renderer.patchTypeState(clampTypeState({ ...renderer.getTypeState(), ...patch }));
+      typeUi.sync(renderer.getTypeState());
+    },
     lastFieldInk: () => renderer.lastFieldInk(),
     setAspect: (value: string) => setAspect(value),
     lastExportResult: () => lastExportResult,
