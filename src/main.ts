@@ -685,8 +685,8 @@ function behaviorCopy(behavior: MaskBehavior<unknown>, params: ParamValues): str
 function syncTreatmentUI(): void {
   const productBloom = currentBehavior.id === "bloom";
   const treatmentDef = findTreatmentDef(currentBehavior);
-  treatmentPanel.hidden = !productBloom || !treatmentDef;
-  if (productBloom && treatmentDef) {
+  treatmentPanel.hidden = productBloom || !treatmentDef;
+  if (!productBloom && treatmentDef) {
     treatmentLabel.textContent = treatmentDef.label;
     const treatment = currentParams.treatment as string;
     rebuildTreatmentToggle(treatmentDef, treatment);
@@ -724,11 +724,10 @@ function rebuildPresetToggle(treatment: string): void {
 }
 
 function syncPresetUI(): void {
-  const treatmentDef = findTreatmentDef(currentBehavior);
   const productBloom = currentBehavior.id === "bloom";
-  presetPanel.hidden = !productBloom || !treatmentDef;
-  if (!productBloom || !treatmentDef) return;
-  const treatment = currentParams.treatment as string;
+  presetPanel.hidden = !productBloom;
+  if (!productBloom) return;
+  const treatment = "clean";
   if (treatment !== presetTreatmentCache) rebuildPresetToggle(treatment);
   const matched = matchingPreset(treatment, currentParams);
   presetToggle.querySelectorAll("button").forEach((b) => {
@@ -750,7 +749,7 @@ presetToggle.addEventListener("click", (e) => {
   const target = (e.target as HTMLElement).closest("button");
   if (!target) return;
   const id = target.getAttribute("data-preset-id");
-  const treatment = currentParams.treatment as string;
+  const treatment = currentBehavior.id === "bloom" ? "clean" : String(currentParams.treatment);
   const preset = presetsForTreatment(treatment).find((p) => p.id === id);
   if (preset) selectPreset(preset);
 });
@@ -1179,12 +1178,8 @@ function renderSavedStatesList(): void {
 }
 
 saveStateBtn.addEventListener("click", () => {
-  const treatmentDef = findTreatmentDef(currentBehavior);
-  const treatmentLabelText = treatmentDef
-    ? (visibleTreatmentOptions(treatmentDef, String(currentParams.treatment)).find((o) => o.value === currentParams.treatment)?.label ?? "")
-    : "";
   const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const name = `${currentBehavior.name}${treatmentLabelText ? " · " + treatmentLabelText : ""} · ${stamp}`;
+  const name = `${currentBehavior.name} · ${stamp}`;
   createSavedState(gatherCurrentSaveInput(name));
   renderSavedStatesList();
 });

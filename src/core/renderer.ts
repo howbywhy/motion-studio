@@ -1321,9 +1321,16 @@ export class Renderer {
 
     const img = sctx.getImageData(0, 0, smallW, smallH);
     const data = img.data;
-    const cut = Math.round(Math.max(0, 1 - resolve * resolve * resolve) * 220);
+    const lo = (1 - resolve) * (1 - resolve) * 70;
+    const hi = Math.min(255, lo + 52 + (1 - resolve) * 70);
+    const span = Math.max(1, hi - lo);
     for (let i = 3; i < data.length; i += 4) {
-      if (data[i]! > cut) data[i] = 255;
+      const a = data[i]!;
+      let t = (a - lo) / span;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      t = t * t * (3 - 2 * t);
+      data[i] = Math.round(a + (255 - a) * t * (0.28 + 0.72 * resolve));
     }
     sctx.putImageData(img, 0, 0);
 

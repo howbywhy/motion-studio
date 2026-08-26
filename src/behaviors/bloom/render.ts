@@ -29,7 +29,7 @@ export function renderMaskFromFields(
   softnessFrac: number
 ): void {
   const minDim = Math.min(width, height);
-  const extraBlur = (0.15 + softnessFrac * 0.85) * minDim * 0.045;
+  const extraBlur = (0.06 + softnessFrac * 0.5) * minDim * 0.028;
   ctx.filter = extraBlur > 0.5 ? `blur(${extraBlur}px)` : "none";
   ctx.globalCompositeOperation = "lighten";
 
@@ -37,8 +37,11 @@ export function renderMaskFromFields(
     if (field.radius <= 0 || field.alpha <= 0.002) continue;
     applyLobes(ctx, field, (lx, ly, lr) => {
       const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
+      const core = Math.min(0.97, field.innerStop);
+      const mid = Math.min(0.99, core + (1 - core) * 0.48);
       g.addColorStop(0, `rgba(255,255,255,${field.alpha})`);
-      g.addColorStop(field.innerStop, `rgba(255,255,255,${field.alpha})`);
+      g.addColorStop(core, `rgba(255,255,255,${field.alpha})`);
+      g.addColorStop(mid, `rgba(255,255,255,${field.alpha * 0.34})`);
       g.addColorStop(1, "rgba(255,255,255,0)");
       return g;
     });

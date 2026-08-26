@@ -6,6 +6,7 @@ import { getImageAwareAttractors } from "./imageAware";
 
 const treatmentOptions = [
   { value: "clean", label: "Clean" },
+  // Dormant: kept so saved states with treatment=registration still decode.
   { value: "registration", label: "Registration" },
 ];
 
@@ -66,7 +67,7 @@ export const bloomBehavior: MaskBehavior<BloomState> = {
     return params.filter((d) => {
       if (d.key === "treatment" || d.key === "imageAware") return false;
       if (d.key === "refractionAmount") return p.treatment === "refraction";
-      if (d.key === "registrationAmount") return p.treatment === "registration";
+      if (d.key === "registrationAmount") return false;
       return true;
     });
   },

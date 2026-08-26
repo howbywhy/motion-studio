@@ -1,14 +1,12 @@
-/** Registration has two callers with two languages:
+/** Registration: one product-facing global surface.
  *
- *   Bloom's own Registration treatment still uses the original ink formula
- *   in this file (paintRegistrationInkContent) — black + tinted separations
- *   plus a faint halftone, confined to each field's ring. Unchanged.
+ *   Bloom Registration remains as a dormant composite path for saved
+ *   states that still store treatment=registration. It is not exposed in
+ *   the production UI.
  *
- *   The global layer is FIELD-informed plates as occupancy, then a small
- *   spatial slip of the photograph itself through those plates. Persistent
- *   base, then reactive tent. Not a colour filter and not a black overlay.
- *
- * One product-facing Registration toggle. No language selector. */
+ *   The global layer is a photographic impression through image-derived
+ *   irregular coverage, with a micro spatial offset. Persistent base,
+ *   then reactive tent. */
 import { sampleAverageColor, type RGB } from "./media";
 import { paintFieldPersistent, paintFieldReactive, prepareFieldPrintInk } from "./registrationFieldInk";
 
