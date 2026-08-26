@@ -1,29 +1,20 @@
-/** The registration "ink" formula — a hard black-contrast separation pass
- * and a pass tinted from the photograph's own average color, offset from
- * each other, plus a faint halftone screen — originally built as Bloom's
- * Registration treatment (see behaviors/bloom/treatments.ts), now promoted
- * here so it has exactly one implementation shared by three callers:
- *   - Bloom's own Registration treatment, confined to each field's own
- *     boundary ring (unchanged look — still built there, from field
- *     geometry that only Bloom has).
- *   - The global output layer's PERSISTENT base (paintPersistentRegistration
- *     below) — a restrained, unmasked pass across the entire frame, present
- *     whether or not anything is transforming. This is what makes
- *     Registration read as the surface the whole photograph is printed on,
- *     not a transition effect that vanishes the instant a region settles.
- *   - The global output layer's REACTIVE component (paintReactiveRegistration
- *     below), confined to wherever ANY behavior's own reveal mask is
- *     currently transitioning — the one thing every behavior always
- *     computes, regardless of its own geometry — layered on top of the
- *     persistent base so activity intensifies the same language rather than
- *     introducing a different one.
- * The global output layer is always: persistent base, then reactive on top
- * (see Renderer.finalizeOutput) — "whole image lightly misregistered, active
- * transformation strongly misregistered," never a hard on/off per pixel.
- * This module owns only the ink formula and these two full-frame-scale
- * variants; it knows nothing about fields, rings, or any other
- * behavior-specific geometry. */
+/** Registration has two callers with two languages:
+ *
+ *   Bloom's own Registration treatment still uses the original ink formula
+ *   in this file (paintRegistrationInkContent) — black + tinted separations
+ *   plus a faint halftone, confined to each field's ring. Unchanged.
+ *
+ *   The global Print layer (prepareGlobalPrintInk / paintPersistent /
+ *   paintReactive) is FIELD-informed: two related binary mark plates,
+ *   occupancy from a coarse luminance of the composed frame, small spatial
+ *   disagreement. Persistent base across the whole frame; reactive tent on
+ *   the behaviour mask. The photograph stays put; only the graphic
+ *   impressions misalign.
+ *
+ * One product-facing Print toggle. No language selector. */
 import { sampleAverageColor, type RGB } from "./media";
+import { paintFieldPersistent, paintFieldReactive, prepareFieldPrintInk } from "./registrationFieldInk";
+
 
 // --- shared halftone pattern + tint cache --------------------------------
 // One implementation, reused by both callers so there is exactly one
@@ -150,68 +141,20 @@ function sizeCanvas(c: HTMLCanvasElement, w: number, h: number): void {
   }
 }
 
-let globalInkScratch: HTMLCanvasElement | null = null;
-let globalTintScratch: HTMLCanvasElement | null = null;
 let globalBoundarySmall: HTMLCanvasElement | null = null;
-let globalBlackSrc: HTMLCanvasElement | null = null;
-let globalTintSrc: HTMLCanvasElement | null = null;
 
 const BOUNDARY_SMALL_W = 200;
 
-/** Filter B once per Print frame (or once until still media changes).
- * Persistent and reactive only differ by offset, so sharing these sources
- * is pixel-equivalent to filtering inside each pass. Bloom's own
- * Registration treatment still uses paintRegistrationInkContent. */
-export function prepareGlobalPrintInk(bLayer: HTMLCanvasElement, width: number, height: number): void {
-  if (!globalBlackSrc) globalBlackSrc = makeCanvas();
-  if (!globalTintSrc) globalTintSrc = makeCanvas();
-  sizeCanvas(globalBlackSrc, width, height);
-  sizeCanvas(globalTintSrc, width, height);
-
-  const bctx = globalBlackSrc.getContext("2d")!;
-  bctx.clearRect(0, 0, width, height);
-  bctx.filter = "grayscale(1) contrast(1.55)";
-  bctx.drawImage(bLayer, 0, 0);
-  bctx.filter = "none";
-
-  const tint = currentInkTint(bLayer);
-  const tctx = globalTintSrc.getContext("2d")!;
-  tctx.clearRect(0, 0, width, height);
-  tctx.filter = "grayscale(1) contrast(1.3)";
-  tctx.drawImage(bLayer, 0, 0);
-  tctx.filter = "none";
-  tctx.globalCompositeOperation = "source-atop";
-  tctx.fillStyle = `rgb(${tint.r | 0},${tint.g | 0},${tint.b | 0})`;
-  tctx.fillRect(0, 0, width, height);
-  tctx.globalCompositeOperation = "source-over";
-}
-
-function blitPreparedPrintInk(sctx: CanvasRenderingContext2D, width: number, height: number, off: number): void {
-  if (!globalBlackSrc || !globalTintSrc) return;
-  sctx.save();
-  sctx.beginPath();
-  sctx.rect(0, 0, width, height);
-  sctx.clip();
-
-  sctx.save();
-  sctx.globalAlpha = 0.8;
-  sctx.translate(off, -off * 0.4);
-  sctx.drawImage(globalBlackSrc, 0, 0);
-  sctx.restore();
-
-  sctx.save();
-  sctx.globalAlpha = 0.6;
-  sctx.translate(-off, off * 0.4);
-  sctx.drawImage(globalTintSrc, 0, 0);
-  sctx.restore();
-
-  sctx.save();
-  sctx.globalAlpha = 0.22;
-  sctx.fillStyle = getHalftonePattern(sctx);
-  sctx.fillRect(0, 0, width, height);
-  sctx.restore();
-
-  sctx.restore();
+/** Build FIELD registration plates from the composed frame. Cached by the
+ * renderer until still media changes; rebuilt every frame for live/video. */
+export function prepareGlobalPrintInk(
+  bLayer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  dpr = 1,
+  composed?: HTMLCanvasElement,
+): void {
+  prepareFieldPrintInk(composed ?? bLayer, width, height, dpr);
 }
 
 /** The universal analogue of Bloom's per-field boundary ring: wherever ANY
@@ -270,22 +213,7 @@ export function paintPersistentRegistration(
   height: number,
   amount: number
 ): void {
-  if (amount <= 0.001) return;
-
-  if (!globalInkScratch) globalInkScratch = makeCanvas();
-  if (!globalTintScratch) globalTintScratch = makeCanvas();
-  sizeCanvas(globalInkScratch, width, height);
-  sizeCanvas(globalTintScratch, width, height);
-
-  const ictx = globalInkScratch.getContext("2d")!;
-  ictx.clearRect(0, 0, width, height);
-  const off = 2 + amount * 5;
-  blitPreparedPrintInk(ictx, width, height, off);
-
-  ctx.save();
-  ctx.globalAlpha = amount;
-  ctx.drawImage(globalInkScratch, 0, 0);
-  ctx.restore();
+  paintFieldPersistent(ctx, width, height, amount);
 }
 
 /** The reactive layer: the same ink formula, confined to wherever the
@@ -303,26 +231,6 @@ export function paintReactiveRegistration(
   amount: number
 ): void {
   if (amount <= 0.001) return;
-
   const boundarySmall = buildBoundaryAlpha(maskLayer, width, height);
-
-  if (!globalInkScratch) globalInkScratch = makeCanvas();
-  if (!globalTintScratch) globalTintScratch = makeCanvas();
-  sizeCanvas(globalInkScratch, width, height);
-  sizeCanvas(globalTintScratch, width, height);
-
-  const ictx = globalInkScratch.getContext("2d")!;
-  ictx.clearRect(0, 0, width, height);
-  const off = 2 + amount * 5;
-  blitPreparedPrintInk(ictx, width, height, off);
-
-  ictx.save();
-  ictx.globalCompositeOperation = "destination-in";
-  ictx.globalAlpha = amount;
-  ictx.drawImage(boundarySmall, 0, 0, boundarySmall.width, boundarySmall.height, 0, 0, width, height);
-  ictx.globalCompositeOperation = "source-over";
-  ictx.globalAlpha = 1;
-  ictx.restore();
-
-  ctx.drawImage(globalInkScratch, 0, 0);
+  paintFieldReactive(ctx, maskLayer, boundarySmall, width, height, amount);
 }

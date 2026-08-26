@@ -901,7 +901,7 @@ export class Renderer {
     const tPrep0 = mark();
     if (this.registrationOn) {
       if (this.hasLiveSource() || this.printInkDirty) {
-        prepareGlobalPrintInk(this.bLayer, width, height);
+        prepareGlobalPrintInk(this.bLayer, width, height, this.dpr, this.composedLayer);
         if (!this.hasLiveSource()) this.printInkDirty = false;
       }
     }
