@@ -452,8 +452,13 @@ body {
   cursor: pointer;
 }
 
-.stage-controls button:hover {
+.stage-controls button:hover:not(:disabled) {
   border-color: var(--text-dim);
+}
+
+.stage-controls button:disabled {
+  opacity: 0.28;
+  cursor: default;
 }
 
 .stage-controls .primary {

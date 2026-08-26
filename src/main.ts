@@ -19,6 +19,8 @@ import { BEHAVIORS } from "./behaviors/index";
 import { SHIFT_EXPRESSION_COPY } from "./behaviors/shift";
 import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
+import { generateRandomisation, newRandomisationSeed, type FieldExploreState } from "./core/randomise";
+import type { ClockMode } from "./core/phaseClock";
 import {
   createSavedState,
   deleteSavedState,
@@ -78,6 +80,7 @@ app.innerHTML = `
           </div>
           <div id="loop-length"></div>
           <div id="phase-control"></div>
+          <button type="button" class="diagnostic-toggle" id="pause-all" title="Freeze the entire composition exactly where it is. Independent of HOLD and Video Pause.">Pause All</button>
         </div>
         <div class="stage-frame" id="stage-frame">
           <canvas id="canvas"></canvas>
@@ -86,6 +89,8 @@ app.innerHTML = `
           <button id="play-pause" class="primary" title="Pause or resume source video. Independent of Phase Auto/Hold.">Pause</button>
           <button type="button" class="diagnostic-toggle" id="audio-toggle" title="Hear source video audio, or mute. Independent of HOLD.">Audio</button>
           <button id="swap" title="Reverse the source sequence">Reverse</button>
+          <button type="button" id="randomise" title="Curated variation of the current behaviour, frozen as a still">Randomise</button>
+          <button type="button" id="randomise-undo" disabled title="Restore the previous composition">Undo</button>
         </div>
         <div class="export-panel" id="export-panel">
           <div class="export-row">
@@ -164,6 +169,9 @@ const controlsEl = document.querySelector<HTMLDivElement>("#controls")!;
 const titleEl = document.querySelector<HTMLHeadingElement>("#behavior-title")!;
 const descEl = document.querySelector<HTMLParagraphElement>("#behavior-desc")!;
 const playPauseBtn = document.querySelector<HTMLButtonElement>("#play-pause")!;
+const pauseAllBtn = document.querySelector<HTMLButtonElement>("#pause-all")!;
+const randomiseBtn = document.querySelector<HTMLButtonElement>("#randomise")!;
+const randomiseUndoBtn = document.querySelector<HTMLButtonElement>("#randomise-undo")!;
 const audioBtn = document.querySelector<HTMLButtonElement>("#audio-toggle")!;
 const swapBtn = document.querySelector<HTMLButtonElement>("#swap")!;
 const aspectToggle = document.querySelector<HTMLDivElement>("#aspect-toggle")!;
@@ -823,6 +831,140 @@ audioBtn.addEventListener("click", () => {
 
 swapBtn.addEventListener("click", () => renderer.swap());
 
+interface ExploreSnapshot {
+  params: ParamValues;
+  fields: FieldExploreState[];
+  clockMode: ClockMode;
+  holdPhase: number;
+  elapsed: number;
+  graphicElapsed: number;
+  frozen: boolean;
+  playing: boolean;
+  randomisationSeed: number;
+}
+
+let randomisationSeed = 0;
+let undoSnapshot: ExploreSnapshot | null = null;
+
+function collectFieldStates(): FieldExploreState[] {
+  const out: FieldExploreState[] = [];
+  for (const item of renderer.getSequence()) {
+    const g = asGraphic(item.asset);
+    if (!g) continue;
+    out.push({ id: item.id, field: { ...g.getField() } });
+  }
+  return out;
+}
+
+function applyFieldStates(fields: FieldExploreState[]): void {
+  for (const entry of fields) {
+    const item = renderer.getSequence().find((s) => s.id === entry.id);
+    const g = asGraphic(item?.asset ?? null);
+    if (!g) continue;
+    g.patchField({ ...entry.field });
+  }
+}
+
+function captureExploreSnapshot(): ExploreSnapshot {
+  return {
+    params: { ...currentParams },
+    fields: collectFieldStates(),
+    clockMode: renderer.getClockMode(),
+    holdPhase: renderer.getLoopPhase(),
+    elapsed: renderer.getElapsed(),
+    graphicElapsed: renderer.getGraphicElapsed(),
+    frozen: renderer.isFrozen(),
+    playing: renderer.isPlaying(),
+    randomisationSeed,
+  };
+}
+
+function syncFreezeButton(): void {
+  pauseAllBtn.classList.toggle("active", renderer.isFrozen());
+}
+
+function restoreClockUi(mode: ClockMode, phase: number): void {
+  phaseUi.setMode(mode);
+  phaseUi.setDisplayedPhase(phase);
+}
+
+function applyExploreSnapshot(snap: ExploreSnapshot): void {
+  currentParams = { ...snap.params };
+  lastParamsByBehavior.set(currentBehavior.id, currentParams);
+  rememberCurrentExpression();
+  applyFieldStates(snap.fields);
+  renderer.setBehavior(currentBehavior, currentParams);
+  renderer.setGraphicElapsed(snap.graphicElapsed);
+  renderer.restoreClock(snap.clockMode, snap.holdPhase, snap.elapsed);
+  if (snap.playing) renderer.play();
+  else renderer.pause();
+  renderer.setFrozen(snap.frozen);
+  randomisationSeed = snap.randomisationSeed;
+  restoreClockUi(snap.clockMode, renderer.getPhase());
+  rebuildControlsPanel();
+  rebuildGraphicPanel();
+  syncTreatmentUI();
+  syncPresetUI();
+  syncFreezeButton();
+  updatePlayPauseLabel();
+  renderer.renderExploreFrame();
+}
+
+function applyRandomise(): void {
+  undoSnapshot = captureExploreSnapshot();
+  randomiseUndoBtn.disabled = false;
+  const seed = newRandomisationSeed();
+  randomisationSeed = seed;
+  const pair = renderer.getActivePair();
+  const result = generateRandomisation({
+    seed,
+    behaviorId: currentBehavior.id,
+    treatment: String(currentParams.treatment ?? ""),
+    params: currentParams,
+    loopSeconds: renderer.getLoopSeconds(),
+    pairIndex: pair.pairIndex,
+    pairCount: Math.max(1, pair.pairCount),
+    fields: collectFieldStates(),
+  });
+  currentParams = result.params;
+  lastParamsByBehavior.set(currentBehavior.id, currentParams);
+  rememberCurrentExpression();
+  applyFieldStates(result.fields);
+  renderer.setBehavior(currentBehavior, currentParams);
+  renderer.setGraphicElapsed(result.graphicElapsed);
+  renderer.setHoldPhase(result.holdPhase);
+  renderer.setFrozen(true);
+  restoreClockUi("hold", result.holdPhase);
+  rebuildControlsPanel();
+  rebuildGraphicPanel();
+  syncTreatmentUI();
+  syncPresetUI();
+  syncFreezeButton();
+  renderer.renderExploreFrame();
+}
+
+function undoRandomise(): boolean {
+  if (!undoSnapshot) return false;
+  const snap = undoSnapshot;
+  undoSnapshot = null;
+  randomiseUndoBtn.disabled = true;
+  applyExploreSnapshot(snap);
+  return true;
+}
+
+pauseAllBtn.addEventListener("click", () => {
+  renderer.setFrozen(!renderer.isFrozen());
+  syncFreezeButton();
+});
+
+randomiseBtn.addEventListener("click", () => {
+  applyRandomise();
+});
+
+randomiseUndoBtn.addEventListener("click", () => {
+  undoRandomise();
+});
+
 // --- diagnostic: cycle off -> mask -> boundary -> off. Boundary is only
 // meaningful for a behavior that defines renderBoundary (Bloom); for one
 // that doesn't (Shift) that state is skipped entirely. ---
@@ -913,6 +1055,13 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     loopSeconds: renderer.getLoopSeconds(),
     selectedId: renderer.getSelectedId(),
     audioEnabled: renderer.isAudioEnabled(),
+    clockMode: renderer.getClockMode(),
+    holdPhase: renderer.getLoopPhase(),
+    elapsed: renderer.getElapsed(),
+    graphicElapsed: renderer.getGraphicElapsed(),
+    frozen: renderer.isFrozen(),
+    playing: renderer.isPlaying(),
+    randomisationSeed,
     sources: renderer.getSequence().map((item) => ({
       id: item.id,
       asset: item.asset,
@@ -945,6 +1094,19 @@ function loadSavedState(state: SavedState): void {
   );
   renderer.setAudioEnabled(state.audioEnabled !== false);
   syncAudioButton();
+  if (state.graphicElapsed != null) renderer.setGraphicElapsed(state.graphicElapsed);
+  if (state.clockMode === "hold") {
+    renderer.restoreClock("hold", state.holdPhase ?? renderer.getLoopPhase(), state.elapsed ?? renderer.getElapsed());
+  } else if (state.clockMode === "auto") {
+    renderer.restoreClock("auto", state.holdPhase ?? renderer.getLoopPhase(), state.elapsed ?? renderer.getElapsed());
+  }
+  if (state.playing === false) renderer.pause();
+  else if (state.playing === true) renderer.play();
+  renderer.setFrozen(state.frozen === true);
+  randomisationSeed = state.randomisationSeed ?? 0;
+  restoreClockUi(renderer.getClockMode(), renderer.getPhase());
+  syncFreezeButton();
+  updatePlayPauseLabel();
   syncSourceInspector();
   rebuildGraphicPanel();
   rebuildCompositionPanel();
@@ -1159,6 +1321,7 @@ resizeToStage();
 renderer.play();
 updatePlayPauseLabel();
 syncAudioButton();
+syncFreezeButton();
 
 /** Product default: Media A × Field Core B, Bloom restrained-to-medium,
  * Print on, B&W off. Not an extreme showcase. */
@@ -1230,6 +1393,24 @@ Object.assign(window, {
     },
     getClockMode: () => renderer.getClockMode(),
     isPlaying: () => renderer.isPlaying(),
+    isFrozen: () => renderer.isFrozen(),
+    setFrozen: (on: boolean) => {
+      renderer.setFrozen(on);
+      syncFreezeButton();
+    },
+    getGraphicElapsed: () => renderer.getGraphicElapsed(),
+    getElapsed: () => renderer.getElapsed(),
+    getRandomisationSeed: () => randomisationSeed,
+    randomise: () => {
+      applyRandomise();
+      return { seed: randomisationSeed, phase: renderer.getLoopPhase(), frozen: renderer.isFrozen(), params: { ...currentParams } };
+    },
+    undoRandomise: () => undoRandomise(),
+    canvasSha: async () => {
+      const img = renderer.getVisibleImageData();
+      const digest = await crypto.subtle.digest("SHA-256", img.data);
+      return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    },
     getParams: () => ({ ...currentParams }),
     setParams: (patch: ParamValues) => onParamsChange(patch),
     selectBehavior: (id: string) => selectBehavior(id),

@@ -31,6 +31,15 @@ export interface SavedState {
   selectedId: string | null;
   audioEnabled: boolean;
   sources: SavedSource[];
+  /** Optional freeze/clock fields so a randomised still can be restored
+   *  in-session. Older saves omit them. */
+  clockMode?: "auto" | "hold";
+  holdPhase?: number;
+  elapsed?: number;
+  graphicElapsed?: number;
+  frozen?: boolean;
+  playing?: boolean;
+  randomisationSeed?: number;
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;

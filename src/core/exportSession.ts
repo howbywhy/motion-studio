@@ -48,18 +48,43 @@ export async function runExport(
   const quality = new Quality(request.quality === "high" ? "high" : "medium");
   const filename = stampName(renderer, request.format, meta.behaviorId, meta.treatment);
   const holdPhase = renderer.getLoopPhase();
+  const graphicElapsed = renderer.getGraphicElapsed();
 
   const throwIfAborted = (): void => {
     if (signal.aborted) throw new DOMException("Export cancelled", "AbortError");
   };
 
-  renderer.beginExport(width, height);
   const t0 = performance.now();
   let encodeMs = 0;
+
+  if (request.format === "png" && request.size === "preview") {
+    onProgress({ ratio: 0.15, label: "EXPORTING 15%" });
+    throwIfAborted();
+    const live = renderer.getVisibleCanvas();
+    const blob = await new Promise<Blob | null>((resolve) => live.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("PNG encode failed");
+    encodeMs = performance.now() - t0;
+    onProgress({ ratio: 1, label: "DONE" });
+    return {
+      blob,
+      filename,
+      width: live.width,
+      height: live.height,
+      fps: 0,
+      duration: 0,
+      videoCodec: "png",
+      audioCodec: null,
+      bytes: blob.size,
+      renderMs: encodeMs,
+      encodeMs,
+    };
+  }
+
+  renderer.beginExport(width, height);
   try {
     if (request.format === "png") {
       onProgress({ ratio: 0.15, label: "EXPORTING 15%" });
-      await renderer.renderExportFrame(holdPhase * duration);
+      await renderer.renderExportFrame(holdPhase * duration, { graphicTime: graphicElapsed });
       throwIfAborted();
       const blob = await new Promise<Blob | null>((resolve) => renderer.getVisibleCanvas().toBlob(resolve, "image/png"));
       if (!blob) throw new Error("PNG encode failed");

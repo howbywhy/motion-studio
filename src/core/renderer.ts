@@ -177,6 +177,11 @@ export class Renderer {
    * and Live frequency modulation both read this clock — HOLD does not
    * freeze it. Live FIELD is source motion, not behaviour motion. */
   private graphicElapsed = 0;
+  /** Master freeze. Stops every preview clock (behaviour, sequence, Live
+   * FIELD, video, audio) without resetting any of them. Distinct from HOLD
+   * (phase only) and Video Pause (source video only). Export ignores this
+   * and still walks the full deterministic loop. */
+  private frozen = false;
   lastProfile: FrameProfile | null = null;
   private exporting = false;
   private exportClock: { loopPhase: number; graphicTime: number } | null = null;
@@ -188,6 +193,7 @@ export class Renderer {
     elapsed: number;
     graphicElapsed: number;
     playing: boolean;
+    frozen: boolean;
     videos: { el: HTMLVideoElement; time: number; paused: boolean }[];
   } | null = null;
 
@@ -507,6 +513,42 @@ export class Renderer {
     this.renderFrame();
   }
 
+  restoreClock(mode: ClockMode, holdPhase: number, elapsed: number): void {
+    this.clockMode = mode;
+    this.holdPhase = clampLoopPhase(holdPhase);
+    this.elapsed = Math.max(0, elapsed);
+    this.lastTs = performance.now();
+    this.renderFrame();
+  }
+
+  getElapsed(): number {
+    return this.elapsed;
+  }
+
+  getGraphicElapsed(): number {
+    return this.graphicElapsed;
+  }
+
+  setGraphicElapsed(seconds: number): void {
+    this.graphicElapsed = Math.max(0, seconds);
+  }
+
+  setFrozen(on: boolean): void {
+    if (this.frozen === on) return;
+    this.frozen = on;
+    this.lastTs = performance.now();
+    this.syncActiveVideos();
+    this.syncAudio();
+  }
+
+  isFrozen(): boolean {
+    return this.frozen;
+  }
+
+  videosWantPlay(): boolean {
+    return this.playing && !this.frozen && !this.exporting;
+  }
+
   /** Global sequence position 0..1. Behaviours receive pair-local phase. */
   getPhase(): number {
     return this.getLoopPhase();
@@ -633,6 +675,7 @@ export class Renderer {
       elapsed: this.elapsed,
       graphicElapsed: this.graphicElapsed,
       playing: this.playing,
+      frozen: this.frozen,
       videos,
     };
     this.exporting = true;
@@ -656,28 +699,28 @@ export class Renderer {
     this.elapsed = snap.elapsed;
     this.graphicElapsed = snap.graphicElapsed;
     this.playing = snap.playing;
+    this.frozen = snap.frozen;
+    this.lastTs = performance.now();
     for (const v of snap.videos) {
       try {
         v.el.currentTime = v.time;
-        if (!v.paused && snap.playing) void v.el.play().catch(() => undefined);
+        if (!v.paused && snap.playing && !snap.frozen) void v.el.play().catch(() => undefined);
         else v.el.pause();
       } catch {
         /* seek restore is best-effort */
       }
     }
     this.resize(snap.cssWidth, snap.cssHeight);
-    if (snap.playing) {
-      this.syncActiveVideos();
-      this.syncAudio();
-    }
+    this.syncActiveVideos();
+    this.syncAudio();
     this.renderFrame();
   }
 
-  async renderExportFrame(timeSec: number): Promise<void> {
+  async renderExportFrame(timeSec: number, opts?: { graphicTime?: number }): Promise<void> {
     const prev = this.exportClock;
     this.exportClock = {
       loopPhase: loopPhaseFromElapsed(timeSec, this.loopSeconds),
-      graphicTime: Math.max(0, timeSec),
+      graphicTime: opts?.graphicTime ?? Math.max(0, timeSec),
     };
     try {
       this.bindActivePair();
@@ -723,6 +766,7 @@ export class Renderer {
   mediaInfo(): {
     swapped: boolean;
     playing: boolean;
+    frozen: boolean;
     sequenceLength: number;
     loopPhase: number;
     localPhase: number;
@@ -732,6 +776,8 @@ export class Renderer {
     seam: string;
     audioLabel: string | null;
     audioUnlocked: boolean;
+    graphicElapsed: number;
+    elapsed: number;
     A: { kind: string; label: string; w: number; h: number; paused: boolean | null; currentTime: number | null; muted: boolean | null; motion: string | null } | null;
     B: { kind: string; label: string; w: number; h: number; paused: boolean | null; currentTime: number | null; muted: boolean | null; motion: string | null } | null;
   } {
@@ -757,6 +803,7 @@ export class Renderer {
     return {
       swapped: false,
       playing: this.playing,
+      frozen: this.frozen,
       sequenceLength: this.items.length,
       loopPhase: this.getLoopPhase(),
       localPhase: mapping.localPhase,
@@ -766,6 +813,8 @@ export class Renderer {
       seam: getSeamCandidate(),
       audioLabel: this.audioAsset?.label ?? null,
       audioUnlocked: this.audioUnlocked,
+      graphicElapsed: this.graphicElapsed,
+      elapsed: this.elapsed,
       A: slot(this.mediaA),
       B: slot(this.mediaB),
     };
@@ -773,6 +822,14 @@ export class Renderer {
 
   /** Source pixels changed (graphic params, etc.) — Print ink must rebuild. */
   touchMedia(): void {
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  /** Discrete explore jump (randomise / undo). Do not inherit FIELD ink
+   *  smoothing or Print plates from the previous composition. */
+  renderExploreFrame(): void {
+    resetFieldInkSmoothing();
     this.invalidatePrintInk();
     this.renderFrame();
   }
@@ -838,18 +895,19 @@ export class Renderer {
 
   private syncOneVideo(asset: MediaAsset): void {
     if (!asset.videoEl) return;
-    if (this.playing) void asset.videoEl.play().catch(() => undefined);
+    if (this.videosWantPlay()) void asset.videoEl.play().catch(() => undefined);
     else asset.videoEl.pause();
   }
 
-  /** Keep every sequence video decoding while Play is on. Pair changes
-   * only retarget mute — they must not pause/play, which clicks and can
-   * reset decoder state. */
+  /** Keep every sequence video decoding while Play is on and the master
+   * freeze is off. Pair changes only retarget mute — they must not
+   * pause/play, which clicks and can reset decoder state. */
   private syncActiveVideos(): void {
+    const want = this.videosWantPlay();
     for (const item of this.items) {
       const video = item.asset.videoEl;
       if (!video) continue;
-      if (this.playing) void video.play().catch(() => undefined);
+      if (want) void video.play().catch(() => undefined);
       else video.pause();
     }
   }
@@ -869,10 +927,12 @@ export class Renderer {
     }
     const dt = (ts - this.lastTs) / 1000;
     this.lastTs = ts;
-    if (this.clockMode === "auto") this.elapsed += dt;
-    this.graphicElapsed += dt;
-    this.renderFrame();
-    this.syncAudio();
+    if (!this.frozen) {
+      if (this.clockMode === "auto") this.elapsed += dt;
+      this.graphicElapsed += dt;
+      this.renderFrame();
+      this.syncAudio();
+    }
     if (this.loopActive) requestAnimationFrame(this.tick);
   };
 
@@ -954,7 +1014,8 @@ export class Renderer {
         ? this.mediaA
         : this.items.find((item) => videoMayOwnAudio(item.asset))?.asset ?? null
       : this.pickAudioAsset(mapping.localPhase);
-    const wantSound = this.playing && this.audioEnabled && this.audioUnlocked && Boolean(owner?.videoEl);
+    const wantSound =
+      this.playing && !this.frozen && !this.exporting && this.audioEnabled && this.audioUnlocked && Boolean(owner?.videoEl);
     const active = new Set<HTMLVideoElement>();
     for (const item of this.items) {
       const video = item.asset.videoEl;
