@@ -10,7 +10,7 @@ import {
   canEncodeVideo,
 } from "mediabunny";
 import type { Renderer } from "./renderer";
-import { mixExportAudio } from "./exportAudio";
+import { mixExportAudio, clearExportAudioCache } from "./exportAudio";
 import { encodeCanvasWebP, frameDurationMs, muxAnimatedWebP } from "./webpAnim";
 import {
   exportFilename,
@@ -121,7 +121,7 @@ export async function runExport(
     let audioOmittedReason: string | undefined;
     if (request.includeAudio) {
       onProgress({ ratio: 0.02, label: "EXPORTING 2%" });
-      const mix = await mixExportAudio(renderer, duration);
+      const mix = await mixExportAudio(renderer, duration, signal);
       audioBuffer = mix.buffer;
       if (!audioBuffer) {
         audioOmittedReason = mix.reason ?? "No sequence-owned video soundtrack to export.";
@@ -201,6 +201,7 @@ export async function runExport(
       throw err;
     }
   } finally {
+    clearExportAudioCache();
     renderer.endExport();
   }
 }

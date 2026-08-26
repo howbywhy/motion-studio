@@ -86,11 +86,3 @@ export function sequenceEnvelope(
   if (p <= holdUntil) return { behaviorPhase: 0.5, resolve: 0 };
   return { behaviorPhase: 0.5, resolve: smoothstep((p - holdUntil) / (1 - holdUntil)) };
 }
-
-export function sequenceProgressToBehaviorPhase(
-  behaviorId: string | undefined,
-  treatment: string | undefined,
-  pairProgress: number,
-): number {
-  return sequenceEnvelope(behaviorId, treatment, pairProgress).behaviorPhase;
-}

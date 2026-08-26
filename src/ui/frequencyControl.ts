@@ -28,7 +28,7 @@ export function buildFrequencyControl(
   svg.setAttribute("height", String(H));
   svg.classList.add("fragment-svg");
   svg.setAttribute("role", "slider");
-  svg.setAttribute("aria-label", "Graphic frequency");
+  svg.setAttribute("aria-label", "FIELD frequency");
   body.appendChild(svg);
 
   const track = document.createElementNS(svgNS, "rect");

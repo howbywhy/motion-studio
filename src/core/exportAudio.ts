@@ -46,6 +46,10 @@ async function decodeAssetAudio(
   }
 }
 
+export function clearExportAudioCache(): void {
+  decoded.clear();
+}
+
 function stitch(chunks: AudioBuffer[]): AudioBuffer | null {
   if (!chunks.length) return null;
   const rate = chunks[0]!.sampleRate;
@@ -75,11 +79,17 @@ function sampleAt(buffer: AudioBuffer, channel: number, timeSec: number): number
 }
 
 /** Mix sequence-owned video audio into one buffer for the export loop. */
-export async function mixExportAudio(renderer: Renderer, durationSec: number): Promise<MixExportAudioResult> {
+export async function mixExportAudio(
+  renderer: Renderer,
+  durationSec: number,
+  signal?: AbortSignal,
+): Promise<MixExportAudioResult> {
+  if (signal?.aborted) throw new DOMException("Export cancelled", "AbortError");
   const sources: { asset: MediaAsset; buffer: AudioBuffer }[] = [];
   let decodeError: string | null = null;
   for (const item of renderer.getSequence()) {
     const { buffer, error } = await decodeAssetAudio(item.asset, durationSec);
+    if (signal?.aborted) throw new DOMException("Export cancelled", "AbortError");
     if (error) decodeError = error;
     if (buffer && buffer.duration > 0.04) sources.push({ asset: item.asset, buffer });
   }

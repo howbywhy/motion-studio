@@ -358,6 +358,7 @@ sourceRemoveBtn.addEventListener("click", () => {
   const item = selectedItem();
   if (!item || renderer.getSequence().length <= 1) return;
   const dispose = !isAssetReferencedBySavedState(item.asset);
+  lastMediaById.delete(item.id);
   renderer.removeSource(item.id, { dispose });
   syncSourceInspector();
   rebuildGraphicPanel();
@@ -838,9 +839,9 @@ showMaskBtn.addEventListener("click", () => {
   updateDiagnosticLabel(mode);
 });
 
-// --- global output-layer toggles: Registration, B&W. Deliberately binary
+// --- global output-layer toggles: Print, B&W. Deliberately binary
 // (no strength slider), applied after whatever behavior/treatment is
-// active, unaffected by behavior switching, media type, or Swap A/B — see
+// active, unaffected by behavior switching, media type, or Reverse — see
 // Renderer.finalizeOutput. ---
 registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
 registrationBtn.addEventListener("click", () => {
@@ -1208,6 +1209,10 @@ function applyProductDefault(): void {
 
 applyProductDefault();
 
+window.addEventListener("pagehide", () => {
+  renderer.pause();
+});
+
 Object.assign(window, {
   __motionStudio: {
     setProfiling: (on: boolean) => renderer.setProfiling(on),
@@ -1260,6 +1265,8 @@ Object.assign(window, {
       includeAudio?: boolean;
     }) => {
       const { runExport } = await import("./core/exportSession");
+      exportAbort = new AbortController();
+      (window as unknown as { __exportPct: number }).__exportPct = 0;
       return runExport(
         renderer,
         {
@@ -1274,8 +1281,10 @@ Object.assign(window, {
           behaviorId: currentBehavior.id,
           treatment: String(currentParams.treatment ?? "export"),
         },
-        () => undefined,
-        new AbortController().signal,
+        (p) => {
+          (window as unknown as { __exportPct: number }).__exportPct = p.ratio;
+        },
+        exportAbort.signal,
       ).then((r) => {
         lastExportResult = {
           filename: r.filename,
@@ -1291,9 +1300,17 @@ Object.assign(window, {
           audioOmittedReason: r.audioOmittedReason,
         };
         (window as unknown as { __motionStudioLastBlob: Blob }).__motionStudioLastBlob = r.blob;
-        return { ...lastExportResult, blobUrl: URL.createObjectURL(r.blob) };
+        const prevUrl = (window as unknown as { __motionStudioLastBlobUrl?: string }).__motionStudioLastBlobUrl;
+        if (prevUrl) URL.revokeObjectURL(prevUrl);
+        const blobUrl = URL.createObjectURL(r.blob);
+        (window as unknown as { __motionStudioLastBlobUrl?: string }).__motionStudioLastBlobUrl = blobUrl;
+        return { ...lastExportResult, blobUrl };
+      }).finally(() => {
+        exportAbort = null;
       });
     },
+    abortExport: () => exportAbort?.abort(),
+    isExporting: () => renderer.isExporting(),
     compareHoldExport: async (phase: number) => {
       renderer.pause();
       renderer.setHoldPhase(phase);

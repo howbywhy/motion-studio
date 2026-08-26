@@ -132,16 +132,6 @@ export const FIELD_TERRITORIES = {
 
 export const DEFAULT_FIELD: FieldParams = { ...FIELD_TERRITORIES.core };
 
-export const DEFAULT_FIELD_B: FieldParams = {
-  ...FIELD_TERRITORIES.core,
-  density: 48,
-  scale: 58,
-  complexity: 40,
-  biasX: 64,
-  biasY: 38,
-  seed: 11,
-};
-
 export function hash2(ix: number, iy: number, seed: number): number {
   const x = ix | 0;
   const y = iy | 0;

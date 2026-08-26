@@ -164,13 +164,22 @@ export function refreshSoundtrack(asset: MediaAsset): void {
   }
 }
 
+/** Pause and mute a video that is leaving the active sequence but must
+ * remain loaded (saved state / Media↔FIELD toggle). Does not revoke URLs. */
+export function parkMediaAsset(asset: MediaAsset | null | undefined): void {
+  const video = asset?.videoEl;
+  if (!video) return;
+  video.pause();
+  video.muted = true;
+}
+
 /** Releases everything a loaded asset holds — the decoded video element
  * (paused and detached) and its object URL. Safe to call on placeholders
  * (no videoEl/objectUrl) or null. */
 export function disposeMediaAsset(asset: MediaAsset | null | undefined): void {
   if (!asset) return;
+  parkMediaAsset(asset);
   if (asset.videoEl) {
-    asset.videoEl.pause();
     asset.videoEl.removeAttribute("src");
     asset.videoEl.load();
     asset.videoEl.remove();

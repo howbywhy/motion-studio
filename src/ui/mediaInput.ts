@@ -1,6 +1,6 @@
 import { defaultTransform, detectMediaKind, isAnimatedWebP, type MediaAsset } from "../core/media";
 
-const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
+const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
 
 export function loadMediaFile(
   file: File,
@@ -17,6 +17,10 @@ function loadFile(
   onLoad: (asset: MediaAsset) => void,
   onError: (message: string) => void
 ): void {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    onError(`File is too large to load in the browser (${file.name}). Try a smaller export.`);
+    return;
+  }
   const kind = detectMediaKind(file);
   if (!kind) {
     onError(`Unsupported file type: ${file.name}`);
@@ -80,8 +84,11 @@ function loadFile(
   video.preload = "auto";
   videoHost.appendChild(video);
 
+  let committed = false;
   const commit = (): void => {
+    if (committed) return;
     if (video.videoWidth < 1 || video.videoHeight < 1) return;
+    committed = true;
     onLoad({
       kind: "video",
       source: video,
@@ -93,10 +100,12 @@ function loadFile(
       transform: defaultTransform(),
     });
   };
-  video.addEventListener("loadeddata", commit, { once: true });
+  video.addEventListener("loadeddata", commit);
+  video.addEventListener("loadedmetadata", commit);
   video.addEventListener(
     "error",
     () => {
+      if (committed) return;
       URL.revokeObjectURL(objectUrl);
       video.remove();
       onError(`Could not decode video: ${file.name} (this browser may not support this format)`);
@@ -104,45 +113,4 @@ function loadFile(
     { once: true }
   );
   video.src = objectUrl;
-}
-
-/** Wires `zone` as both a click-to-browse target and a drag/drop target
- * for a single media slot, accepting images and videos alike. */
-export function wireMediaDropZone(
-  zone: HTMLElement,
-  videoHost: HTMLElement,
-  onLoad: (asset: MediaAsset) => void,
-  onError: (message: string) => void
-): void {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ACCEPT;
-  input.style.display = "none";
-  zone.appendChild(input);
-
-  zone.addEventListener("click", (e) => {
-    if (zone.dataset.filePick === "off") return;
-    const t = e.target as HTMLElement;
-    if (t.closest(".seg-toggle, input, textarea, .graphic-slot-ui")) return;
-    input.click();
-  });
-  input.addEventListener("change", () => {
-    const file = input.files?.[0];
-    if (file) loadFile(file, videoHost, onLoad, onError);
-    input.value = "";
-  });
-
-  zone.addEventListener("dragover", (e) => {
-    if (zone.dataset.filePick === "off") return;
-    e.preventDefault();
-    zone.classList.add("drag-over");
-  });
-  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
-  zone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    zone.classList.remove("drag-over");
-    if (zone.dataset.filePick === "off") return;
-    const file = e.dataTransfer?.files?.[0];
-    if (file) loadFile(file, videoHost, onLoad, onError);
-  });
 }

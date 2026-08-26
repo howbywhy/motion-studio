@@ -1,5 +1,5 @@
 /**
- * Generates two default placeholder "photos" purely from canvas drawing
+ * Generates a default placeholder "photo" purely from canvas drawing
  * (gradients + soft geometric shapes, no text/logos) so the tool has
  * visible, non-black content to test masking correctness against before
  * any real images are dropped in.
@@ -47,48 +47,6 @@ export function placeholderA(): HTMLCanvasElement {
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, h);
-    ctx.stroke();
-  }
-
-  return c;
-}
-
-export function placeholderB(): HTMLCanvasElement {
-  const w = 1200;
-  const h = 1500;
-  const c = makeCanvas(w, h);
-  const ctx = c.getContext("2d")!;
-
-  const g = ctx.createLinearGradient(0, h, w, 0);
-  g.addColorStop(0, "#0c1a2b");
-  g.addColorStop(0.5, "#1f4e6b");
-  g.addColorStop(1, "#7fd6d1");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.globalAlpha = 0.3;
-  for (let i = 0; i < 8; i++) {
-    const rg = ctx.createRadialGradient(
-      (i * 271) % w,
-      (i * 419) % h,
-      0,
-      (i * 271) % w,
-      (i * 419) % h,
-      Math.max(w, h) * 0.25
-    );
-    rg.addColorStop(0, "#d8fbf8");
-    rg.addColorStop(1, "rgba(216,251,248,0)");
-    ctx.fillStyle = rg;
-    ctx.fillRect(0, 0, w, h);
-  }
-  ctx.globalAlpha = 1;
-
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
-  ctx.lineWidth = 2;
-  for (let y = 0; y < h; y += 60) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
     ctx.stroke();
   }
 

@@ -32,13 +32,6 @@ export const EASING_OPTIONS: { value: EasingId; label: string }[] = [
   { value: "easeOutBack", label: "Ease Out Back" },
 ];
 
-/** Triangle wave: maps linear time to a 0..1..0 bounce over period `period`. */
-export function pingPong(time: number, period: number): number {
-  if (period <= 0) return 0;
-  const t = time % (period * 2);
-  return t < period ? t / period : 2 - t / period;
-}
-
 export function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }

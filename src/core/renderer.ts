@@ -1,7 +1,7 @@
 import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
-import { clampTransform, disposeMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
+import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk } from "./registrationInk";
 import {
   applyFieldInk,
@@ -291,6 +291,8 @@ export class Renderer {
     const [removed] = this.items.splice(index, 1);
     if (!removed) return null;
     if (this.selectedId === id) this.selectedId = this.items[Math.min(index, this.items.length - 1)]?.id ?? null;
+    if (this.audioAsset === removed.asset) this.audioAsset = null;
+    parkMediaAsset(removed.asset);
     this.bindActivePair();
     this.invalidatePrintInk();
     this.renderFrame();
@@ -305,7 +307,7 @@ export class Renderer {
     this.renderFrame();
   }
 
-  /** Reverse sequence order. Replaces Swap A/B now that slots are not permanent. */
+  /** Reverse sequence order. */
   reverseSequence(): void {
     this.items = this.items.slice().reverse();
     this.bindActivePair();
@@ -318,6 +320,8 @@ export class Renderer {
     if (index < 0) return;
     const prev = this.items[index]!.asset;
     this.items[index] = { id, asset };
+    if (this.audioAsset === prev) this.audioAsset = null;
+    if (prev && prev !== asset) parkMediaAsset(prev);
     this.syncGraphicRasters();
     this.syncOneVideo(asset);
     this.bindActivePair();
@@ -670,13 +674,18 @@ export class Renderer {
   }
 
   async renderExportFrame(timeSec: number): Promise<void> {
+    const prev = this.exportClock;
     this.exportClock = {
       loopPhase: loopPhaseFromElapsed(timeSec, this.loopSeconds),
       graphicTime: Math.max(0, timeSec),
     };
-    this.bindActivePair();
-    await this.seekActivePairVideos(timeSec);
-    this.renderFrame();
+    try {
+      this.bindActivePair();
+      await this.seekActivePairVideos(timeSec);
+      this.renderFrame();
+    } finally {
+      if (!this.exporting) this.exportClock = prev;
+    }
   }
 
   audioOwnerAt(loopPhase: number): MediaAsset | null {
@@ -861,7 +870,6 @@ export class Renderer {
     const dt = (ts - this.lastTs) / 1000;
     this.lastTs = ts;
     if (this.clockMode === "auto") this.elapsed += dt;
-    if (this.playing) this.graphicElapsed += dt;
     this.graphicElapsed += dt;
     this.renderFrame();
     this.syncAudio();
@@ -947,10 +955,17 @@ export class Renderer {
         : this.items.find((item) => videoMayOwnAudio(item.asset))?.asset ?? null
       : this.pickAudioAsset(mapping.localPhase);
     const wantSound = this.playing && this.audioEnabled && this.audioUnlocked && Boolean(owner?.videoEl);
+    const active = new Set<HTMLVideoElement>();
     for (const item of this.items) {
       const video = item.asset.videoEl;
       if (!video) continue;
+      active.add(video);
       video.muted = !(wantSound && item.asset === owner);
+    }
+    for (const video of this.videoHost.querySelectorAll("video")) {
+      if (active.has(video)) continue;
+      video.pause();
+      video.muted = true;
     }
   }
 
