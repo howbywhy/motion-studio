@@ -1,35 +1,31 @@
 /**
- * FIELD — binary cellular source material.
+ * FIELD — full-frame binary graphic plate.
  *
- * Macro density + spatial bias → threshold → coarse raster →
- * connected-component meso (corridors, holes, related islands) →
- * coverage match → fine binary mark paint.
+ * Two scales, one material:
+ *   MACRO — a slow occupancy map (density, bias, scale). Never thresholded
+ *           into islands. Perceived as regions becoming denser or lighter.
+ *   MICRO — a fine orthogonal lattice of irregular digital marks whose
+ *           local black/white decision follows that occupancy.
  *
- * Two scales of information:
- *   MACRO / MESO — territory, holes, corridors, connected/fractured organisation
- *   SCREEN       — high-resolution binary line screen that renders those territories
- *
- * Topology is authored on a coarse grid. The screen is generated at source
- * resolution — never by upscaling a low-frequency texture.
+ * Marks may join into short cardinal runs. Complexity controls run length,
+ * not giant territories. Frequency is mark size, independent of Scale.
  *
  * Output is strictly monochrome at source level: 0 or 255, never grey.
- * Density = how much territory. Bias = where. Scale = macro unit size.
- * Complexity = connected ↔ fractured. Frequency = screen resolution.
  */
 
 export interface FieldParams {
-  /** 0–100. Black mass vs negative space — composition, not fill %. */
+  /** 0–100. Full-frame black mass vs white information. */
   density: number;
-  /** 0–100. Size of structural units (high = coarser). */
+  /** 0–100. Spatial scale of occupancy variation (high = broader). */
   scale: number;
-  /** 0–100. Connected (0) ↔ fractured (100). Not “add noise”. */
+  /** 0–100. Connected (0) ↔ fractured (100). Run length, not islands. */
   complexity: number;
-  /** 0–100. Where mass accumulates (50 = centre). */
+  /** 0–100. Where occupancy accumulates (50,50 = even). */
   biasX: number;
   biasY: number;
   seed: number;
   motion: "static" | "live";
-  /** 0–100. Spatial frequency of the editorial screen. Independent of Scale. */
+  /** 0–100. Visual frequency of marks. Independent of Scale. */
   frequency: number;
 }
 
@@ -41,18 +37,24 @@ export function clampFrequency(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
 
-/** Visual screen period in CSS pixels. More slider resolution in the
- * 2–5 px editorial band; low stays graphic without 10 px bars; high
- * approaches a micro-screen rather than 1-backing-px grain. */
-export function screenPeriodCss(frequency: number): number {
+/** Mark cell size in CSS pixels. Fine ≈ 1.2 px; coarse extreme ≈ 6.5 px.
+ *  Most of the slider lives in the 1.5–3.5 px editorial band. */
+export function markPeriodCss(frequency: number): number {
   const t = clampFrequency(frequency) / 100;
-  return 1.25 + 5.75 * Math.pow(1 - t, 2.35);
+  return 1.2 + 5.3 * Math.pow(1 - t, 1.9);
 }
 
-/** Backing-store period. Multiply by DPR so Frequency is a visual pitch,
- * not an accidental device-pixel density. */
+/** @deprecated alias — Frequency UI and older call sites. */
+export function screenPeriodCss(frequency: number): number {
+  return markPeriodCss(frequency);
+}
+
+export function markCellPx(frequency: number, dpr = 1): number {
+  return Math.max(1, Math.round(markPeriodCss(frequency) * Math.max(1, dpr)));
+}
+
 export function screenPeriod(frequency: number, dpr = 1): number {
-  return screenPeriodCss(frequency) * Math.max(1, dpr);
+  return markCellPx(frequency, dpr);
 }
 
 export interface LiveMotion {
@@ -63,26 +65,25 @@ export interface LiveMotion {
   biasY: number;
 }
 
-/** Deterministic Live phrase — not a visible sine. Incommensurate
- * periods so the loop point is hard to catch. No per-frame noise. */
+/** Deterministic Live phrase. Occupancy drifts; mark lattice does not
+ *  rebuild. No per-frame noise. */
 export function liveMotion(time: number): LiveMotion {
   const t = Math.max(0, time);
   const u = (t / LIVE_PHRASE_SECONDS) % 1;
-  let freqShape = 0;
-  if (u < 0.14) freqShape = 0;
-  else if (u < 0.3) freqShape = -smooth01((u - 0.14) / 0.16);
-  else if (u < 0.48) freqShape = -1 + 0.35 * smooth01((u - 0.3) / 0.18);
-  else if (u < 0.6) freqShape = -0.65 + 0.65 * smooth01((u - 0.48) / 0.12);
-  else if (u < 0.78) freqShape = 0.85 * smooth01((u - 0.6) / 0.18);
-  else if (u < 0.88) freqShape = 0.85 - 0.85 * smooth01((u - 0.78) / 0.1);
-  else freqShape = 0.15 * Math.sin(((u - 0.88) / 0.12) * Math.PI);
+  let amp = 0;
+  if (u < 0.16) amp = 0;
+  else if (u < 0.34) amp = -smooth01((u - 0.16) / 0.18);
+  else if (u < 0.52) amp = -1 + 0.4 * smooth01((u - 0.34) / 0.18);
+  else if (u < 0.66) amp = -0.6 + 0.6 * smooth01((u - 0.52) / 0.14);
+  else if (u < 0.84) amp = 0.7 * smooth01((u - 0.66) / 0.18);
+  else amp = 0.7 - 0.7 * smooth01((u - 0.84) / 0.16);
 
   return {
-    driftX: t * 0.017 + 0.07 * Math.sin(t * 0.093) + 0.035 * Math.sin(t * 0.041),
-    driftY: 0.1 * Math.sin(t * 0.067) + 0.04 * Math.sin(t * 0.029 + 1.1),
-    freqDelta: freqShape * 9,
-    biasX: 1.8 * Math.sin(t * 0.033) + 0.7 * Math.sin(t * 0.019 + 0.6),
-    biasY: 1.5 * Math.sin(t * 0.027 + 0.4) + 0.6 * Math.sin(t * 0.014),
+    driftX: t * 0.011 + 0.055 * Math.sin(t * 0.071) + 0.028 * Math.sin(t * 0.033),
+    driftY: t * 0.007 + 0.08 * Math.sin(t * 0.053) + 0.03 * Math.sin(t * 0.021 + 1.1),
+    freqDelta: amp * 4,
+    biasX: 1.4 * Math.sin(t * 0.027) + 0.55 * Math.sin(t * 0.016 + 0.6),
+    biasY: 1.2 * Math.sin(t * 0.023 + 0.4) + 0.45 * Math.sin(t * 0.012),
   };
 }
 
@@ -167,411 +168,163 @@ function valueNoise(x: number, y: number, seed: number): number {
   return a + (b - a) * fy;
 }
 
-/** One dominant octave. A weak second octave only breaks silhouettes. */
-function densityField(x: number, y: number, seed: number, freq: number): number {
+/** Slow occupancy. Two octaves only — variation, not a cloud demo. */
+function occupancyNoise(x: number, y: number, seed: number, freq: number): number {
   const n1 = valueNoise(x * freq, y * freq, seed);
-  const n2 = valueNoise(x * freq * 1.55 + 9.2, y * freq * 1.55, seed + 17) * 0.16;
-  return n1 * 0.84 + n2;
+  const n2 = valueNoise(x * freq * 1.7 + 8.1, y * freq * 1.35, seed + 19) * 0.22;
+  return n1 * 0.78 + n2;
 }
 
-function spatialBias(nx: number, ny: number, bx: number, by: number, density: number): number {
-  const dx = nx - bx;
-  const dy = ny - by;
-  const d = Math.sqrt(dx * dx + dy * dy);
-  const falloff = 0.88 + (1 - density) * 0.4;
-  return 1 - Math.min(1, d * falloff);
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-/** 14–34 columns. Never fine enough to read as static. */
-export function cellCounts(scale: number, aspectW: number, aspectH: number): { cols: number; rows: number } {
-  const t = Math.max(0, Math.min(100, scale)) / 100;
-  const cols = Math.round(14 + (1 - t) * 20);
-  const rows = Math.max(10, Math.round((cols * aspectH) / aspectW));
-  return { cols, rows };
+function occupancyAt(
+  nx: number,
+  ny: number,
+  params: FieldParams,
+  live: LiveMotion | null,
+): number {
+  const density = clamp01(params.density / 100);
+  const scale = clamp01(params.scale / 100);
+  const seed = params.seed | 0;
+  const bx = clamp01((params.biasX + (live?.biasX ?? 0)) / 100);
+  const by = clamp01((params.biasY + (live?.biasY ?? 0)) / 100);
+  const driftX = live?.driftX ?? 0;
+  const driftY = live?.driftY ?? 0;
+  const contrastPulse = 1 + (live?.freqDelta ?? 0) * 0.012;
+
+  const freq = 1.05 + (1 - scale) * 2.85;
+  const macro = occupancyNoise(nx + driftX, ny + driftY, seed, freq);
+  const tilt = (nx - 0.5) * (bx - 0.5) * 2 + (ny - 0.5) * (by - 0.5) * 2;
+  const amp = (0.15 + (1 - scale) * 0.14) * contrastPulse;
+  const base = 0.05 + density * 0.9;
+  return clamp01(base + (macro - 0.5) * amp + tilt * 0.34);
 }
 
-function neighborOn(grid: Uint8Array, cols: number, rows: number, x: number, y: number): number {
-  let on = 0;
-  for (let oy = -1; oy <= 1; oy++) {
-    for (let ox = -1; ox <= 1; ox++) {
-      if (ox === 0 && oy === 0) continue;
-      const xx = x + ox;
-      const yy = y + oy;
-      if (xx < 0 || yy < 0 || xx >= cols || yy >= rows) continue;
-      on += grid[yy * cols + xx]!;
-    }
-  }
-  return on;
+function neighbor4(on: Uint8Array, cols: number, rows: number, x: number, y: number): number {
+  let n = 0;
+  if (x > 0 && on[y * cols + x - 1]) n++;
+  if (x < cols - 1 && on[y * cols + x + 1]) n++;
+  if (y > 0 && on[(y - 1) * cols + x]) n++;
+  if (y < rows - 1 && on[(y + 1) * cols + x]) n++;
+  return n;
 }
 
-function majorityPass(grid: Uint8Array, cols: number, rows: number, need: number): Uint8Array<ArrayBuffer> {
-  const next = new Uint8Array(grid.length);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const on = neighborOn(grid, cols, rows, x, y) + grid[y * cols + x]!;
-      next[y * cols + x] = on >= need ? 1 : 0;
-    }
-  }
-  return next;
+function meanOcc(occ: Float32Array): number {
+  let s = 0;
+  for (let i = 0; i < occ.length; i++) s += occ[i]!;
+  return s / occ.length;
 }
 
-function dilate(grid: Uint8Array, cols: number, rows: number): Uint8Array<ArrayBuffer> {
-  const next = new Uint8Array(grid.length);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      next[y * cols + x] = grid[y * cols + x] || neighborOn(grid, cols, rows, x, y) > 0 ? 1 : 0;
-    }
-  }
-  return next;
-}
-
-function erode(grid: Uint8Array, cols: number, rows: number): Uint8Array<ArrayBuffer> {
-  const next = new Uint8Array(grid.length);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      next[y * cols + x] = grid[y * cols + x] && neighborOn(grid, cols, rows, x, y) >= 3 ? 1 : 0;
-    }
-  }
-  return next;
-}
-
-/** Drop connected components of `value` smaller than minSize. */
-function removeSmallComponents(
-  grid: Uint8Array,
-  cols: number,
-  rows: number,
-  value: number,
-  minSize: number,
-): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(grid) as Uint8Array<ArrayBuffer>;
-  const seen = new Uint8Array(grid.length);
-  const stack: number[] = [];
-  const fill: number[] = [];
-
-  for (let i = 0; i < grid.length; i++) {
-    if (seen[i] || out[i] !== value) continue;
-    stack.length = 0;
-    fill.length = 0;
-    stack.push(i);
-    seen[i] = 1;
-    while (stack.length) {
-      const idx = stack.pop()!;
-      fill.push(idx);
-      const x = idx % cols;
-      const y = (idx / cols) | 0;
-      const nbs = [idx - 1, idx + 1, idx - cols, idx + cols];
-      const ok = [x > 0, x < cols - 1, y > 0, y < rows - 1];
-      for (let k = 0; k < 4; k++) {
-        if (!ok[k]) continue;
-        const n = nbs[k]!;
-        if (seen[n] || out[n] !== value) continue;
-        seen[n] = 1;
-        stack.push(n);
-      }
-    }
-    if (fill.length < minSize) {
-      const flip = value ? 0 : 1;
-      for (const idx of fill) out[idx] = flip;
-    }
-  }
-  return out;
-}
-
-function coverage(grid: Uint8Array): number {
-  let on = 0;
-  for (let i = 0; i < grid.length; i++) on += grid[i]!;
-  return on / grid.length;
-}
-
-function peel(grid: Uint8Array, cols: number, rows: number): Uint8Array<ArrayBuffer> {
-  const next = new Uint8Array(grid.length);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      next[y * cols + x] = grid[y * cols + x] && neighborOn(grid, cols, rows, x, y) >= 6 ? 1 : 0;
-    }
-  }
-  return next;
-}
-
-/** Lowest `fraction` of ON-cell values — the weakly committed interior of this mass. */
-function onValueCutoff(grid: Uint8Array, values: Float32Array, fraction: number): number {
-  const on: number[] = [];
-  for (let i = 0; i < grid.length; i++) if (grid[i]) on.push(values[i]!);
-  if (on.length < 8) return Infinity;
-  on.sort((a, b) => a - b);
-  const idx = Math.min(on.length - 1, Math.max(0, Math.floor(on.length * fraction)));
-  return on[idx]!;
-}
-
-/** Interior local minima of the same value field — holes and pockets, not edge nibble. */
-function carveInteriorMinima(
-  grid: Uint8Array,
-  values: Float32Array,
-  cols: number,
-  rows: number,
-  complexity: number,
-): Uint8Array<ArrayBuffer> {
-  if (complexity < 0.26) return grid as Uint8Array<ArrayBuffer>;
-  const scored: { i: number; s: number }[] = [];
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      if (!grid[i]) continue;
-      const n = neighborOn(grid, cols, rows, x, y);
-      if (n < 6) continue;
-      let sum = 0;
-      let count = 0;
-      for (let oy = -1; oy <= 1; oy++) {
-        for (let ox = -1; ox <= 1; ox++) {
-          if (ox === 0 && oy === 0) continue;
-          const xx = x + ox;
-          const yy = y + oy;
-          if (xx < 0 || yy < 0 || xx >= cols || yy >= rows) continue;
-          sum += values[yy * cols + xx]!;
-          count++;
-        }
-      }
-      if (!count) continue;
-      scored.push({ i, s: sum / count - values[i]! });
-    }
-  }
-  if (!scored.length) return grid as Uint8Array<ArrayBuffer>;
-  scored.sort((a, b) => b.s - a.s);
-  const take = Math.max(1, Math.round(scored.length * (0.08 + (complexity - 0.26) * 0.45)));
-  const next = new Uint8Array(grid) as Uint8Array<ArrayBuffer>;
-  for (let k = 0; k < take; k++) next[scored[k]!.i] = 0;
-  return next;
-}
-function carveWeakMembership(
-  grid: Uint8Array,
-  values: Float32Array,
-  cols: number,
-  rows: number,
-  cutoff: number,
-): Uint8Array<ArrayBuffer> {
-  if (!Number.isFinite(cutoff)) return grid as Uint8Array<ArrayBuffer>;
-  const next = new Uint8Array(grid) as Uint8Array<ArrayBuffer>;
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      if (!grid[i]) continue;
-      if (values[i]! > cutoff) continue;
-      const n = neighborOn(grid, cols, rows, x, y);
-      if (n >= 2) next[i] = 0;
-    }
-  }
-  return next;
-}
-
-/**
- * Branches and related islands: raise near-threshold OFF cells that already
- * belong to the same density field, adjacent (or nearly adjacent) to the mass.
- */
-function growRelatedStructure(
-  grid: Uint8Array,
-  values: Float32Array,
-  cols: number,
-  rows: number,
-  thresh: number,
-  complexity: number,
-): Uint8Array<ArrayBuffer> {
-  if (complexity < 0.22) return grid as Uint8Array<ArrayBuffer>;
-  const attachBand = 0.06 + complexity * 0.12;
-  const islandBand = 0.03 + complexity * 0.08;
-  const next = new Uint8Array(grid) as Uint8Array<ArrayBuffer>;
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      if (grid[i]) continue;
-      const n = neighborOn(grid, cols, rows, x, y);
-      if (n >= 1 && values[i]! >= thresh - attachBand) {
-        next[i] = 1;
-        continue;
-      }
-      if (complexity < 0.48 || values[i]! < thresh - islandBand) continue;
-      let near = false;
-      for (let oy = -2; oy <= 2 && !near; oy++) {
-        for (let ox = -2; ox <= 2; ox++) {
-          const xx = x + ox;
-          const yy = y + oy;
-          if (xx < 0 || yy < 0 || xx >= cols || yy >= rows) continue;
-          if (grid[yy * cols + xx]) near = true;
-        }
-      }
-      if (near) next[i] = 1;
-    }
-  }
-  return next;
-}
-
-/** Split related territories by opening 4-connected bridges at high complexity. */
-function breakBridges(
-  grid: Uint8Array,
-  cols: number,
-  rows: number,
-  complexity: number,
-  seed: number,
-): Uint8Array<ArrayBuffer> {
-  if (complexity < 0.48) return grid as Uint8Array<ArrayBuffer>;
-  const chance = (complexity - 0.48) * 1.35;
-  const next = new Uint8Array(grid) as Uint8Array<ArrayBuffer>;
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const i = y * cols + x;
-      if (!grid[i]) continue;
-      const n = neighborOn(grid, cols, rows, x, y);
-      if (n !== 2 && n !== 3) continue;
-      const left = x > 0 && grid[i - 1];
-      const right = x < cols - 1 && grid[i + 1];
-      const up = y > 0 && grid[i - cols];
-      const down = y < rows - 1 && grid[i + cols];
-      const straight = (left && right && !up && !down) || (up && down && !left && !right);
-      if (!straight && n !== 2) continue;
-      if (hash2(x, y, seed + 47) < chance) next[i] = 0;
-    }
-  }
-  return next;
-}
-
-/**
- * Density owns coverage. Peel if too black. If too light, attach the
- * highest-value OFF cells that already touch the mass — never sprinkle.
- */
-function matchCoverage(
-  grid: Uint8Array<ArrayBuffer>,
-  values: Float32Array,
+function adjustCoverage(
+  on: Uint8Array,
+  occ: Float32Array,
   cols: number,
   rows: number,
   target: number,
-  maxPeel: number,
-): Uint8Array<ArrayBuffer> {
-  let out = grid;
-  let guard = 0;
-  while (coverage(out) > target + 0.03 && guard++ < maxPeel) {
-    out = peel(out, cols, rows);
+  fractured: number,
+): void {
+  const n = on.length;
+  let have = 0;
+  for (let i = 0; i < n; i++) have += on[i]!;
+  const want = Math.round(clamp01(target) * n);
+  if (Math.abs(have - want) < n * 0.01) return;
+
+  const connected = 1 - clamp01(fractured);
+
+  if (have > want) {
+    let need = have - want;
+    const scored: { i: number; s: number }[] = [];
+    const stride = Math.max(1, Math.floor(n / Math.min(n, need * 8 + 1200)));
+    for (let i = 0; i < n; i += stride) {
+      if (!on[i]) continue;
+      const x = i % cols;
+      const y = (i / cols) | 0;
+      const nb = neighbor4(on, cols, rows, x, y);
+      const s = connected > 0.5 ? occ[i]! + nb * 0.35 : occ[i]! - nb * 0.25;
+      scored.push({ i, s });
+    }
+    scored.sort((a, b) => a.s - b.s);
+    for (const item of scored) {
+      if (need <= 0) break;
+      if (!on[item.i]) continue;
+      on[item.i] = 0;
+      need--;
+    }
+    for (let i = 0; i < n && need > 0; i++) {
+      if (on[i]) {
+        on[i] = 0;
+        need--;
+      }
+    }
+    return;
   }
 
-  guard = 0;
-  while (coverage(out) < target - 0.03 && guard++ < out.length) {
-    let best = -1;
-    let bestV = -1;
+  let need = want - have;
+  const scored: { i: number; s: number }[] = [];
+  const stride = Math.max(1, Math.floor(n / Math.min(n, need * 8 + 1200)));
+  for (let i = 0; i < n; i += stride) {
+    if (on[i]) continue;
+    const x = i % cols;
+    const y = (i / cols) | 0;
+    const nb = neighbor4(on, cols, rows, x, y);
+    const extend = nb === 1 ? 0.45 * connected : 0;
+    const blob = nb >= 2 ? -0.55 * connected : 0;
+    const isolated = nb === 0 ? 0.25 * fractured : 0;
+    scored.push({ i, s: occ[i]! + extend + blob + isolated });
+  }
+  scored.sort((a, b) => b.s - a.s);
+  for (const item of scored) {
+    if (need <= 0) break;
+    if (on[item.i]) continue;
+    on[item.i] = 1;
+    need--;
+  }
+  for (let i = 0; i < n && need > 0; i++) {
+    if (!on[i] && occ[i]! > 0.08) {
+      on[i] = 1;
+      need--;
+    }
+  }
+}
+
+function buildMarks(
+  cols: number,
+  rows: number,
+  occ: Float32Array,
+  complexity: number,
+  seed: number,
+): Uint8Array {
+  const n = cols * rows;
+  const on = new Uint8Array(n);
+  const fractured = clamp01(complexity);
+  const seedRate = 0.34 + fractured * 0.22;
+  const growPasses = 1 + Math.round((1 - fractured) * 3);
+  const join = 0.16 + (1 - fractured) * 0.34;
+
+  for (let i = 0; i < n; i++) {
+    if (hash2(i % cols, (i / cols) | 0, seed) < occ[i]! * seedRate) on[i] = 1;
+  }
+
+  const next = new Uint8Array(n);
+  for (let pass = 0; pass < growPasses; pass++) {
+    next.set(on);
+    const passSeed = seed + 31 + pass * 17;
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const i = y * cols + x;
-        if (out[i]) continue;
-        const nOn = neighborOn(out, cols, rows, x, y);
-        if (nOn < 1 || nOn >= 5) continue;
-        const v = values[i]!;
-        if (v > bestV) {
-          bestV = v;
-          best = i;
-        }
+        if (on[i]) continue;
+        const nb = neighbor4(on, cols, rows, x, y);
+        if (nb === 0) continue;
+        if (hash2(x, y, passSeed) < occ[i]! * (join + 0.12 * nb)) next[i] = 1;
       }
     }
-    if (best < 0) break;
-    out[best] = 1;
-  }
-  return out;
-}
-
-export function generateFieldGrid(
-  params: FieldParams,
-  cols: number,
-  rows: number,
-  time: number,
-): { grid: Uint8Array; values: Float32Array; thresh: number } {
-  const density = Math.max(0, Math.min(100, params.density)) / 100;
-  const complexity = Math.max(0, Math.min(100, params.complexity)) / 100;
-  const seed = params.seed | 0;
-  const live = params.motion === "live" ? liveMotion(time) : null;
-  const bx = Math.max(0, Math.min(100, params.biasX + (live?.biasX ?? 0))) / 100;
-  const by = Math.max(0, Math.min(100, params.biasY + (live?.biasY ?? 0))) / 100;
-  const driftX = live?.driftX ?? 0;
-  const driftY = live?.driftY ?? 0;
-  const freq = 0.92 + (1 - params.scale / 100) * 0.95;
-  const thresh = 0.55 - density * 0.2;
-
-  const grid = new Uint8Array(cols * rows) as Uint8Array<ArrayBuffer>;
-  const values = new Float32Array(cols * rows);
-
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const nx = (x + 0.5) / cols;
-      const ny = (y + 0.5) / rows;
-      const macro = densityField(nx + driftX, ny + driftY, seed, freq);
-      const bias = spatialBias(nx, ny, bx, by, density);
-      const v = macro * 0.66 + bias * 0.34;
-      const i = y * cols + x;
-      values[i] = v;
-      grid[i] = v > thresh ? 1 : 0;
-    }
+    on.set(next);
   }
 
-  let out: Uint8Array<ArrayBuffer> = grid;
-  let carveCutoff = -1;
-
-  // Close only when we want one smooth territory. Meso needs the necks.
-  if (complexity < 0.18) {
-    out = dilate(out, cols, rows);
-    out = erode(out, cols, rows);
-    out = majorityPass(out, cols, rows, 5);
-    out = majorityPass(out, cols, rows, 5);
-  } else {
-    out = majorityPass(out, cols, rows, complexity < 0.4 ? 5 : 4);
-    out = growRelatedStructure(out, values, cols, rows, thresh, complexity);
-    const carveFraction = Math.min(0.62, 0.12 + (complexity - 0.18) * 0.62);
-    carveCutoff = onValueCutoff(out, values, carveFraction);
-    out = carveWeakMembership(out, values, cols, rows, carveCutoff);
-    out = carveInteriorMinima(out, values, cols, rows, complexity);
-    out = breakBridges(out, cols, rows, complexity, seed);
-  }
-
-  const nCells = cols * rows;
-  const minIsland =
-    complexity < 0.22
-      ? Math.max(8, Math.round(nCells * 0.028))
-      : complexity < 0.55
-        ? 5
-        : 3;
-  const minHole =
-    complexity < 0.2 ? Math.max(10, Math.round(nCells * 0.04)) : complexity < 0.5 ? 4 : 2;
-  out = removeSmallComponents(out, cols, rows, 1, minIsland);
-  out = removeSmallComponents(out, cols, rows, 0, minHole);
-
-  const target = 0.16 + density * 0.52;
-  const maxPeel = complexity < 0.25 ? 8 : complexity < 0.5 ? 4 : 2;
-  out = matchCoverage(out, values, cols, rows, target, maxPeel);
-  out = removeSmallComponents(out, cols, rows, 1, minIsland);
-
-  return { grid: out, values, thresh };
-}
-
-/** 75° line screen — offset-print black-plate angle. Raster A in the
- * Phase 10 study. Duty cycle follows occupancy so Density still means
- * territory, not “more dots”. */
-const SCREEN_COS = Math.cos((75 * Math.PI) / 180);
-const SCREEN_SIN = Math.sin((75 * Math.PI) / 180);
-
-function sampleArray(data: ArrayLike<number>, cols: number, rows: number, ix: number, iy: number): number {
-  if (ix < 0 || iy < 0 || ix >= cols || iy >= rows) return 0;
-  return data[iy * cols + ix]!;
-}
-
-function fadeBilinear(data: ArrayLike<number>, cols: number, rows: number, fx: number, fy: number): number {
-  const x0 = Math.floor(fx);
-  const y0 = Math.floor(fy);
-  const wx = fade(fx - x0);
-  const wy = fade(fy - y0);
-  return (
-    sampleArray(data, cols, rows, x0, y0) * (1 - wx) * (1 - wy) +
-    sampleArray(data, cols, rows, x0 + 1, y0) * wx * (1 - wy) +
-    sampleArray(data, cols, rows, x0, y0 + 1) * (1 - wx) * wy +
-    sampleArray(data, cols, rows, x0 + 1, y0 + 1) * wx * wy
-  );
-}
-
-function wrap01(v: number): number {
-  return v - Math.floor(v);
+  adjustCoverage(on, occ, cols, rows, meanOcc(occ), fractured);
+  return on;
 }
 
 export function paintFieldToCanvas(
@@ -584,49 +337,44 @@ export function paintFieldToCanvas(
   const h = canvas.height;
   if (w < 1 || h < 1) return;
 
-  const { cols, rows } = cellCounts(params.scale, w, h);
-  const { grid, values, thresh } = generateFieldGrid(params, cols, rows, time);
-  const freq = params.motion === "live"
-    ? liveFrequency(params.frequency ?? FREQUENCY_DEFAULT, time)
-    : clampFrequency(params.frequency ?? FREQUENCY_DEFAULT);
-  const period = screenPeriod(freq, dpr);
-  const invP = 1 / Math.max(0.5, period);
+  const freq = clampFrequency(params.frequency ?? FREQUENCY_DEFAULT);
+  const cell = markCellPx(freq, dpr);
+  const cols = Math.ceil(w / cell);
+  const rows = Math.ceil(h / cell);
+  const live = params.motion === "live" ? liveMotion(time) : null;
+  const occ = new Float32Array(cols * rows);
+
+  for (let y = 0; y < rows; y++) {
+    const ny = (y + 0.5) / rows;
+    for (let x = 0; x < cols; x++) {
+      const nx = (x + 0.5) / cols;
+      occ[y * cols + x] = occupancyAt(nx, ny, params, live);
+    }
+  }
+
+  const on = buildMarks(cols, rows, occ, Math.max(0, Math.min(100, params.complexity)) / 100, params.seed | 0);
 
   const ctx = canvas.getContext("2d")!;
   const img = ctx.createImageData(w, h);
   const d = img.data;
   d.fill(255);
 
-  const cx = (w - 1) * 0.5;
-  const cy = (h - 1) * 0.5;
-  const invW = cols / w;
-  const invH = rows / h;
-
-  for (let y = 0; y < h; y++) {
-    const fy = (y + 0.5) * invH - 0.5;
-    const rowOff = y * w;
-    for (let x = 0; x < w; x++) {
-      const fx = (x + 0.5) * invW - 0.5;
-      const x0 = Math.floor(fx);
-      const y0 = Math.floor(fy);
-      const c00 = sampleArray(grid, cols, rows, x0, y0);
-      const c10 = sampleArray(grid, cols, rows, x0 + 1, y0);
-      const c01 = sampleArray(grid, cols, rows, x0, y0 + 1);
-      const c11 = sampleArray(grid, cols, rows, x0 + 1, y0 + 1);
-      let occ = fadeBilinear(grid, cols, rows, fx, fy);
-      const boundary = !(c00 === c10 && c10 === c01 && c01 === c11);
-      if (boundary && occ > 0.02 && occ < 0.96) {
-        const v = fadeBilinear(values, cols, rows, fx, fy);
-        const iso = fade(Math.min(1, Math.max(0, (v - (thresh - 0.1)) / 0.22)));
-        occ = Math.max(occ * 0.45, Math.min(1, occ * 0.4 + iso * 0.6));
+  for (let cy = 0; cy < rows; cy++) {
+    const y0 = cy * cell;
+    const y1 = Math.min(h, y0 + cell);
+    for (let cx = 0; cx < cols; cx++) {
+      if (!on[cy * cols + cx]) continue;
+      const x0 = cx * cell;
+      const x1 = Math.min(w, x0 + cell);
+      for (let y = y0; y < y1; y++) {
+        let o = (y * w + x0) * 4;
+        for (let x = x0; x < x1; x++) {
+          d[o] = 0;
+          d[o + 1] = 0;
+          d[o + 2] = 0;
+          o += 4;
+        }
       }
-      if (occ <= 0.02) continue;
-      const duty = 0.16 + occ * 0.72;
-      if (wrap01(((x - cx) * SCREEN_COS + (y - cy) * SCREEN_SIN) * invP) >= duty) continue;
-      const o = (rowOff + x) * 4;
-      d[o] = 0;
-      d[o + 1] = 0;
-      d[o + 2] = 0;
     }
   }
 

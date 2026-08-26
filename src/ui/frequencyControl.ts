@@ -1,4 +1,4 @@
-import { clampFrequency, FREQUENCY_DEFAULT, screenPeriodCss } from "../sources/field";
+import { clampFrequency, FREQUENCY_DEFAULT, markPeriodCss } from "../sources/field";
 
 export function buildFrequencyControl(
   container: HTMLElement,
@@ -28,7 +28,7 @@ export function buildFrequencyControl(
   svg.setAttribute("height", String(H));
   svg.classList.add("fragment-svg");
   svg.setAttribute("role", "slider");
-  svg.setAttribute("aria-label", "Screen frequency");
+  svg.setAttribute("aria-label", "Graphic frequency");
   body.appendChild(svg);
 
   const track = document.createElementNS(svgNS, "rect");
@@ -51,17 +51,21 @@ export function buildFrequencyControl(
   function place(v: number): void {
     const f = clampFrequency(v);
     while (marks.childNodes.length > 0) marks.removeChild(marks.lastChild!);
-    const period = Math.max(1.6, screenPeriodCss(f) * 3.2);
+    const period = Math.max(2.2, markPeriodCss(f) * 3.6);
     let x = PAD + 1;
-    while (x < PAD + INNER - 1) {
-      const line = document.createElementNS(svgNS, "rect");
-      line.setAttribute("x", String(x));
-      line.setAttribute("y", "10");
-      line.setAttribute("width", f > 78 ? "0.7" : "1.1");
-      line.setAttribute("height", "20");
-      line.setAttribute("class", "fragment-bar");
-      marks.appendChild(line);
+    let i = 0;
+    while (x < PAD + INNER - 1.5) {
+      const mark = document.createElementNS(svgNS, "rect");
+      const mw = f > 78 ? 1.1 : f > 45 ? 1.5 : 2.1;
+      const mh = 5 + ((i * 5) % 13);
+      mark.setAttribute("x", String(x));
+      mark.setAttribute("y", String(20 - mh * 0.5));
+      mark.setAttribute("width", String(mw));
+      mark.setAttribute("height", String(mh));
+      mark.setAttribute("class", "fragment-bar");
+      marks.appendChild(mark);
       x += period;
+      i++;
     }
     valueEl.textContent = `${Math.round(f)}`;
   }

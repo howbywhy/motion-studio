@@ -1,5 +1,5 @@
-/** Scale as structure size: few large cells at the high end, many small
- * ones at the low end. Same visual language as Fragment, inverted meaning. */
+/** Scale as occupancy wavelength: broader density regions at the high
+ * end, more local variation at the low end. Not island size. */
 export function buildFieldScaleControl(
   container: HTMLElement,
   value: number,
@@ -28,7 +28,7 @@ export function buildFieldScaleControl(
   svg.setAttribute("height", String(H));
   svg.classList.add("fragment-svg");
   svg.setAttribute("role", "slider");
-  svg.setAttribute("aria-label", "Structure scale");
+  svg.setAttribute("aria-label", "Occupancy scale");
   body.appendChild(svg);
 
   const track = document.createElementNS(svgNS, "rect");
