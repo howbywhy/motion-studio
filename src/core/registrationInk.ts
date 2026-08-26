@@ -4,12 +4,10 @@
  *   in this file (paintRegistrationInkContent) — black + tinted separations
  *   plus a faint halftone, confined to each field's ring. Unchanged.
  *
- *   The global Print layer (prepareGlobalPrintInk / paintPersistent /
- *   paintReactive) is FIELD-informed: two related binary mark plates,
- *   occupancy from a coarse luminance of the composed frame, small spatial
- *   disagreement. Persistent base across the whole frame; reactive tent on
- *   the behaviour mask. The photograph stays put; only the graphic
- *   impressions misalign.
+ *   The global Print layer is FIELD-informed: two related mark plates as
+ *   alpha, occupancy from coarse luminance, small spatial disagreement.
+ *   Paint is an image-derived tonal impression (local colour, slightly
+ *   displaced), not a black overlay. Persistent base, then reactive tent.
  *
  * One product-facing Print toggle. No language selector. */
 import { sampleAverageColor, type RGB } from "./media";
@@ -145,16 +143,18 @@ let globalBoundarySmall: HTMLCanvasElement | null = null;
 
 const BOUNDARY_SMALL_W = 200;
 
-/** Build FIELD registration plates from the composed frame. Cached by the
- * renderer until still media changes; rebuilt every frame for live/video. */
+/** Build FIELD registration plates and local tone maps from the composed
+ * frame. Cached until still media changes; rebuilt every frame for live/video. */
 export function prepareGlobalPrintInk(
   bLayer: HTMLCanvasElement,
   width: number,
   height: number,
   dpr = 1,
   composed?: HTMLCanvasElement,
+  live = false,
+  bw = false,
 ): void {
-  prepareFieldPrintInk(composed ?? bLayer, width, height, dpr);
+  prepareFieldPrintInk(composed ?? bLayer, width, height, dpr, live, bw);
 }
 
 /** The universal analogue of Bloom's per-field boundary ring: wherever ANY

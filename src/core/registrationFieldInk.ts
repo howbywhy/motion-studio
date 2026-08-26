@@ -1,12 +1,12 @@
 /** FIELD-informed global Print.
  *
- * Related to FIELD as a source, not a duplicate of it:
- * occupancy is sampled from a heavily downsampled luminance of the
- * composed photograph (FIELD micro-structure averages out). Marks use a
- * neighbouring seed/domain and a finer internal frequency than the
- * default FIELD territory. Two plates disagree by offset, density and
- * a 1-cell period. The photograph stays put; only the graphic impressions
- * misalign.
+ * Structure (unchanged): two related binary mark plates, neighbouring
+ * seeds/frequencies, occupancy from coarse luminance of the composed
+ * frame. The photograph stays put; only the impressions misalign.
+ *
+ * Colour: plates are alpha. Paint composites an image-derived tonal
+ * impression — local colour, slightly displaced — rather than black
+ * marks over the photograph.
  */
 import { hash2, markCellPx } from "../sources/field";
 
@@ -21,19 +21,29 @@ function sizeCanvas(c: HTMLCanvasElement, w: number, h: number): void {
   }
 }
 
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
 const LUMA_W = 140;
-/** Fine end of the FIELD frequency curve (~1.4 CSS px). */
 const REG_FREQ_A = 82;
-/** Neighbouring period — slight frequency disagreement, not a duplicate. */
 const REG_FREQ_B = 74;
 const SEED_A = 71;
 const SEED_B = 88;
+/** Per-frame follow for live/video colour. ~5 frames to settle. */
+const COLOR_FOLLOW = 0.2;
 
 let lumaCanvas: HTMLCanvasElement | null = null;
 let plateA: HTMLCanvasElement | null = null;
 let plateB: HTMLCanvasElement | null = null;
+let colorA: HTMLCanvasElement | null = null;
+let colorB: HTMLCanvasElement | null = null;
 let inkScratch: HTMLCanvasElement | null = null;
+let toneScratch: HTMLCanvasElement | null = null;
 let stampData: ImageData | null = null;
+let colorDataA: ImageData | null = null;
+let colorDataB: ImageData | null = null;
+let smoothRgb: Float32Array | null = null;
 let prepared = false;
 let preparedW = 0;
 let preparedH = 0;
@@ -98,7 +108,7 @@ function stampMarks(canvas: HTMLCanvasElement, on: Uint8Array, cols: number, row
   ctx.putImageData(stampData, 0, 0);
 }
 
-function readLuma(source: HTMLCanvasElement): { data: Uint8ClampedArray; w: number; h: number } {
+function readLocal(source: HTMLCanvasElement): { data: Uint8ClampedArray; w: number; h: number } {
   if (!lumaCanvas) lumaCanvas = makeCanvas();
   const smallH = Math.max(1, Math.round(LUMA_W * (source.height / Math.max(1, source.width))));
   sizeCanvas(lumaCanvas, LUMA_W, smallH);
@@ -108,21 +118,20 @@ function readLuma(source: HTMLCanvasElement): { data: Uint8ClampedArray; w: numb
   return { data: lctx.getImageData(0, 0, LUMA_W, smallH).data, w: LUMA_W, h: smallH };
 }
 
-function occupancyFromLuma(
-  luma: { data: Uint8ClampedArray; w: number; h: number },
+function occupancyFromLocal(
+  local: { data: Uint8ClampedArray; w: number; h: number },
   cols: number,
   rows: number,
   scale: number,
 ): Float32Array {
   const occ = new Float32Array(cols * rows);
   for (let y = 0; y < rows; y++) {
-    const sy = Math.min(luma.h - 1, Math.floor(((y + 0.5) / rows) * luma.h));
+    const sy = Math.min(local.h - 1, Math.floor(((y + 0.5) / rows) * local.h));
     for (let x = 0; x < cols; x++) {
-      const sx = Math.min(luma.w - 1, Math.floor(((x + 0.5) / cols) * luma.w));
-      const i = (sy * luma.w + sx) * 4;
-      const yv = (luma.data[i]! * 0.2126 + luma.data[i + 1]! * 0.7152 + luma.data[i + 2]! * 0.0722) / 255;
+      const sx = Math.min(local.w - 1, Math.floor(((x + 0.5) / cols) * local.w));
+      const i = (sy * local.w + sx) * 4;
+      const yv = (local.data[i]! * 0.2126 + local.data[i + 1]! * 0.7152 + local.data[i + 2]! * 0.0722) / 255;
       const dark = 1 - yv;
-      // Quantize so video compression grain cannot reseed marks every frame.
       const raw = Math.min(0.62, 0.018 + dark * scale);
       occ[y * cols + x] = Math.round(raw * 40) / 40;
     }
@@ -130,11 +139,87 @@ function occupancyFromLuma(
   return occ;
 }
 
+function protectMid(y: number): number {
+  const mid = 4 * y * (1 - y);
+  const shadow = y < 0.12 ? y / 0.12 : 1;
+  const highlight = y > 0.88 ? (1 - y) / 0.12 : 1;
+  return mid * shadow * highlight;
+}
+
+function writeToneMaps(
+  local: { data: Uint8ClampedArray; w: number; h: number },
+  live: boolean,
+  bw: boolean,
+): void {
+  const { w, h, data } = local;
+  const n = w * h;
+  if (!colorA) colorA = makeCanvas();
+  if (!colorB) colorB = makeCanvas();
+  sizeCanvas(colorA, w, h);
+  sizeCanvas(colorB, w, h);
+  const actx = colorA.getContext("2d")!;
+  const bctx = colorB.getContext("2d")!;
+  if (!colorDataA || colorDataA.width !== w || colorDataA.height !== h) {
+    colorDataA = actx.createImageData(w, h);
+    colorDataB = bctx.createImageData(w, h);
+    smoothRgb = new Float32Array(n * 3);
+    live = false;
+  }
+  const da = colorDataA.data;
+  const db = colorDataB!.data;
+  const sm = smoothRgb!;
+  const follow = live ? COLOR_FOLLOW : 1;
+  const keep = 1 - follow;
+
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    let r = data[i]!;
+    let g = data[i + 1]!;
+    let b = data[i + 2]!;
+    const s = p * 3;
+    sm[s] = sm[s]! * keep + r * follow;
+    sm[s + 1] = sm[s + 1]! * keep + g * follow;
+    sm[s + 2] = sm[s + 2]! * keep + b * follow;
+    r = sm[s]!;
+    g = sm[s + 1]!;
+    b = sm[s + 2]!;
+
+    const y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255;
+    const protect = protectMid(y);
+    const gray = y * 255;
+    const sat = bw ? 0 : 0.78;
+    const cr = gray + (r - gray) * sat;
+    const cg = gray + (g - gray) * sat;
+    const cb = gray + (b - gray) * sat;
+    const chroma = (Math.abs(r - g) + Math.abs(g - b) + Math.abs(b - r)) / 3;
+    const chromaGate = bw ? 0 : Math.min(1, chroma / 36) * protect;
+
+    const dA = -15.5 * protect;
+    const dB = 8.5 * protect;
+    const warm = 2.2 * chromaGate;
+    const cool = 1.6 * chromaGate;
+
+    da[i] = clamp(cr + dA + warm, 10, 245);
+    da[i + 1] = clamp(cg + dA + warm * 0.35, 10, 245);
+    da[i + 2] = clamp(cb + dA - cool, 10, 245);
+    da[i + 3] = 255;
+
+    db[i] = clamp(cr + dB - cool * 0.6, 10, 245);
+    db[i + 1] = clamp(cg + dB, 10, 245);
+    db[i + 2] = clamp(cb + dB + cool, 10, 245);
+    db[i + 3] = 255;
+  }
+  actx.putImageData(colorDataA, 0, 0);
+  bctx.putImageData(colorDataB!, 0, 0);
+}
+
 export function prepareFieldPrintInk(
   composed: HTMLCanvasElement,
   width: number,
   height: number,
   dpr: number,
+  live = false,
+  bw = false,
 ): void {
   if (!plateA) plateA = makeCanvas();
   if (!plateB) plateB = makeCanvas();
@@ -148,25 +233,55 @@ export function prepareFieldPrintInk(
   const colsB = Math.ceil(width / cellB);
   const rowsB = Math.ceil(height / cellB);
 
-  const luma = readLuma(composed);
-  const occA = occupancyFromLuma(luma, colsA, rowsA, 0.2);
-  const occB = occupancyFromLuma(luma, colsB, rowsB, 0.12);
+  const local = readLocal(composed);
+  const occA = occupancyFromLocal(local, colsA, rowsA, 0.2);
+  const occB = occupancyFromLocal(local, colsB, rowsB, 0.12);
   stampMarks(plateA, buildMarks(colsA, rowsA, occA, SEED_A), colsA, rowsA, cellA);
   stampMarks(plateB, buildMarks(colsB, rowsB, occB, SEED_B), colsB, rowsB, cellB);
+  writeToneMaps(local, live, bw);
   prepared = true;
   preparedW = width;
   preparedH = height;
 }
 
-function blitPlates(ctx: CanvasRenderingContext2D, width: number, height: number, off: number): void {
-  if (!prepared || !plateA || !plateB || preparedW !== width || preparedH !== height) return;
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 1;
-  ctx.drawImage(plateA, off, -off * 0.35);
-  ctx.globalAlpha = 0.7;
-  ctx.drawImage(plateB, -off, off * 0.35);
-  ctx.restore();
+function blitTonalPlate(
+  dest: CanvasRenderingContext2D,
+  plate: HTMLCanvasElement,
+  color: HTMLCanvasElement,
+  width: number,
+  height: number,
+  dx: number,
+  dy: number,
+  mix: number,
+): void {
+  if (!toneScratch) toneScratch = makeCanvas();
+  sizeCanvas(toneScratch, width, height);
+  const tctx = toneScratch.getContext("2d")!;
+  tctx.clearRect(0, 0, width, height);
+  tctx.imageSmoothingEnabled = true;
+  tctx.drawImage(color, 0, 0, width, height);
+  tctx.globalCompositeOperation = "destination-in";
+  tctx.imageSmoothingEnabled = false;
+  tctx.drawImage(plate, dx, dy);
+  tctx.globalCompositeOperation = "source-over";
+  dest.save();
+  dest.globalAlpha = mix;
+  dest.globalCompositeOperation = "source-over";
+  dest.drawImage(toneScratch, 0, 0);
+  dest.restore();
+}
+
+function blitTonalPlates(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  off: number,
+  mixA: number,
+  mixB: number,
+): void {
+  if (!prepared || !plateA || !plateB || !colorA || !colorB || preparedW !== width || preparedH !== height) return;
+  blitTonalPlate(ctx, plateA, colorA, width, height, off, -off * 0.35, mixA);
+  blitTonalPlate(ctx, plateB, colorB, width, height, -off, off * 0.35, mixB);
 }
 
 export function paintFieldPersistent(
@@ -180,11 +295,8 @@ export function paintFieldPersistent(
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
-  blitPlates(ictx, width, height, 1 + amount * 4);
-  ctx.save();
-  ctx.globalAlpha = Math.min(0.26, amount * 2.4);
+  blitTonalPlates(ictx, width, height, 0.7 + amount * 3, 0.34, 0.2);
   ctx.drawImage(inkScratch, 0, 0);
-  ctx.restore();
 }
 
 export function paintFieldReactive(
@@ -200,10 +312,11 @@ export function paintFieldReactive(
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
-  blitPlates(ictx, width, height, 2.2 + amount * 6);
+  blitTonalPlates(ictx, width, height, 1.8 + amount * 5, 0.72, 0.48);
+
   ictx.save();
   ictx.globalCompositeOperation = "destination-in";
-  ictx.globalAlpha = amount;
+  ictx.globalAlpha = Math.min(1, amount * 1.35);
   ictx.drawImage(boundarySmall, 0, 0, boundarySmall.width, boundarySmall.height, 0, 0, width, height);
   ictx.globalCompositeOperation = "source-over";
   ictx.globalAlpha = 1;

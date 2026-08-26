@@ -391,6 +391,7 @@ export class Renderer {
 
   setBWEnabled(on: boolean): void {
     this.bwOn = on;
+    this.invalidatePrintInk();
     this.renderFrame();
   }
 
@@ -901,14 +902,26 @@ export class Renderer {
     const tPrep0 = mark();
     if (this.registrationOn) {
       if (this.hasLiveSource() || this.printInkDirty) {
-        prepareGlobalPrintInk(this.bLayer, width, height, this.dpr, this.composedLayer);
+        prepareGlobalPrintInk(
+          this.bLayer,
+          width,
+          height,
+          this.dpr,
+          this.composedLayer,
+          this.hasLiveSource(),
+          this.bwOn,
+        );
         if (!this.hasLiveSource()) this.printInkDirty = false;
       }
     }
     const tPrep = mark();
     if (this.registrationOn) {
+      const reactive =
+        this.behavior?.id === "shift" && this.params.treatment === "diffuse"
+          ? REACTIVE_REGISTRATION_AMOUNT * 0.55
+          : REACTIVE_REGISTRATION_AMOUNT;
       paintPersistentRegistration(composedCtx, this.bLayer, width, height, BASE_REGISTRATION_AMOUNT);
-      paintReactiveRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, REACTIVE_REGISTRATION_AMOUNT);
+      paintReactiveRegistration(composedCtx, this.bLayer, this.maskLayer, width, height, reactive);
     }
     const tReg = mark();
 
