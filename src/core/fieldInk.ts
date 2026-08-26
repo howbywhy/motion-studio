@@ -68,6 +68,13 @@ export function lastFieldInk(): FieldInk | null {
   return lastInk ? { dark: { ...lastInk.dark }, light: { ...lastInk.light } } : null;
 }
 
+export function resetFieldInkSmoothing(): void {
+  cachedKey = "";
+  cachedInk = null;
+  smoothDark = null;
+  smoothLight = null;
+}
+
 function sampleCentre(photo: HTMLCanvasElement, bw: boolean): RGB {
   if (!sampleCanvas) sampleCanvas = makeCanvas();
   const h = Math.max(1, Math.round(SAMPLE_W * (photo.height / Math.max(1, photo.width))));

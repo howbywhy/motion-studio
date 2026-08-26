@@ -107,6 +107,23 @@ export function detectMediaKind(file: File): MediaKind | null {
   return null;
 }
 
+/** Animated WebP is an image container, not a seekable timed source in Chromium. */
+export function isAnimatedWebP(bytes: ArrayBuffer): boolean {
+  const u8 = new Uint8Array(bytes);
+  if (u8.length < 16) return false;
+  const tag = (i: number) => String.fromCharCode(u8[i]!, u8[i + 1]!, u8[i + 2]!, u8[i + 3]!);
+  if (tag(0) !== "RIFF" || tag(8) !== "WEBP") return false;
+  let p = 12;
+  while (p + 8 <= u8.length) {
+    const fourcc = tag(p);
+    const size = u8[p + 4]! | (u8[p + 5]! << 8) | (u8[p + 6]! << 16) | (u8[p + 7]! << 24);
+    if (fourcc === "ANIM" || fourcc === "ANMF") return true;
+    p += 8 + size + (size & 1);
+    if (size < 0) break;
+  }
+  return false;
+}
+
 type VideoAudioProbe = HTMLVideoElement & {
   mozHasAudio?: boolean;
   audioTracks?: { length: number };

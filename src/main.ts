@@ -3,6 +3,7 @@ import { Renderer, type DiagnosticMode, type MediaSlot } from "./core/renderer";
 import { placeholderA } from "./core/placeholder";
 import { wrapCanvasAsPlaceholder, defaultTransform, type MediaAsset, type MediaKind } from "./core/media";
 import { loadMediaFile } from "./ui/mediaInput";
+import type { ExportFormat, ExportFps, ExportQuality, ExportSize } from "./core/exportTypes";
 import { buildControls } from "./ui/controls";
 import { buildXYPad } from "./ui/xyPad";
 import { buildPhaseControl } from "./ui/phaseControl";
@@ -85,7 +86,36 @@ app.innerHTML = `
           <button id="play-pause" class="primary" title="Pause or resume source video. Independent of Phase Auto/Hold.">Pause</button>
           <button type="button" class="diagnostic-toggle" id="audio-toggle" title="Hear source video audio, or mute. Independent of HOLD.">Audio</button>
           <button id="swap" title="Reverse the source sequence">Reverse</button>
-          <button id="export-png" title="Save a PNG of the exact current frame — no UI, full render resolution">Export PNG</button>
+        </div>
+        <div class="export-panel" id="export-panel">
+          <div class="export-row">
+            <span class="export-label">Export</span>
+            <div class="seg-toggle" id="export-format">
+              <button type="button" data-value="mp4" class="active">MP4</button>
+              <button type="button" data-value="webp">WEBP</button>
+              <button type="button" data-value="png">PNG</button>
+            </div>
+            <div class="seg-toggle" id="export-fps">
+              <button type="button" data-value="24">24</button>
+              <button type="button" data-value="25">25</button>
+              <button type="button" data-value="30" class="active">30</button>
+            </div>
+            <div class="seg-toggle" id="export-size">
+              <button type="button" data-value="preview">Preview</button>
+              <button type="button" data-value="1080" class="active">1080</button>
+              <button type="button" data-value="2160">2160</button>
+            </div>
+            <div class="seg-toggle" id="export-quality">
+              <button type="button" data-value="standard" class="active">Standard</button>
+              <button type="button" data-value="high">High</button>
+            </div>
+          </div>
+          <div class="export-row">
+            <span class="export-duration" id="export-duration">Loop 12s</span>
+            <button type="button" id="export-run" class="primary" title="Deterministic offline export of the current loop">Export</button>
+            <button type="button" id="export-cancel" hidden>Cancel</button>
+            <span class="export-status" id="export-status"></span>
+          </div>
         </div>
       </section>
       <aside class="control-panel">
@@ -161,7 +191,14 @@ const presetToggle = document.querySelector<HTMLDivElement>("#preset-toggle")!;
 const saveStateBtn = document.querySelector<HTMLButtonElement>("#save-state-btn")!;
 const savedStatesListEl = document.querySelector<HTMLDivElement>("#saved-states-list")!;
 const savedStatesEmptyEl = document.querySelector<HTMLParagraphElement>("#saved-states-empty")!;
-const exportPngBtn = document.querySelector<HTMLButtonElement>("#export-png")!;
+const exportRunBtn = document.querySelector<HTMLButtonElement>("#export-run")!;
+const exportCancelBtn = document.querySelector<HTMLButtonElement>("#export-cancel")!;
+const exportStatusEl = document.querySelector<HTMLSpanElement>("#export-status")!;
+const exportDurationEl = document.querySelector<HTMLSpanElement>("#export-duration")!;
+const exportFormatToggle = document.querySelector<HTMLDivElement>("#export-format")!;
+const exportFpsToggle = document.querySelector<HTMLDivElement>("#export-fps")!;
+const exportSizeToggle = document.querySelector<HTMLDivElement>("#export-size")!;
+const exportQualityToggle = document.querySelector<HTMLDivElement>("#export-quality")!;
 
 const renderer = new Renderer(canvas);
 
@@ -361,7 +398,10 @@ const sequenceStrip = buildSequenceStrip(document.querySelector<HTMLDivElement>(
 
 const loopLengthUi = buildLoopLengthControl(
   document.querySelector<HTMLDivElement>("#loop-length")!,
-  (seconds) => renderer.setLoopSeconds(seconds),
+  (seconds) => {
+    renderer.setLoopSeconds(seconds);
+    syncExportDuration();
+  },
 );
 
 renderer.onFrame = () => {
@@ -992,46 +1032,28 @@ saveStateBtn.addEventListener("click", () => {
 
 renderSavedStatesList();
 
-// --- export: PNG still of the exact current frame. The visible canvas IS
-// the finished output (behavior -> persistent registration -> reactive
-// registration -> B&W already happened before this pixel ever reached it
-// — see Renderer.finalizeOutput), so exporting it directly guarantees the
-// file matches what's on screen with no separate render path to drift out
-// of sync, and captures the canvas's own backing-store resolution (up to
-// 2x device pixel ratio), not just its on-screen CSS size.
-//
-// canvas.toBlob() takes its pixel snapshot SYNCHRONOUSLY at the moment
-// it's called (the HTML spec requires the bitmap to be copied before
-// control returns to the caller; only the encoding happens off-thread
-// afterward) — so whatever is still animating on screen after this line
-// runs can never affect the exported bytes.
-//
-// The plain `<a download>` path below is the correct, complete
-// implementation for a normal deployed browser. It does nothing when this
-// app is opened as a published Claude Artifact, though: that viewer never
-// grants a page direct download access (a deliberate sandbox boundary,
-// not a bug here), so a programmatic download click there is silently
-// inert. When `window.claude.use` is present (i.e. running inside that
-// artifact runtime), route the save through its `downloads` capability
-// instead, which prompts the viewer directly; fall back to `<a download>`
-// whenever that capability isn't there, including every normal browser
-// deployment where `window.claude` doesn't exist at all. ---
-interface ClaudeDownloadsNamespace {
-  save(request: { filename: string; data: Blob }): Promise<{ status: "saved" }>;
-}
-interface ClaudeGlobal {
-  use<T = unknown>(name: string): Promise<T | null>;
-}
-declare global {
-  interface Window {
-    claude?: ClaudeGlobal;
-  }
+function activeSeg(root: HTMLElement): string {
+  return root.querySelector("button.active")?.getAttribute("data-value") ?? "";
 }
 
-function exportFilename(): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `motion-studio-${currentBehavior.id}-${currentParams.treatment ?? "export"}-${stamp}.png`;
+function wireSeg(root: HTMLElement, onChange?: () => void): void {
+  root.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("button");
+    if (!b || !root.contains(b)) return;
+    root.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+    onChange?.();
+  });
 }
+
+function syncExportDuration(): void {
+  const s = renderer.getLoopSeconds();
+  exportDurationEl.textContent = `Loop ${s}s`;
+}
+
+wireSeg(exportFormatToggle);
+wireSeg(exportFpsToggle);
+wireSeg(exportSizeToggle);
+wireSeg(exportQualityToggle);
 
 function downloadBlobDirectly(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -1044,50 +1066,88 @@ function downloadBlobDirectly(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-function setExportStatus(text: string, revertAfterMs?: number): void {
-  const original = "Export PNG";
-  exportPngBtn.textContent = text;
-  if (revertAfterMs) {
-    setTimeout(() => {
-      exportPngBtn.textContent = original;
-    }, revertAfterMs);
+let exportAbort: AbortController | null = null;
+let lastExportResult: {
+  filename: string;
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  bytes: number;
+  renderMs: number;
+  encodeMs: number;
+  audioOmittedReason?: string;
+} | null = null;
+
+async function runCurrentExport(): Promise<void> {
+  if (renderer.isExporting()) return;
+  const format = (activeSeg(exportFormatToggle) || "mp4") as ExportFormat;
+  const fps = (Number(activeSeg(exportFpsToggle) || 30) || 30) as ExportFps;
+  const size = (activeSeg(exportSizeToggle) || "1080") as ExportSize;
+  const quality = (activeSeg(exportQualityToggle) || "standard") as ExportQuality;
+  exportAbort = new AbortController();
+  exportRunBtn.disabled = true;
+  exportCancelBtn.hidden = false;
+  exportStatusEl.textContent = "EXPORTING 0%";
+  try {
+    const { runExport } = await import("./core/exportSession");
+    const result = await runExport(
+      renderer,
+      {
+        format,
+        fps,
+        size,
+        quality,
+        aspect: currentAspect,
+        includeAudio: format === "mp4" && renderer.isAudioEnabled(),
+      },
+      {
+        behaviorId: currentBehavior.id,
+        treatment: String(currentParams.treatment ?? "export"),
+      },
+      (p) => {
+        exportStatusEl.textContent = p.label;
+      },
+      exportAbort.signal,
+    );
+    lastExportResult = {
+      filename: result.filename,
+      width: result.width,
+      height: result.height,
+      fps: result.fps,
+      duration: result.duration,
+      videoCodec: result.videoCodec,
+      audioCodec: result.audioCodec,
+      bytes: result.bytes,
+      renderMs: result.renderMs,
+      encodeMs: result.encodeMs,
+      audioOmittedReason: result.audioOmittedReason,
+    };
+    downloadBlobDirectly(result.blob, result.filename);
+    exportStatusEl.textContent = result.audioOmittedReason ? `DONE — ${result.audioOmittedReason}` : "DONE";
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    exportStatusEl.textContent = aborted ? "Cancelled" : err instanceof Error ? err.message : "Export failed";
+  } finally {
+    exportAbort = null;
+    exportRunBtn.disabled = false;
+    exportCancelBtn.hidden = true;
+    resizeToStage();
   }
 }
 
-async function exportCurrentFrameAsPng(): Promise<void> {
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) {
-    setExportStatus("Export failed", 2000);
-    return;
-  }
-  const filename = exportFilename();
-
-  if (window.claude?.use) {
-    try {
-      const downloads = await window.claude.use<ClaudeDownloadsNamespace>("downloads");
-      if (downloads) {
-        await downloads.save({ filename, data: blob });
-        setExportStatus("Saved", 1500);
-        return;
-      }
-    } catch {
-      // Declined, rate-limited, or unavailable after all — fall through to
-      // the direct browser download rather than leaving the click with no
-      // visible result.
-    }
-  }
-
-  downloadBlobDirectly(blob, filename);
-  setExportStatus("Download started", 1500);
-}
-
-exportPngBtn.addEventListener("click", () => {
-  void exportCurrentFrameAsPng();
+exportRunBtn.addEventListener("click", () => {
+  void runCurrentExport();
 });
+exportCancelBtn.addEventListener("click", () => exportAbort?.abort());
+syncExportDuration();
 
 // --- responsive stage sizing (resize preserves alignment: renderer
 // recomputes cover-fit for both A and B against the new pixel size) ---
 function resizeToStage(): void {
+  if (renderer.isExporting()) return;
   const rect = stageFrame.getBoundingClientRect();
   renderer.resize(rect.width, rect.height);
 }
@@ -1133,6 +1193,7 @@ function applyProductDefault(): void {
   if (fieldItem) renderer.selectItem(fieldItem.id);
   renderer.setLoopSeconds(12);
   loopLengthUi.setSeconds(12);
+  syncExportDuration();
   syncSourceInspector();
   rebuildGraphicPanel();
   rebuildCompositionPanel();
@@ -1182,6 +1243,81 @@ Object.assign(window, {
       bwBtn.classList.toggle("active", on);
     },
     lastFieldInk: () => renderer.lastFieldInk(),
+    setAspect: (value: string) => setAspect(value),
+    lastExportResult: () => lastExportResult,
+    renderExportFrame: (timeSec: number) => renderer.renderExportFrame(timeSec),
+    beginExport: (w: number, h: number) => renderer.beginExport(w, h),
+    endExport: () => renderer.endExport(),
+    getVisibleImageData: () => {
+      const img = renderer.getVisibleImageData();
+      return { width: img.width, height: img.height, data: Array.from(img.data.subarray(0, 64)) };
+    },
+    runExport: async (req: {
+      format: ExportFormat;
+      fps?: ExportFps;
+      size?: ExportSize;
+      quality?: ExportQuality;
+      includeAudio?: boolean;
+    }) => {
+      const { runExport } = await import("./core/exportSession");
+      return runExport(
+        renderer,
+        {
+          format: req.format,
+          fps: req.fps ?? 30,
+          size: req.size ?? "preview",
+          quality: req.quality ?? "standard",
+          aspect: currentAspect,
+          includeAudio: req.includeAudio ?? (req.format === "mp4" && renderer.isAudioEnabled()),
+        },
+        {
+          behaviorId: currentBehavior.id,
+          treatment: String(currentParams.treatment ?? "export"),
+        },
+        () => undefined,
+        new AbortController().signal,
+      ).then((r) => {
+        lastExportResult = {
+          filename: r.filename,
+          width: r.width,
+          height: r.height,
+          fps: r.fps,
+          duration: r.duration,
+          videoCodec: r.videoCodec,
+          audioCodec: r.audioCodec,
+          bytes: r.bytes,
+          renderMs: r.renderMs,
+          encodeMs: r.encodeMs,
+          audioOmittedReason: r.audioOmittedReason,
+        };
+        (window as unknown as { __motionStudioLastBlob: Blob }).__motionStudioLastBlob = r.blob;
+        return { ...lastExportResult, blobUrl: URL.createObjectURL(r.blob) };
+      });
+    },
+    compareHoldExport: async (phase: number) => {
+      renderer.pause();
+      renderer.setHoldPhase(phase);
+      phaseUi.setMode("hold");
+      phaseUi.setDisplayedPhase(phase);
+      renderer.renderFrame();
+      const live = renderer.getVisibleImageData();
+      const copy = new Uint8ClampedArray(live.data);
+      const { width, height } = live;
+      renderer.beginExport(width, height);
+      await renderer.renderExportFrame(phase * renderer.getLoopSeconds());
+      const exp = renderer.getVisibleImageData();
+      renderer.endExport();
+      renderer.setHoldPhase(phase);
+      let mad = 0;
+      let disagree = 0;
+      const n = copy.length;
+      for (let i = 0; i < n; i++) {
+        const d = Math.abs(copy[i]! - exp.data[i]!);
+        mad += d;
+        if (d > 2) disagree++;
+      }
+      return { phase, width, height, mad: mad / n, disagree: disagree / n };
+    },
     mediaInfo: () => renderer.mediaInfo(),
     getCanvasSize: () => renderer.getCanvasSize(),
     getSequence: () =>
@@ -1207,6 +1343,7 @@ Object.assign(window, {
     setLoopSeconds: (seconds: number) => {
       renderer.setLoopSeconds(seconds);
       loopLengthUi.setSeconds(renderer.getLoopSeconds());
+      syncExportDuration();
     },
     selectSource: (index: number) => {
       const item = renderer.getSourceAt(index);

@@ -1,6 +1,6 @@
-import { defaultTransform, detectMediaKind, type MediaAsset } from "../core/media";
+import { defaultTransform, detectMediaKind, isAnimatedWebP, type MediaAsset } from "../core/media";
 
-  const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
+const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime,.mov";
 
 export function loadMediaFile(
   file: File,
@@ -22,29 +22,49 @@ function loadFile(
     onError(`Unsupported file type: ${file.name}`);
     return;
   }
-  const objectUrl = URL.createObjectURL(file);
 
   if (kind === "image") {
-    const img = new Image();
-    img.onload = () => {
-      onLoad({
-        kind: "image",
-        source: img,
-        naturalW: img.naturalWidth,
-        naturalH: img.naturalHeight,
-        label: file.name,
-        objectUrl,
-        transform: defaultTransform(),
-      });
+    const loadStill = (): void => {
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        onLoad({
+          kind: "image",
+          source: img,
+          naturalW: img.naturalWidth,
+          naturalH: img.naturalHeight,
+          label: file.name,
+          objectUrl,
+          transform: defaultTransform(),
+        });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        onError(`Could not decode image: ${file.name}`);
+      };
+      img.src = objectUrl;
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      onError(`Could not decode image: ${file.name}`);
-    };
-    img.src = objectUrl;
+    const looksWebp = file.type.toLowerCase().includes("webp") || /\.webp$/i.test(file.name);
+    if (looksWebp) {
+      void file.arrayBuffer().then(
+        (buf) => {
+          if (isAnimatedWebP(buf)) {
+            onError(
+              `Animated WebP is not supported as a timed source (${file.name}). Use a still WebP, MP4, or WebM.`,
+            );
+            return;
+          }
+          loadStill();
+        },
+        () => onError(`Could not read image: ${file.name}`),
+      );
+      return;
+    }
+    loadStill();
     return;
   }
 
+  const objectUrl = URL.createObjectURL(file);
   // Video: a single persistent <video> element decodes in a hidden host;
   // every render frame samples whatever frame it's on via drawImage.
   // Playback is owned by Renderer.play/pause — this loader must not call

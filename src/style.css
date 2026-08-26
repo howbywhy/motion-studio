@@ -402,6 +402,45 @@ body {
   gap: 10px;
 }
 
+.export-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.export-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-label,
+.export-duration,
+.export-status {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.export-status {
+  color: var(--text);
+}
+
+.export-panel .seg-toggle button {
+  font-size: 10px;
+  padding: 4px 8px;
+}
+
+.export-panel #export-run {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 .stage-controls button,
 .primary {
   background: var(--panel);

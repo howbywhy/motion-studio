@@ -7,6 +7,7 @@ import {
   applyFieldInk,
   deriveFieldInk,
   lastFieldInk,
+  resetFieldInkSmoothing,
   type FieldInk,
 } from "./fieldInk";
 import {
@@ -44,6 +45,48 @@ const MAX_DPR = 2;
 function makeCanvas(): HTMLCanvasElement {
   const c = document.createElement("canvas");
   return c;
+}
+
+function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void> {
+  const duration = video.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return Promise.resolve();
+  let t = timeSec % duration;
+  if (t < 0) t += duration;
+  if (t >= duration) t = Math.max(0, duration - 1 / 120);
+  video.pause();
+  if (video.readyState >= 2 && Math.abs(video.currentTime - t) < 1 / 120) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onSeeked);
+      window.clearTimeout(timer);
+      const rvfc = (video as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: () => void) => number;
+        cancelVideoFrameCallback?: (id: number) => void;
+      });
+      if (typeof rvfc.requestVideoFrameCallback === "function") {
+        const id = rvfc.requestVideoFrameCallback(() => resolve());
+        window.setTimeout(() => {
+          rvfc.cancelVideoFrameCallback?.(id);
+          resolve();
+        }, 90);
+        return;
+      }
+      resolve();
+    };
+    const onSeeked = (): void => finish();
+    const timer = window.setTimeout(finish, 1800);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("error", onSeeked);
+    try {
+      video.currentTime = t;
+    } catch {
+      finish();
+    }
+  });
 }
 
 /**
@@ -135,6 +178,18 @@ export class Renderer {
    * freeze it. Live FIELD is source motion, not behaviour motion. */
   private graphicElapsed = 0;
   lastProfile: FrameProfile | null = null;
+  private exporting = false;
+  private exportClock: { loopPhase: number; graphicTime: number } | null = null;
+  private exportRestore: {
+    cssWidth: number;
+    cssHeight: number;
+    clockMode: ClockMode;
+    holdPhase: number;
+    elapsed: number;
+    graphicElapsed: number;
+    playing: boolean;
+    videos: { el: HTMLVideoElement; time: number; paused: boolean }[];
+  } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.visible = canvas;
@@ -454,6 +509,7 @@ export class Renderer {
   }
 
   getLoopPhase(): number {
+    if (this.exportClock) return this.exportClock.loopPhase;
     if (this.clockMode === "hold") return this.holdPhase;
     return loopPhaseFromElapsed(this.elapsed, this.loopSeconds);
   }
@@ -527,6 +583,132 @@ export class Renderer {
 
   getCanvasSize(): { width: number; height: number; dpr: number } {
     return { width: this.width, height: this.height, dpr: this.dpr };
+  }
+
+  isExporting(): boolean {
+    return this.exporting;
+  }
+
+  getVisibleCanvas(): HTMLCanvasElement {
+    return this.visible;
+  }
+
+  getVisibleImageData(): ImageData {
+    return this.ctx.getImageData(0, 0, this.width, this.height);
+  }
+
+  /** Pixel backing store for offline export. dpr is 1 so 1080 means 1080. */
+  resizeExact(pixelW: number, pixelH: number): void {
+    const w = Math.max(2, pixelW & ~1);
+    const h = Math.max(2, pixelH & ~1);
+    this.width = w;
+    this.height = h;
+    this.dpr = 1;
+    for (const c of [this.visible, this.aLayer, this.bLayer, this.maskLayer, this.boundaryLayer, this.bMasked, this.composedLayer]) {
+      c.width = w;
+      c.height = h;
+    }
+    this.syncGraphicRasters();
+    this.invalidatePrintInk();
+  }
+
+  beginExport(pixelW: number, pixelH: number): void {
+    if (this.exporting) this.endExport();
+    const videos: { el: HTMLVideoElement; time: number; paused: boolean }[] = [];
+    for (const item of this.items) {
+      const el = item.asset.videoEl;
+      if (!el) continue;
+      videos.push({ el, time: el.currentTime, paused: el.paused });
+      el.pause();
+    }
+    this.exportRestore = {
+      cssWidth: parseFloat(this.visible.style.width) || this.width / this.dpr,
+      cssHeight: parseFloat(this.visible.style.height) || this.height / this.dpr,
+      clockMode: this.clockMode,
+      holdPhase: this.holdPhase,
+      elapsed: this.elapsed,
+      graphicElapsed: this.graphicElapsed,
+      playing: this.playing,
+      videos,
+    };
+    this.exporting = true;
+    this.playing = false;
+    this.exportClock = { loopPhase: 0, graphicTime: 0 };
+    this.lastAudioPairKey = "";
+    this.audioHysteresis = "hold";
+    this.audioAsset = null;
+    resetFieldInkSmoothing();
+    if (pixelW !== this.width || pixelH !== this.height) this.resizeExact(pixelW, pixelH);
+  }
+
+  endExport(): void {
+    const snap = this.exportRestore;
+    this.exporting = false;
+    this.exportClock = null;
+    this.exportRestore = null;
+    if (!snap) return;
+    this.clockMode = snap.clockMode;
+    this.holdPhase = snap.holdPhase;
+    this.elapsed = snap.elapsed;
+    this.graphicElapsed = snap.graphicElapsed;
+    this.playing = snap.playing;
+    for (const v of snap.videos) {
+      try {
+        v.el.currentTime = v.time;
+        if (!v.paused && snap.playing) void v.el.play().catch(() => undefined);
+        else v.el.pause();
+      } catch {
+        /* seek restore is best-effort */
+      }
+    }
+    this.resize(snap.cssWidth, snap.cssHeight);
+    if (snap.playing) {
+      this.syncActiveVideos();
+      this.syncAudio();
+    }
+    this.renderFrame();
+  }
+
+  async renderExportFrame(timeSec: number): Promise<void> {
+    this.exportClock = {
+      loopPhase: loopPhaseFromElapsed(timeSec, this.loopSeconds),
+      graphicTime: Math.max(0, timeSec),
+    };
+    this.bindActivePair();
+    await this.seekActivePairVideos(timeSec);
+    this.renderFrame();
+  }
+
+  audioOwnerAt(loopPhase: number): MediaAsset | null {
+    const prev = this.exportClock;
+    this.exportClock = { loopPhase, graphicTime: loopPhase * this.loopSeconds };
+    this.bindActivePair();
+    const mapping = this.pairMapping();
+    const owner = mapping.untreated
+      ? videoMayOwnAudio(this.mediaA)
+        ? this.mediaA
+        : this.items.find((item) => videoMayOwnAudio(item.asset))?.asset ?? null
+      : this.pickAudioAsset(mapping.localPhase);
+    this.exportClock = prev;
+    return owner;
+  }
+
+  resetExportAudioCursor(): void {
+    this.lastAudioPairKey = "";
+    this.audioHysteresis = "hold";
+    this.audioAsset = null;
+  }
+
+  private async seekActivePairVideos(timeSec: number): Promise<void> {
+    const active = new Set<HTMLVideoElement>();
+    for (const asset of [this.mediaA, this.mediaB]) {
+      if (asset?.videoEl) active.add(asset.videoEl);
+    }
+    for (const item of this.items) {
+      const el = item.asset.videoEl;
+      if (el && !active.has(el)) el.pause();
+    }
+    await Promise.all([...active].map((el) => seekVideoFrame(el, timeSec)));
   }
 
   mediaInfo(): {
@@ -617,7 +799,7 @@ export class Renderer {
     if (key !== this.lastPairKey) {
       this.lastPairKey = key;
       this.printInkDirty = true;
-      this.syncActiveVideos();
+      if (!this.exporting) this.syncActiveVideos();
     }
   }
 
@@ -636,7 +818,7 @@ export class Renderer {
       const g = asset.graphic;
       if (!g) continue;
       const live = g.getMotion() === "live";
-      const t = live ? this.graphicElapsed : 0;
+      const t = live ? (this.exportClock?.graphicTime ?? this.graphicElapsed) : 0;
       if (!g.dirty && !live) continue;
       g.paint(t);
       g.paintedAt = t;
@@ -671,6 +853,11 @@ export class Renderer {
   }
 
   private tick = (ts: number): void => {
+    if (this.exporting) {
+      this.lastTs = ts;
+      if (this.loopActive) requestAnimationFrame(this.tick);
+      return;
+    }
     const dt = (ts - this.lastTs) / 1000;
     this.lastTs = ts;
     if (this.clockMode === "auto") this.elapsed += dt;
