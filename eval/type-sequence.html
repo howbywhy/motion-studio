@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MBM type sequence</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2, h3 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      h3 { color: #9a9aa2; margin: 12px 0 8px; }
+      p { color: #888; max-width: 52em; }
+      .page-row { display: flex; gap: 10px; margin: 0 0 22px; align-items: flex-start; flex-wrap: wrap; }
+      figure { margin: 0; }
+      canvas { height: auto; max-height: 220px; background: #000; display: block; }
+      figcaption { margin-top: 4px; color: #888; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <div id="root">Loading Switzer…</div>
+    <pre id="out"></pre>
+    <script type="module">
+      import { runTypeSequence } from "/src/eval/typeSequence.ts";
+      const root = document.getElementById("root");
+      const out = document.getElementById("out");
+      try {
+        const report = await runTypeSequence(root);
+        window.__TYPE_SEQUENCE__ = report;
+        out.textContent = JSON.stringify(report, null, 2);
+      } catch (e) {
+        root.textContent = String(e);
+      }
+    </script>
+  </body>
+</html>

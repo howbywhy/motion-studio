@@ -6,6 +6,7 @@ import {
   TYPE_WEIGHT_MIN,
   type TypeAnchor,
   type TypeComposition,
+  type TypeSequenceMode,
   type TypeState,
 } from "../core/typeState";
 
@@ -244,6 +245,15 @@ export function buildTypePanel(
   colorRow.appendChild(color);
   body.appendChild(colorRow);
 
+  const sequenceSeg = seg(body, "Sequence", [
+    { value: "together", label: "Together" },
+    { value: "stagger", label: "Stagger" },
+    { value: "hold", label: "Hold" },
+    { value: "alternate", label: "Alternate" },
+  ], initial.typeSequenceMode, (v) => onChange({ typeSequenceMode: v as TypeSequenceMode }));
+
+  const pace = slider(body, "Pace", 0, 100, 1, initial.typeSequencePace, (v) => onChange({ typeSequencePace: v }));
+
   function markSeg(el: HTMLDivElement, value: string): void {
     for (const b of el.querySelectorAll("button")) {
       b.classList.toggle("active", b.getAttribute("data-value") === value);
@@ -266,6 +276,9 @@ export function buildTypePanel(
       spacing.valueEl.textContent = String(s.spacing);
       pos.set(s.anchor);
       color.value = s.color;
+      markSeg(sequenceSeg, s.typeSequenceMode);
+      pace.input.value = String(s.typeSequencePace);
+      pace.valueEl.textContent = String(s.typeSequencePace);
     },
   };
 }

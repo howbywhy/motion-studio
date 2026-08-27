@@ -17,6 +17,7 @@ import { buildTypePanel } from "./ui/typePanel";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, defaultTypeState } from "./core/typeState";
 import { debugLinePlan, layoutTypography } from "./core/typeLayout";
+import { evaluateTypeSequence } from "./core/typeMotion";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
@@ -1461,6 +1462,7 @@ Object.assign(window, {
       const ch = h ?? size.height;
       const state = renderer.getTypeState();
       const layout = layoutTypography(state, cw, ch);
+      const sequence = layout ? evaluateTypeSequence(state, layout, renderer.getLoopPhase()) : null;
       return {
         lines: debugLinePlan(state, cw, ch),
         fontSize: layout?.fontSize ?? 0,
@@ -1468,7 +1470,9 @@ Object.assign(window, {
         opacity: layout?.opacity ?? 0,
         offsetX: layout?.offsetX ?? 0,
         offsetY: layout?.offsetY ?? 0,
-        placed: layout?.lines.map((l) => ({ text: l.text, x: l.x, y: l.y, width: l.width, height: l.height })) ?? [],
+        placed: layout?.lines.map((l) => ({ text: l.text, x: l.x, y: l.y, width: l.width, height: l.height, unit: l.unit })) ?? [],
+        sequence,
+        phase: renderer.getLoopPhase(),
       };
     },
     lastFieldInk: () => renderer.lastFieldInk(),

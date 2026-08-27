@@ -1,18 +1,19 @@
-/** COMPAT — typography motion. Product UI is static; Renderer does not call this. */
-import type { TypeInMotion, TypeOutMotion, TypeMotionKind, TypeState } from "./typeState";
+/** Editorial type sequencing. Time only reveals already-positioned authored units.
+ * Together is identity with the static layout. No kinetic effects. */
+import type { TypeRole, TypeSequenceMode, TypeState } from "./typeState";
+import type { TypeLayout } from "./typeLayout";
 
-export interface TypeLineMotion {
+export interface TypeUnitMotion {
+  opacity: number;
   dx: number;
   dy: number;
-  opacity: number;
-  clipT: number;
-  weight: number;
 }
 
-export interface TypeMotionState {
-  visible: boolean;
-  lines: TypeLineMotion[];
-  weight: number;
+export interface TypeSequenceState {
+  identity: boolean;
+  mode: TypeSequenceMode;
+  unitCount: number;
+  units: TypeUnitMotion[];
 }
 
 function clamp01(v: number): number {
@@ -26,117 +27,168 @@ function smooth(t: number): number {
   return u * u * (3 - 2 * u);
 }
 
-function lineProgress(global: number, index: number, count: number, stagger: number): number {
-  if (count <= 1 || stagger <= 0.5) return clamp01(global);
-  const span = 0.18 + (stagger / 100) * 0.62;
-  const start = (index / Math.max(1, count - 1)) * span;
-  const dur = 1 - span;
-  return clamp01((global - start) / Math.max(0.12, dur));
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }
 
-function inOffsets(
-  kind: TypeInMotion,
-  u: number,
-  index: number,
-  fontSize: number,
-  canvasW: number,
-): { dx: number; dy: number; clip: number } {
-  const e = 1 - smooth(u);
-  if (kind === "none") return { dx: 0, dy: 0, clip: 1 };
-  if (kind === "rise") return { dx: 0, dy: fontSize * 0.55 * e, clip: 1 };
-  if (kind === "slide") return { dx: canvasW * 0.08 * (index % 2 === 0 ? -1 : 1) * e, dy: 0, clip: 1 };
-  if (kind === "reveal") return { dx: 0, dy: fontSize * 0.08 * e, clip: smooth(u) };
-  const assembleX = canvasW * 0.06 * (index % 2 === 0 ? -1 : 1) * e;
-  const assembleY = fontSize * 0.22 * (index % 3 === 1 ? -1 : 1) * e;
-  return { dx: assembleX, dy: assembleY, clip: 1 };
+function unitCount(layout: TypeLayout): number {
+  let max = 0;
+  for (const line of layout.lines) max = Math.max(max, line.unit);
+  return max + 1;
 }
 
-function outOffsets(
-  kind: TypeOutMotion,
-  u: number,
-  index: number,
-  fontSize: number,
-  canvasW: number,
-): { dx: number; dy: number; clip: number } {
-  const e = smooth(u);
-  if (kind === "none") return { dx: 0, dy: 0, clip: 1 };
-  if (kind === "rise") return { dx: 0, dy: -fontSize * 0.45 * e, clip: 1 };
-  if (kind === "slide") return { dx: canvasW * 0.07 * (index % 2 === 0 ? 1 : -1) * e, dy: 0, clip: 1 };
-  if (kind === "reveal") return { dx: 0, dy: -fontSize * 0.06 * e, clip: 1 - e };
-  return { dx: canvasW * 0.05 * (index % 2 === 0 ? -1 : 1) * e, dy: fontSize * 0.18 * e, clip: 1 };
+function sequenceWindow(pace: number): number {
+  return lerp(0.88, 0.34, clamp01(pace / 100));
 }
 
-function weightFor(
-  kind: TypeMotionKind,
-  base: number,
-  inU: number | null,
-  outU: number | null,
-): number {
-  if (kind === "position") return base;
-  const delta = Math.min(140, Math.max(40, base * 0.18));
-  if (inU !== null && inU < 1) {
-    const from = Math.max(100, base - delta);
-    return from + (base - from) * smooth(inU);
-  }
-  if (outU !== null && outU > 0) {
-    const to = Math.max(100, base - delta * 0.75);
-    return base + (to - base) * smooth(outU);
-  }
+function arriveK(pace: number, role: TypeRole): number {
+  const base = lerp(0.42, 0.2, clamp01(pace / 100));
+  if (role === "editorial") return Math.min(0.55, base * 1.35);
+  if (role === "caption") return Math.min(0.5, base * 1.1);
   return base;
 }
 
-export function evaluateTypeMotion(
-  state: TypeState,
-  loopPhase: number,
-  loopSeconds: number,
-  lineCount: number,
-  fontSize: number,
+function arrivalOffset(
+  role: TypeRole,
   canvasW: number,
-): TypeMotionState {
-  const n = Math.max(1, lineCount);
-  if (!state.enabled) {
-    return { visible: false, lines: [], weight: state.weight };
+  canvasH: number,
+  layout: TypeLayout,
+  unit: number,
+): { dx: number; dy: number } {
+  const s = canvasW / 500;
+  if (role === "caption") return { dx: 0, dy: 6 * s };
+  if (role === "editorial") return { dx: 0, dy: 10 * s };
+  if (role === "display") return { dx: 0, dy: 16 * s };
+  let y = 0;
+  let n = 0;
+  for (const line of layout.lines) {
+    if (line.unit !== unit) continue;
+    y += line.y;
+    n += 1;
   }
+  const cy = n > 0 ? y / n : canvasH * 0.5;
+  const mag = 18 * s;
+  return { dx: 0, dy: cy < canvasH * 0.5 ? -mag : mag };
+}
 
-  const inP = Math.min(state.inPoint, state.outPoint) / 100;
-  const outP = Math.max(state.inPoint, state.outPoint) / 100;
-  const inDur = Math.min(state.inDuration / Math.max(0.2, loopSeconds), Math.max(0.02, outP - inP) * 0.48);
-  const outDur = Math.min(state.outDuration / Math.max(0.2, loopSeconds), Math.max(0.02, outP - inP) * 0.48);
+function rest(): TypeUnitMotion {
+  return { opacity: 1, dx: 0, dy: 0 };
+}
 
-  const p = ((loopPhase % 1) + 1) % 1;
-  if (p < inP || p > outP) {
-    return { visible: false, lines: [], weight: state.weight };
-  }
+function hidden(): TypeUnitMotion {
+  return { opacity: 0, dx: 0, dy: 0 };
+}
 
-  let inGlobal: number | null = null;
-  let outGlobal: number | null = null;
-  if (p < inP + inDur) inGlobal = (p - inP) / Math.max(0.0001, inDur);
-  else if (p > outP - outDur) outGlobal = (p - (outP - outDur)) / Math.max(0.0001, outDur);
+function arriving(u: number, off: { dx: number; dy: number }): TypeUnitMotion {
+  const e = smooth(u);
+  return {
+    opacity: e,
+    dx: off.dx * (1 - e),
+    dy: off.dy * (1 - e),
+  };
+}
 
-  const pos = state.typeMotion !== "variable";
-  const lines: TypeLineMotion[] = [];
-  let usedWeight = state.weight;
-
+function staggerUnits(
+  p: number,
+  n: number,
+  W: number,
+  k: number,
+  offs: { dx: number; dy: number }[],
+): TypeUnitMotion[] {
+  const slot = W / n;
+  const dur = Math.max(0.04, slot * k);
+  const out: TypeUnitMotion[] = [];
   for (let i = 0; i < n; i++) {
-    const iu = inGlobal === null ? 1 : lineProgress(inGlobal, i, n, state.stagger);
-    const ou = outGlobal === null ? 0 : lineProgress(outGlobal, i, n, state.stagger);
-    const inn = inOffsets(state.inMotion, iu, i, fontSize, canvasW);
-    const out = outOffsets(state.outMotion, ou, i, fontSize, canvasW);
-    const dx = pos ? inn.dx + out.dx : 0;
-    const dy = pos ? inn.dy + out.dy : 0;
-    const clipT = Math.min(inn.clip, out.clip);
-    const fadeIn = state.inMotion === "none" ? 1 : 0.35 + 0.65 * iu;
-    const fadeOut = state.outMotion === "none" ? 1 : 1 - ou * 0.85;
-    const w = weightFor(state.typeMotion, state.weight, inGlobal === null ? 1 : iu, outGlobal === null ? null : ou);
-    lines.push({
-      dx,
-      dy,
-      opacity: Math.max(0, Math.min(1, fadeIn * fadeOut)),
-      clipT,
-      weight: w,
-    });
-    usedWeight = w;
+    const start = i * slot;
+    if (i === 0 || p >= W || p >= start + dur) out.push(rest());
+    else if (p <= start) out.push(hidden());
+    else out.push(arriving((p - start) / dur, offs[i]!));
   }
+  return out;
+}
 
-  return { visible: true, lines, weight: usedWeight };
+function holdUnits(
+  p: number,
+  n: number,
+  k: number,
+  offs: { dx: number; dy: number }[],
+): TypeUnitMotion[] {
+  const slot = 1 / n;
+  const fade = Math.max(0.03, slot * k);
+  const out: TypeUnitMotion[] = [];
+  for (let i = 0; i < n; i++) {
+    const start = i * slot;
+    const end = (i + 1) * slot;
+    if (p < start || p >= end) {
+      out.push(hidden());
+      continue;
+    }
+    const into = i === 0 ? 1 : smooth((p - start) / fade);
+    const leave = i === n - 1 ? 1 : smooth((end - p) / fade);
+    const vis = Math.min(into, leave);
+    if (i === 0 || vis >= 0.999) out.push({ opacity: vis, dx: 0, dy: 0 });
+    else {
+      const a = arriving(into, offs[i]!);
+      out.push({ opacity: vis, dx: a.dx, dy: a.dy });
+    }
+  }
+  return out;
+}
+
+function alternateUnits(
+  p: number,
+  n: number,
+  W: number,
+  k: number,
+  offs: { dx: number; dy: number }[],
+): TypeUnitMotion[] {
+  const beats = n + 1;
+  const slot = W / beats;
+  const dur = Math.max(0.04, slot * k);
+  if (p >= W) return Array.from({ length: n }, rest);
+  const beat = Math.min(beats - 1, Math.floor(p / slot));
+  const local = p - beat * slot;
+  const out: TypeUnitMotion[] = [];
+  for (let i = 0; i < n; i++) {
+    const exclusive = beat < n && beat === i;
+    const resolve = beat === n;
+    const on = exclusive || resolve;
+    if (!on) {
+      out.push(hidden());
+      continue;
+    }
+    if (local >= dur) out.push(rest());
+    else if (resolve && i === n - 1) out.push(rest());
+    else out.push(arriving(local / dur, offs[i]!));
+  }
+  return out;
+}
+
+export function evaluateTypeSequence(
+  state: TypeState,
+  layout: TypeLayout,
+  loopPhase: number,
+): TypeSequenceState {
+  const n = unitCount(layout);
+  const mode = n <= 1 ? "together" : state.typeSequenceMode;
+  if (mode === "together") {
+    return {
+      identity: true,
+      mode: "together",
+      unitCount: n,
+      units: Array.from({ length: Math.max(1, n) }, rest),
+    };
+  }
+  const p = ((loopPhase % 1) + 1) % 1;
+  const role = layout.composition;
+  const W = sequenceWindow(state.typeSequencePace);
+  const k = arriveK(state.typeSequencePace, role);
+  const offs = Array.from({ length: n }, (_, i) =>
+    arrivalOffset(role, layout.canvasW, layout.canvasH, layout, i),
+  );
+  const units =
+    mode === "stagger" ? staggerUnits(p, n, W, k, offs) :
+    mode === "hold" ? holdUnits(p, n, k, offs) :
+    alternateUnits(p, n, W, k, offs);
+  return { identity: false, mode, unitCount: n, units };
 }

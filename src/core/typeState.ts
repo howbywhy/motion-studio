@@ -10,6 +10,7 @@ export type TypeMode = "responsive" | "fixed";
 export type TypeInMotion = "none" | "rise" | "slide" | "reveal" | "assemble";
 export type TypeOutMotion = "none" | "rise" | "slide" | "reveal" | "disperse";
 export type TypeMotionKind = "position" | "variable" | "both";
+export type TypeSequenceMode = "together" | "stagger" | "hold" | "alternate";
 
 export interface TypeState {
   enabled: boolean;
@@ -39,6 +40,10 @@ export interface TypeState {
   outPoint: number;
   inDuration: number;
   outDuration: number;
+  /** Editorial sequencing. Together is the static default. */
+  typeSequenceMode: TypeSequenceMode;
+  /** 0 = slow / long holds; 100 = quicker succession. */
+  typeSequencePace: number;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -48,6 +53,7 @@ export const TYPE_WEIGHT_DEFAULT = 500;
 export const TYPE_ROLES: TypeRole[] = ["display", "editorial", "caption", "folio"];
 export const TYPE_COMPOSITIONS = TYPE_ROLES;
 export const TYPE_ANCHORS: TypeAnchor[] = ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"];
+export const TYPE_SEQUENCE_MODES: TypeSequenceMode[] = ["together", "stagger", "hold", "alternate"];
 
 export function defaultTypeState(): TypeState {
   return {
@@ -75,6 +81,8 @@ export function defaultTypeState(): TypeState {
     outPoint: 100,
     inDuration: 0.15,
     outDuration: 0.15,
+    typeSequenceMode: "together",
+    typeSequencePace: 50,
   };
 }
 
@@ -138,6 +146,11 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
   };
   const composition = parseRole(raw);
   const anchor = parseAnchor(raw);
+  const seqRaw = raw && (raw as { typeSequenceMode?: unknown }).typeSequenceMode;
+  const typeSequenceMode: TypeSequenceMode =
+    seqRaw === "stagger" || seqRaw === "hold" || seqRaw === "alternate" || seqRaw === "together"
+      ? seqRaw
+      : "together";
   const placed = alignFromAnchor(anchor);
   const color = typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : d.color;
   let spacing = num(raw.spacing ?? raw.spread, 0, 100, d.spacing);
@@ -167,5 +180,7 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
     outPoint: 100,
     inDuration: 0.15,
     outDuration: 0.15,
+    typeSequenceMode,
+    typeSequencePace: num((raw as { typeSequencePace?: unknown }).typeSequencePace, 0, 100, d.typeSequencePace),
   };
 }

@@ -8,6 +8,8 @@ export interface TypeLine {
   y: number;
   width: number;
   height: number;
+  /** Authored newline unit. Auto-wrapped lines share unit 0. */
+  unit: number;
 }
 
 export interface TypeLayout {
@@ -516,6 +518,7 @@ export function layoutTypography(state: TypeState, canvasW: number, canvasH: num
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
   const key = composeKey(state, aspectKey);
+  const authored = hardBlocks(text).length;
 
   let sol: Solution;
   if (cache && cache.key === key) {
@@ -553,6 +556,7 @@ export function layoutTypography(state: TypeState, canvasW: number, canvasH: num
     height: sol.fontSize,
     x: pts.xs[i],
     y: pts.ys[i],
+    unit: authored > 1 ? i : 0,
   }));
 
   const layout: TypeLayout = {
@@ -582,6 +586,7 @@ function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): Type
       y: l.y * s,
       width: l.width * s,
       height: l.height * s,
+      unit: l.unit,
     })),
     fontSize: unit.fontSize * s,
     weight: unit.weight,
