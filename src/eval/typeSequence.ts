@@ -11,8 +11,8 @@ function state(): TypeState {
     typeSequencePace: 12,
     arrangement: "between-v",
     blocks: [
-      { enabled: true, text: mbmById("coming-soon").text, composition: "display", scale: 100, anchor: "bl", color: "#f3efe6" },
-      { enabled: true, text: mbmById("date-md").text, composition: "folio", scale: 100, anchor: "tr", color: "#f3efe6" },
+      { enabled: true, text: mbmById("coming-soon").text, composition: "headline", scale: 100, anchor: "bl", color: "#f3efe6" },
+      { enabled: true, text: mbmById("date-md").text, composition: "footnote", scale: 100, anchor: "tr", color: "#f3efe6" },
     ],
   });
 }
@@ -84,8 +84,8 @@ export async function runTypeSequence(root: HTMLElement): Promise<SequenceReport
   const clean = clampTypeState({
     enabled: true,
     blocks: [
-      { enabled: true, text: mbmById("coming-soon").text, composition: "display", scale: 100, anchor: "bl", color: "#f3efe6" },
-      { enabled: true, text: mbmById("date-md").text, composition: "folio", scale: 100, anchor: "tr", color: "#f3efe6" },
+      { enabled: true, text: mbmById("coming-soon").text, composition: "headline", scale: 100, anchor: "bl", color: "#f3efe6" },
+      { enabled: true, text: mbmById("date-md").text, composition: "footnote", scale: 100, anchor: "tr", color: "#f3efe6" },
     ],
   });
   const withLegacy = paint(type, 500, 625);

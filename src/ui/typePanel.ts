@@ -1,5 +1,6 @@
 import {
-  applyRoleChange,
+  applyStyleChange,
+  authoredLineCount,
   clampTypeState,
   defaultTypeState,
   TYPE_ANCHORS,
@@ -7,8 +8,10 @@ import {
   TYPE_WEIGHT_MIN,
   type TypeAnchor,
   type TypeBlock,
-  type TypeComposition,
+  type TypeColumn,
+  type TypeDistribution,
   type TypeState,
+  type TypeStyle,
   type TypeTextAlign,
 } from "../core/typeState";
 
@@ -52,7 +55,7 @@ function slider(
   step: number,
   value: number,
   onInput: (v: number) => void,
-): { input: HTMLInputElement; valueEl: HTMLSpanElement } {
+): { row: HTMLDivElement; input: HTMLInputElement; valueEl: HTMLSpanElement } {
   const row = document.createElement("div");
   row.className = "control-row";
   const lab = document.createElement("label");
@@ -78,7 +81,7 @@ function slider(
   inputRow.appendChild(valueEl);
   row.appendChild(inputRow);
   parent.appendChild(row);
-  return { input, valueEl };
+  return { row, input, valueEl };
 }
 
 function nearestAnchor(nx: number, ny: number): TypeAnchor {
@@ -87,7 +90,7 @@ function nearestAnchor(nx: number, ny: number): TypeAnchor {
   return `${row}${col}` as TypeAnchor;
 }
 
-function anchorPad(
+function frameAlignPad(
   parent: HTMLElement,
   current: TypeAnchor,
   onChange: (anchor: TypeAnchor) => void,
@@ -95,7 +98,7 @@ function anchorPad(
   const row = document.createElement("div");
   row.className = "control-row type-xy-row";
   const lab = document.createElement("label");
-  lab.textContent = "Position";
+  lab.textContent = "Frame Align";
   row.appendChild(lab);
 
   const SIZE = 88;
@@ -107,7 +110,7 @@ function anchorPad(
   svg.setAttribute("height", String(SIZE));
   svg.classList.add("type-xy-svg");
   svg.setAttribute("role", "group");
-  svg.setAttribute("aria-label", "Position");
+  svg.setAttribute("aria-label", "Frame Align");
 
   const bg = document.createElementNS(svgNS, "rect");
   bg.setAttribute("x", "1");
@@ -229,42 +232,32 @@ function buildBlock(
   textarea.className = "type-text";
   textarea.rows = 4;
   textarea.value = initial.text;
-  textarea.addEventListener("input", () => onChange({ activeIndex: index, text: textarea.value }));
+  textarea.addEventListener("input", () => {
+    paintContext();
+    onChange({ activeIndex: index, text: textarea.value });
+  });
   textRow.appendChild(textarea);
   body.appendChild(textRow);
 
-  let currentRole = initial.composition;
+  let currentStyle = initial.composition;
   let currentAnchor = initial.anchor;
+  let currentDist: TypeDistribution = initial.distribution;
 
-  const roleSeg = seg(body, "Role", [
-    { value: "display", label: "Display" },
-    { value: "editorial", label: "Editorial" },
-    { value: "caption", label: "Caption" },
-    { value: "folio", label: "Folio" },
+  const styleSeg = seg(body, "Style", [
+    { value: "headline", label: "Headline" },
+    { value: "paragraph", label: "Paragraph" },
+    { value: "footnote", label: "Footnote" },
   ], initial.composition, (v) => {
-    const role = v as TypeComposition;
-    const patch = applyRoleChange({ composition: currentRole, anchor: currentAnchor }, role);
-    currentRole = role;
-    if (patch.scale !== undefined) {
-      scale.input.value = String(patch.scale);
-      scale.valueEl.textContent = String(patch.scale);
-    }
-    if (patch.spacing !== undefined) {
-      spacing.input.value = String(patch.spacing);
-      spacing.valueEl.textContent = String(patch.spacing);
-    }
-    if (patch.weight !== undefined) {
-      weight.input.value = String(patch.weight);
-      weight.valueEl.textContent = String(patch.weight);
-    }
-    if (patch.anchor) {
-      currentAnchor = patch.anchor;
-      pos.set(patch.anchor);
-    }
+    const style = v as TypeStyle;
+    const patch = applyStyleChange({ composition: currentStyle, anchor: currentAnchor }, style);
+    currentStyle = style;
+    currentDist = (patch.distribution ?? currentDist) as TypeDistribution;
+    applyPatchToControls(patch);
+    paintContext();
     onChange({ activeIndex: index, ...patch });
   });
 
-  const alignSeg = seg(body, "Align", [
+  const alignSeg = seg(body, "Text Align", [
     { value: "left", label: "Left" },
     { value: "center", label: "Centre" },
     { value: "right", label: "Right" },
@@ -272,12 +265,42 @@ function buildBlock(
 
   const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
   const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
-  const spacing = slider(body, "Spacing", 0, 100, 1, initial.spacing, (v) => onChange({ activeIndex: index, spacing: v }));
 
-  const pos = anchorPad(body, initial.anchor, (anchor) => {
+  const headlineCtx = document.createElement("div");
+  headlineCtx.className = "type-ctx";
+  body.appendChild(headlineCtx);
+  const trackingH = slider(headlineCtx, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+  const gap = slider(headlineCtx, "Gap", 0, 100, 1, initial.gap, (v) => onChange({ activeIndex: index, gap: v }));
+  const distSeg = seg(headlineCtx, "Distribution", [
+    { value: "packed", label: "Packed" },
+    { value: "between", label: "Between" },
+  ], initial.distribution, (v) => {
+    currentDist = v as TypeDistribution;
+    paintContext();
+    onChange({ activeIndex: index, distribution: currentDist });
+  });
+
+  const paraCtx = document.createElement("div");
+  paraCtx.className = "type-ctx";
+  body.appendChild(paraCtx);
+  const widthSeg = seg(paraCtx, "Width", [
+    { value: "narrow", label: "Narrow" },
+    { value: "medium", label: "Medium" },
+    { value: "wide", label: "Wide" },
+  ], initial.column, (v) => onChange({ activeIndex: index, column: v as TypeColumn }));
+  const leading = slider(paraCtx, "Leading", 0, 100, 1, initial.leading, (v) => onChange({ activeIndex: index, leading: v }));
+  const trackingP = slider(paraCtx, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+
+  const footCtx = document.createElement("div");
+  footCtx.className = "type-ctx";
+  body.appendChild(footCtx);
+  const trackingF = slider(footCtx, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+
+  const pos = frameAlignPad(body, initial.anchor, (anchor) => {
     currentAnchor = anchor;
     onChange({ activeIndex: index, anchor });
   });
+  const padding = slider(body, "Padding", 0, 100, 1, initial.padding, (v) => onChange({ activeIndex: index, padding: v }));
 
   const colorRow = document.createElement("div");
   colorRow.className = "control-row bg-colour-row";
@@ -292,6 +315,57 @@ function buildBlock(
   colorRow.appendChild(color);
   body.appendChild(colorRow);
 
+  function setTracking(v: number): void {
+    trackingH.input.value = String(v);
+    trackingH.valueEl.textContent = String(v);
+    trackingP.input.value = String(v);
+    trackingP.valueEl.textContent = String(v);
+    trackingF.input.value = String(v);
+    trackingF.valueEl.textContent = String(v);
+  }
+
+  function applyPatchToControls(patch: Partial<TypeBlock>): void {
+    if (patch.scale !== undefined) {
+      scale.input.value = String(patch.scale);
+      scale.valueEl.textContent = String(patch.scale);
+    }
+    if (patch.weight !== undefined) {
+      weight.input.value = String(patch.weight);
+      weight.valueEl.textContent = String(patch.weight);
+    }
+    if (patch.tracking !== undefined) setTracking(patch.tracking);
+    if (patch.gap !== undefined) {
+      gap.input.value = String(patch.gap);
+      gap.valueEl.textContent = String(patch.gap);
+    }
+    if (patch.leading !== undefined) {
+      leading.input.value = String(patch.leading);
+      leading.valueEl.textContent = String(patch.leading);
+    }
+    if (patch.padding !== undefined) {
+      padding.input.value = String(patch.padding);
+      padding.valueEl.textContent = String(patch.padding);
+    }
+    if (patch.distribution) markSeg(distSeg, patch.distribution);
+    if (patch.column) markSeg(widthSeg, patch.column);
+    if (patch.anchor) {
+      currentAnchor = patch.anchor;
+      pos.set(patch.anchor);
+    }
+  }
+
+  function paintContext(): void {
+    const style = currentStyle;
+    const rows = authoredLineCount(textarea.value);
+    headlineCtx.hidden = style !== "headline";
+    paraCtx.hidden = style !== "paragraph";
+    footCtx.hidden = style !== "footnote";
+    const showDist = style === "headline" && rows >= 2;
+    distSeg.parentElement!.hidden = !showDist;
+    gap.row.hidden = !showDist || currentDist === "between";
+  }
+
+  paintContext();
   parent.appendChild(root);
 
   return {
@@ -299,18 +373,27 @@ function buildBlock(
     sync(block: TypeBlock) {
       paintOn(block.enabled);
       textarea.value = block.text;
-      markSeg(roleSeg, block.composition);
+      currentStyle = block.composition;
+      currentDist = block.distribution;
+      markSeg(styleSeg, block.composition);
       markSeg(alignSeg, block.textAlign);
-      currentRole = block.composition;
+      markSeg(distSeg, block.distribution);
+      markSeg(widthSeg, block.column);
       scale.input.value = String(block.scale);
       scale.valueEl.textContent = String(block.scale);
       weight.input.value = String(block.weight);
       weight.valueEl.textContent = String(block.weight);
-      spacing.input.value = String(block.spacing);
-      spacing.valueEl.textContent = String(block.spacing);
+      setTracking(block.tracking);
+      gap.input.value = String(block.gap);
+      gap.valueEl.textContent = String(block.gap);
+      leading.input.value = String(block.leading);
+      leading.valueEl.textContent = String(block.leading);
+      padding.input.value = String(block.padding);
+      padding.valueEl.textContent = String(block.padding);
       currentAnchor = block.anchor;
       pos.set(block.anchor);
       color.value = block.color;
+      paintContext();
     },
   };
 }

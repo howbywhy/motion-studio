@@ -27,18 +27,14 @@
         const report = await runTypeSheet(root);
         window.__TYPE_SHEET__ = report;
         out.textContent = JSON.stringify({
-          framePx: report.framePx,
-          overflow: { outsideTotal: report.overflow.outsideTotal, inkOutsideTotal: report.overflow.inkOutsideTotal, failures: report.overflow.failures },
-          positionInvariant: report.positionInvariant,
-          alignInvariant: report.alignInvariant,
-          authoredNewlines: report.authoredNewlines,
-          independence: report.independence,
-          longCopy: report.longCopy,
-          twoBlocks: report.twoBlocks,
+          coupling: report.coupling,
+          spaceBetween: report.spaceBetween,
+          paragraphReadable: report.paragraphReadable,
+          styleCeilings: report.styleCeilings,
+          overflow: report.overflow,
           exportParity: report.exportParity,
-          proofCount: report.proofCount,
+          needType03: report.needType03,
           elapsedMs: report.elapsedMs,
-          plans: report.plans,
         }, null, 2);
       } catch (e) {
         root.textContent = String(e);

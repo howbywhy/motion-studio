@@ -39,6 +39,10 @@ export const MBM_COPY: MbmCopy[] = [
   { id: "perfect", group: "Editorial", text: "WE'RE PERFECTLY IMPERFECT." },
   { id: "free", group: "Editorial", text: "CARE-FREE.\nGUILT-FREE.\nJUDGEMENT-FREE." },
   { id: "this-is", group: "Editorial", text: "THIS IS MADE BY MADELEN." },
+  { id: "date-euro", group: "Headline", text: "09.07\n2026" },
+  { id: "two-rows", group: "Headline", text: "FIRST LINE\nSECOND LINE" },
+  { id: "three-rows", group: "Headline", text: "FIRST LINE\nSECOND LINE\nTHIRD LINE" },
+  { id: "kelly", group: "Paragraph", text: "Nic Kelly may have given you a heads up, but welcome to the MBM world made by Madelen. We're flawed and flawless. Care-free. Guilt-free. Judgement-free. Made the way you are." },
 ];
 
 export function mbmById(id: string): MbmCopy {

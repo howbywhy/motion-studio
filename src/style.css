@@ -666,6 +666,11 @@ body {
   opacity: 0.55;
 }
 
+.type-ctx[hidden],
+.type-panel .control-row[hidden] {
+  display: none;
+}
+
 .type-xy-svg {
   display: block;
   border-radius: 4px;
