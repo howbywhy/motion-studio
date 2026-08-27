@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hold Export</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 64em; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin: 12px 0 32px; }
+      figure { margin: 0; }
+      canvas { width: 100%; height: auto; background: #000; display: block; }
+      figcaption { margin-top: 6px; color: #888; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Hold Export</h1>
+    <div id="root">Running…</div>
+    <pre id="out"></pre>
+    <script type="module">
+      import { runHoldExportSheet } from "/src/eval/holdExport.ts";
+      const root = document.getElementById("root");
+      const out = document.getElementById("out");
+      try {
+        const report = await runHoldExportSheet(root);
+        window.__HOLD_EXPORT__ = report;
+        const { details, ...summary } = report;
+        out.textContent = JSON.stringify({ summary, details }, null, 2);
+      } catch (e) {
+        root.textContent = String(e);
+        console.error(e);
+      }
+    </script>
+  </body>
+</html>

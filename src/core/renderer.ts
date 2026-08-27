@@ -673,15 +673,36 @@ export class Renderer {
     return this.playing && !this.frozen && !this.exporting;
   }
 
+  /**
+   * Authoritative master-loop phase for this frame.
+   *
+   * HOLD always wins — including during export. Preview respects HOLD because
+   * `exportClock` is null; historically export ignored HOLD because
+   * `renderExportFrame(timeSec)` stuffed a timestamp-derived phase into
+   * `exportClock` and `getLoopPhase()` returned that first.
+   *
+   * AUTO preview: elapsed.
+   * AUTO export: timestamp via exportClock / exportTimeSec.
+   * HOLD preview or export: holdPhase.
+   *
+   * Source video time is independent (`seekActivePairVideos`).
+   */
+  resolveMasterPhase(exportTimeSec?: number): number {
+    if (this.clockMode === "hold") return clampLoopPhase(this.holdPhase);
+    if (exportTimeSec != null && Number.isFinite(exportTimeSec)) {
+      return loopPhaseFromElapsed(exportTimeSec, this.loopSeconds);
+    }
+    if (this.exportClock) return this.exportClock.loopPhase;
+    return loopPhaseFromElapsed(this.elapsed, this.loopSeconds);
+  }
+
   /** Global sequence position 0..1. Behaviours receive pair-local phase. */
   getPhase(): number {
     return this.getLoopPhase();
   }
 
   getLoopPhase(): number {
-    if (this.exportClock) return this.exportClock.loopPhase;
-    if (this.clockMode === "hold") return this.holdPhase;
-    return loopPhaseFromElapsed(this.elapsed, this.loopSeconds);
+    return this.resolveMasterPhase();
   }
 
   getLocalPhase(): number {
@@ -804,11 +825,14 @@ export class Renderer {
     };
     this.exporting = true;
     this.playing = false;
-    this.exportClock = { loopPhase: 0, graphicTime: 0 };
+    this.exportClock = {
+      loopPhase: this.resolveMasterPhase(),
+      graphicTime: this.graphicElapsed,
+    };
     this.lastAudioPairKey = "";
     this.audioHysteresis = "hold";
     this.audioAsset = null;
-    resetFieldInkSmoothing();
+    if (this.clockMode !== "hold") resetFieldInkSmoothing();
     if (pixelW !== this.width || pixelH !== this.height) this.resizeExact(pixelW, pixelH);
   }
 
@@ -843,9 +867,10 @@ export class Renderer {
 
   async renderExportFrame(timeSec: number, opts?: { graphicTime?: number }): Promise<void> {
     const prev = this.exportClock;
+    const loopPhase = this.resolveMasterPhase(timeSec);
     this.exportClock = {
-      loopPhase: loopPhaseFromElapsed(timeSec, this.loopSeconds),
-      graphicTime: opts?.graphicTime ?? Math.max(0, timeSec),
+      loopPhase,
+      graphicTime: opts?.graphicTime ?? (this.clockMode === "hold" ? this.graphicElapsed : Math.max(0, timeSec)),
     };
     try {
       this.bindActivePair();

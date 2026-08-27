@@ -44,13 +44,15 @@ export async function runExport(
 ): Promise<ExportResult> {
   const preview = renderer.getCanvasSize();
   const { width, height } = exportPixelSize(request.aspect, request.size, preview);
-  const duration = renderer.getLoopSeconds();
-  const fps = request.format === "png" ? 1 : request.fps;
-  const frameCount = request.format === "png" ? 1 : Math.max(1, Math.round(duration * fps));
-  const quality = new Quality(request.quality === "high" ? "high" : "medium");
-  const filename = stampName(renderer, request.format, meta.behaviorId, meta.treatment);
-  const holdPhase = renderer.getLoopPhase();
-  const graphicElapsed = renderer.getGraphicElapsed();
+    const duration = renderer.getLoopSeconds();
+    const fps = request.format === "png" ? 1 : request.fps;
+    const frameCount = request.format === "png" ? 1 : Math.max(1, Math.round(duration * fps));
+    const quality = new Quality(request.quality === "high" ? "high" : "medium");
+    const filename = stampName(renderer, request.format, meta.behaviorId, meta.treatment);
+    const holdPhase = renderer.getLoopPhase();
+    const graphicElapsed = renderer.getGraphicElapsed();
+    // MP4 / WebP still walk `t = i/fps`. HOLD vs AUTO is decided inside
+    // `Renderer.resolveMasterPhase` — this session must not switch clockMode.
 
   const throwIfAborted = (): void => {
     if (signal.aborted) throw new DOMException("Export cancelled", "AbortError");
@@ -199,7 +201,7 @@ export async function runExport(
       audioSource?.close();
 
       renderer.resetExportAudioCursor();
-      resetFieldInkSmoothing();
+      if (renderer.getClockMode() !== "hold") resetFieldInkSmoothing();
       for (let i = 0; i < frameCount; i++) {
         throwIfAborted();
         const t = i / fps;
