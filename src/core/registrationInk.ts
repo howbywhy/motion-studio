@@ -1,18 +1,21 @@
-/** COMPAT — Bloom ring Registration ink only.
+/**
+ * REGISTRATION GOLDEN MASTER
+ * Visual behaviour approved against commit 728ff08.
+ * Do not modify algorithm, constants, mask behaviour or compositing
+ * as part of unrelated feature work.
  *
- * PRODUCT global Registration lives in `globalRegistration.ts` and must
- * not be reimplemented here.
+ * The ink formula is historical Bloom Registration
+ * (`paintRegistrationInkContent`): a high-contrast grayscale impression
+ * of B, a second impression tinted from B's average colour and offset
+ * the other way, plus a faint 8px halftone tile.
  *
- * `paintRegistrationInkContent` remains for Bloom treatment=registration
- * saved states (ring-clipped black + tint + halftone). That is not the
- * product global surface.
+ * Product global Registration applies this ink on Bloom's sharp field
+ * rings via `paintGoldenMasterRegistration` / `paintRegistrationSurface`.
+ * Bloom composite stays Clean.
+ *
+ * Bloom treatment=registration remains a dormant saved-state path only.
  */
 import { sampleAverageColor, type RGB } from "./media";
-import {
-  paintLockedPersistent,
-  paintLockedReactive,
-  prepareLockedGlobalRegistration,
-} from "./globalRegistration";
 
 // --- shared halftone pattern + tint cache --------------------------------
 let halftonePattern: CanvasPattern | null = null;
@@ -34,6 +37,13 @@ export function getHalftonePattern(ctx: CanvasRenderingContext2D): CanvasPattern
 
 let lastAvg: RGB = { r: 150, g: 150, b: 150 };
 let lastTintAt = 0;
+
+/** Test hook only. Does not change the paint algorithm. */
+export function resetRegistrationInkTintCache(): void {
+  lastAvg = { r: 150, g: 150, b: 150 };
+  lastTintAt = 0;
+  halftonePattern = null;
+}
 
 /** The photograph's own average color, damped and re-sampled at most every
  * 400ms — sampling every frame is unnecessary and costs a getImageData. */
@@ -111,57 +121,12 @@ export function paintRegistrationInkContent(
   sctx.restore();
 }
 
-/** Historical Bloom Registration treatment default (registrationAmount=40%).
- *  COMPAT: dormant treatment=registration path only. */
+/** Historical Bloom Registration treatment default (registrationAmount=40%). */
 export const BLOOM_REGISTRATION_AMOUNT = 0.4;
 
-/** @deprecated Use globalRegistration. PRODUCT amounts are locked there. */
-export const REACTIVE_REGISTRATION_AMOUNT = 0.4;
-
-/** @deprecated Use globalRegistration. PRODUCT amounts are locked there. */
-export const BASE_REGISTRATION_AMOUNT = 0.1;
-
-/** Retained so older eval hooks do not throw. Product global path is locked. */
+/** Retained so older eval hooks do not throw. Production is rings only. */
 export type RegistrationStrategy = "tonal" | "offset" | "edge" | "rings" | "tent";
 export function setRegistrationStrategy(_next: RegistrationStrategy): void {}
 export function getRegistrationStrategy(): RegistrationStrategy {
   return "rings";
 }
-
-/** COMPAT alias — product callers should use prepareLockedGlobalRegistration. */
-export function prepareGlobalPrintInk(
-  bLayer: HTMLCanvasElement,
-  width: number,
-  height: number,
-  dpr = 1,
-  composed?: HTMLCanvasElement,
-  live = false,
-  bw = false,
-): void {
-  prepareLockedGlobalRegistration(bLayer, width, height, dpr, composed, live, bw);
-}
-
-/** COMPAT alias. Amount is ignored; locked persistent amount is used. */
-export function paintPersistentRegistration(
-  ctx: CanvasRenderingContext2D,
-  _bLayer: HTMLCanvasElement,
-  width: number,
-  height: number,
-  _amount: number,
-): void {
-  paintLockedPersistent(ctx, width, height);
-}
-
-/** COMPAT alias. Amount is ignored; locked reactive amount is used. */
-export function paintReactiveRegistration(
-  ctx: CanvasRenderingContext2D,
-  _bLayer: HTMLCanvasElement,
-  maskLayer: HTMLCanvasElement,
-  width: number,
-  height: number,
-  _amount: number,
-): void {
-  paintLockedReactive(ctx, maskLayer, width, height);
-}
-
-

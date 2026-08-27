@@ -3,7 +3,8 @@ import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
-import { paintLockedGlobalRegistration, prepareLockedGlobalRegistration } from "./globalRegistration";
+import { paintGoldenMasterRegistration } from "./globalRegistration";
+import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypography } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
@@ -116,7 +117,7 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * and any area the mask doesn't touch simply shows A (never black, since A
  * always fully covers the frame).
  *
- * Sequence → active pair A/B → Bloom → LOCKED Global Registration → static Typography → Output.
+ * Sequence → active pair A/B → Bloom (Clean) → REGISTRATION GOLDEN MASTER → static Typography → Output.
  * Selective B&W is applied to A/B layers before Bloom.
  * Behaviours never see the sequence array. They still receive two layers.
  *
@@ -125,15 +126,14 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * directly — `finalizeOutput` then applies the global, behavior-agnostic
  * output-layer states on top of that, before copying the result onto the
  * visible canvas:
- *   Bloom compose
- *   → prepareLockedGlobalRegistration (plates from Bloom-only composed)
- *   → paintLockedGlobalRegistration (persistent 0.1 + reactive 0.4)
- *   → static typography
+ *   Bloom compose (Clean)
+ *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink, amount 0.4)
+ *   → static typography (must not mutate Registration)
  *   → visible canvas
  *
- * LOCKED VISUAL SYSTEM: do not alter Global Registration algorithm,
- * constants, plate generation, or this compositing order as part of
- * unrelated Typography / Bloom / Export work.
+ * REGISTRATION GOLDEN MASTER — commit 728ff08.
+ * Do not modify algorithm, constants, mask behaviour or compositing
+ * as part of unrelated Typography / Bloom / Export work.
  */
 export class Renderer {
   private readonly visible: HTMLCanvasElement;
@@ -171,7 +171,6 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
-  private printInkDirty = true;
   private typeState: TypeState = defaultTypeState();
   /** A/B test only. Product is false: Registration then type (historical). */
   private typeBeforeRegistration = false;
@@ -905,14 +904,14 @@ export class Renderer {
     };
   }
 
-  /** Source pixels changed (graphic params, etc.) — Print ink must rebuild. */
+  /** Source pixels changed (graphic params, etc.). */
   touchMedia(): void {
     this.invalidatePrintInk();
     this.renderFrame();
   }
 
   /** Discrete explore jump (randomise / undo). Do not inherit FIELD ink
-   *  smoothing or Print plates from the previous composition. */
+   *  smoothing from the previous composition. */
   renderExploreFrame(): void {
     resetFieldInkSmoothing();
     this.invalidatePrintInk();
@@ -923,15 +922,7 @@ export class Renderer {
     for (const item of this.items) fn(item);
   }
 
-  private invalidatePrintInk(): void {
-    this.printInkDirty = true;
-  }
-
-  private hasLiveSource(): boolean {
-    return [this.mediaA, this.mediaB].some(
-      (a) => Boolean(a?.videoEl) || a?.graphic?.getMotion() === "live",
-    );
-  }
+  private invalidatePrintInk(): void {}
 
   private hasAnyGraphic(): boolean {
     return this.items.some((item) => item.asset.kind === "graphic");
@@ -959,7 +950,6 @@ export class Renderer {
     const key = `${mapping.aIndex}/${mapping.bIndex}/${mapping.untreated ? "u" : "p"}`;
     if (key !== this.lastPairKey) {
       this.lastPairKey = key;
-      this.printInkDirty = true;
       if (!this.exporting) this.syncActiveVideos();
     }
   }
@@ -1029,7 +1019,6 @@ export class Renderer {
       g.paint(t);
       g.paintedAt = t;
       g.dirty = false;
-      this.printInkDirty = true;
     }
   }
 
@@ -1393,20 +1382,6 @@ export class Renderer {
     const mark = (): number => (this.profiling ? performance.now() : 0);
 
     const tPrep0 = mark();
-    if (this.registrationOn) {
-      if (this.hasLiveSource() || this.printInkDirty) {
-        prepareLockedGlobalRegistration(
-          this.bLayer,
-          width,
-          height,
-          this.dpr,
-          this.composedLayer,
-          this.hasLiveSource(),
-          this.bwMode === "both",
-        );
-        if (!this.hasLiveSource()) this.printInkDirty = false;
-      }
-    }
     const tPrep = mark();
 
     const paintType = (): void => {
@@ -1420,7 +1395,15 @@ export class Renderer {
     const tTypeEarly = mark();
 
     if (this.registrationOn) {
-      paintLockedGlobalRegistration(composedCtx, this.maskLayer, width, height);
+      const map = lastBloomFieldMap();
+      paintGoldenMasterRegistration(
+        composedCtx,
+        this.bLayer,
+        map?.fields ?? [],
+        width,
+        height,
+        this.bwMode === "both",
+      );
     }
     const tReg = mark();
 

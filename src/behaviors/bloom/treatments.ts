@@ -188,9 +188,15 @@ export function paintRefraction(
 
 // --- REGISTRATION ---------------------------------------------------------
 
-/** Historical Bloom Registration ink, confined to each field's sharp reveal
+/**
+ * REGISTRATION GOLDEN MASTER — commit 728ff08.
+ * Do not modify algorithm, constants, mask behaviour or compositing
+ * as part of unrelated feature work.
+ *
+ * Historical Bloom Registration ink, confined to each field's sharp reveal
  * ring. Used by the global Registration toggle (Bloom stays Clean) and by
- * the dormant treatment=registration saved-state path. */
+ * the dormant treatment=registration saved-state path.
+ */
 export function paintRegistrationSurface(
   ctx: CanvasRenderingContext2D,
   bLayer: HTMLCanvasElement,

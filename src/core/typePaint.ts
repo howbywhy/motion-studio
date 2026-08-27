@@ -19,7 +19,9 @@ function ctx2d(c: HTMLCanvasElement, prev: CanvasRenderingContext2D | null): Can
   return ctx;
 }
 
-/** PRODUCT: one clean Switzer silhouette. No motion, stroke, shadow, or bevel. */
+/** PRODUCT: one clean Switzer silhouette. No motion, stroke, shadow, or bevel.
+ * Typography paints after Registration and must not alter the photographic
+ * Registration algorithm (golden master 728ff08). */
 export function paintTypeLayer(
   dest: CanvasRenderingContext2D,
   layout: TypeLayout,

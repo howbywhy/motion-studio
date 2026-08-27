@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:registration": "node scripts/assert-registration-golden.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.2",
