@@ -14,6 +14,8 @@ import { buildFragmentControl } from "./ui/fragmentControl";
 import { buildBloomFieldMap } from "./ui/bloomFieldMap";
 import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
+import { mountEndBehaviourPanel } from "./ui/endBehaviourPanel";
+import { clampEndBehaviourSettings, END_BEHAVIOUR_OFF } from "./core/endBehaviour";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, cloneTypeState, defaultTypeState } from "./core/typeState";
 import { debugLinePlan, layoutTypeDocument } from "./core/typeLayout";
@@ -141,6 +143,7 @@ app.innerHTML = `
               <input type="color" id="bg-colour" value="#8a5a3a" title="Placeholder background colour" />
               <button type="button" class="reset-btn" id="bg-colour-reset" title="Restore the default background colour">Reset</button>
             </div>
+            <div id="end-behaviour-panel"></div>
           </div>
           <div class="saved-panel">
             <div class="panel-label-row">
@@ -207,6 +210,7 @@ const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!
 const compositionControlsEl = document.querySelector<HTMLDivElement>("#composition-controls")!;
 const compositionResetBtn = document.querySelector<HTMLButtonElement>("#composition-reset")!;
 const typePanelEl = document.querySelector<HTMLDivElement>("#type-panel")!;
+const endBehaviourPanelEl = document.querySelector<HTMLDivElement>("#end-behaviour-panel")!;
 const bgColourInput = document.querySelector<HTMLInputElement>("#bg-colour")!;
 const bgColourResetBtn = document.querySelector<HTMLButtonElement>("#bg-colour-reset")!;
 const graphicPanelEl = document.querySelector<HTMLDivElement>("#graphic-panel")!;
@@ -232,6 +236,13 @@ void loadSwitzer().then(() => renderer.renderFrame());
 const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
   renderer.patchTypeState(patch);
 });
+
+const endUi = mountEndBehaviourPanel(
+  endBehaviourPanelEl,
+  () => renderer.getEndBehaviour(),
+  (next) => renderer.setEndBehaviour(next),
+  () => renderer.getPlaybackMode(),
+);
 
 const inspectorTabs = document.querySelector<HTMLDivElement>("#inspector-tabs")!;
 inspectorTabs.addEventListener("click", (e) => {
@@ -1055,6 +1066,7 @@ function setPlaybackModeUI(mode: "loop" | "pingpong"): void {
   playbackToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.getAttribute("data-value") === mode);
   });
+  endUi.sync();
 }
 
 playbackToggle.addEventListener("click", (e) => {
@@ -1091,6 +1103,10 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     playing: renderer.isPlaying(),
     randomisationSeed,
     type: cloneTypeState(renderer.getTypeState()),
+    endBehaviourMode: renderer.getEndBehaviour().mode,
+    endBehaviourAmount: renderer.getEndBehaviour().amount,
+    endBehaviourHold: renderer.getEndBehaviour().hold,
+    endBehaviourDuration: renderer.getEndBehaviour().duration,
     sources: renderer.getSequence().map((item) => ({
       id: item.id,
       asset: item.asset,
@@ -1107,6 +1123,13 @@ function loadSavedState(state: SavedState): void {
   registrationBtn.classList.toggle("active", state.registrationOn);
   renderer.setTypeState(clampTypeState(state.type));
   typeUi.sync(renderer.getTypeState());
+  renderer.setEndBehaviour(clampEndBehaviourSettings({
+    mode: state.endBehaviourMode,
+    amount: state.endBehaviourAmount,
+    hold: state.endBehaviourHold,
+    duration: state.endBehaviourDuration,
+  }));
+  endUi.sync();
   renderer.setBwMode(resolveSavedBwMode(state));
   syncBwToggle();
   if (state.placeholderBg) {
@@ -1398,6 +1421,8 @@ function applyProductDefault(): void {
   syncAudioButton();
   renderer.setTypeState(defaultTypeState());
   typeUi.sync(renderer.getTypeState());
+  renderer.setEndBehaviour({ ...END_BEHAVIOUR_OFF });
+  endUi.sync();
 }
 
 applyProductDefault();
@@ -1487,6 +1512,12 @@ Object.assign(window, {
       renderer.patchTypeState(clampTypeState({ ...renderer.getTypeState(), ...patch }));
       typeUi.sync(renderer.getTypeState());
     },
+    getEndBehaviour: () => renderer.getEndBehaviour(),
+    setEndBehaviour: (patch: Record<string, unknown>) => {
+      renderer.setEndBehaviour(clampEndBehaviourSettings({ ...renderer.getEndBehaviour(), ...patch }));
+      endUi.sync();
+    },
+    lastEndDiagnostics: () => renderer.lastEndDiagnostics,
     debugTypeLayout: (w?: number, h?: number) => {
       const size = renderer.getCanvasSize();
       const cw = w ?? size.width;
@@ -1615,7 +1646,7 @@ Object.assign(window, {
     isAudioEnabled: () => renderer.isAudioEnabled(),
     setSeamCandidate: (mode: "A" | "B" | "C") => renderer.setSeamCandidate(mode),
     getSeamCandidate: () => renderer.getSeamCandidate(),
-    setPlaybackMode: (mode: "loop" | "pingpong") => renderer.setPlaybackMode(mode),
+    setPlaybackMode: (mode: "loop" | "pingpong") => setPlaybackModeUI(mode),
     getPlaybackMode: () => renderer.getPlaybackMode(),
     getLoopSeconds: () => renderer.getLoopSeconds(),
     setLoopSeconds: (seconds: number) => {

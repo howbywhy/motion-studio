@@ -45,6 +45,11 @@ export interface SavedState {
   bwMode?: "off" | "A" | "B" | "both";
   placeholderBg?: string;
   type?: TypeState;
+  /** Loop-seam interruption. Older saves omit these and load as Off. */
+  endBehaviourMode?: "off" | "flicker" | "fracture";
+  endBehaviourAmount?: number;
+  endBehaviourHold?: number;
+  endBehaviourDuration?: number;
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;

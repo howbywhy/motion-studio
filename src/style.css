@@ -572,6 +572,23 @@ body {
   display: none;
 }
 
+.end-behaviour-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.end-behaviour-panel[hidden] {
+  display: none;
+}
+
+.end-behaviour-fields[hidden] {
+  display: none;
+}
+
 .type-panel {
   display: flex;
   flex-direction: column;

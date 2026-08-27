@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>End Behaviour</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 64em; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin: 12px 0 40px; }
+      figure { margin: 0; }
+      canvas { width: 100%; height: auto; background: #000; display: block; }
+      figcaption { margin-top: 6px; color: #888; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>End Behaviour</h1>
+    <div id="root">Loading Switzer…</div>
+    <pre id="out"></pre>
+    <script type="module">
+      import { runEndBehaviourSheet } from "/src/eval/endBehaviour.ts";
+      const root = document.getElementById("root");
+      const out = document.getElementById("out");
+      try {
+        const report = await runEndBehaviourSheet(root);
+        window.__END_BEHAVIOUR__ = report;
+        out.textContent = JSON.stringify(report, null, 2);
+      } catch (e) {
+        root.textContent = String(e);
+      }
+    </script>
+  </body>
+</html>

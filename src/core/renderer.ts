@@ -9,6 +9,14 @@ import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypeDocument } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
 import {
+  applyEndBehaviour,
+  clampEndBehaviourSettings,
+  emptyEndDiagnostics,
+  END_BEHAVIOUR_OFF,
+  type EndBehaviourSettings,
+  type EndDiagnostics,
+} from "./endBehaviour";
+import {
   applyFieldInk,
   deriveFieldInk,
   lastFieldInk,
@@ -44,6 +52,7 @@ export interface FrameProfile {
   registrationMs: number;
   typeMs: number;
   bwMs: number;
+  endBehaviourMs: number;
   outputMs: number;
   totalMs: number;
 }
@@ -129,6 +138,7 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  *   Bloom compose (Clean)
  *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink, amount 0.4)
  *   → static typography (must not mutate Registration)
+ *   → End Behaviour (loop seam only; OFF is a true bypass)
  *   → visible canvas
  *
  * REGISTRATION GOLDEN MASTER — commit 728ff08.
@@ -172,6 +182,8 @@ export class Renderer {
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
   private typeState: TypeState = defaultTypeState();
+  private endBehaviour: EndBehaviourSettings = { ...END_BEHAVIOUR_OFF };
+  lastEndDiagnostics: EndDiagnostics | null = null;
   /** A/B test only. Product is false: Registration then type (historical). */
   private typeBeforeRegistration = false;
   private bwMode: BwMode = "off";
@@ -534,6 +546,15 @@ export class Renderer {
 
   getTypeState(): TypeState {
     return this.typeState;
+  }
+
+  setEndBehaviour(next: EndBehaviourSettings | Partial<EndBehaviourSettings>): void {
+    this.endBehaviour = clampEndBehaviourSettings({ ...this.endBehaviour, ...next });
+    this.renderFrame();
+  }
+
+  getEndBehaviour(): EndBehaviourSettings {
+    return { ...this.endBehaviour };
   }
 
   setBWEnabled(on: boolean): void {
@@ -1432,6 +1453,20 @@ export class Renderer {
     if (!this.typeBeforeRegistration) paintType();
     const tType = mark();
 
+    const end = this.endBehaviour;
+    if (end.mode !== "off" && this.playbackMode === "loop") {
+      this.lastEndDiagnostics = applyEndBehaviour(
+        composedCtx,
+        this.composedLayer,
+        this.getLoopPhase(),
+        end,
+        this.playbackMode,
+      );
+    } else {
+      this.lastEndDiagnostics = emptyEndDiagnostics(this.getLoopPhase(), end, this.playbackMode);
+    }
+    const tEnd = mark();
+
     this.ctx.clearRect(0, 0, width, height);
     this.ctx.drawImage(this.composedLayer, 0, 0);
     const tOut = mark();
@@ -1448,7 +1483,8 @@ export class Renderer {
         typeMs: this.typeBeforeRegistration ? tTypeEarly - tPrep : tType - tReg,
         registrationMs: this.typeBeforeRegistration ? tReg - tTypeEarly : tReg - tPrep,
         bwMs: tBw - tMedia,
-        outputMs: tOut - tType,
+        endBehaviourMs: tEnd - tType,
+        outputMs: tOut - tEnd,
         totalMs: tOut - t0,
       };
     }
