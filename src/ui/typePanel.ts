@@ -1,8 +1,10 @@
 import {
   clampTypeState,
   defaultTypeState,
+  TYPE_ANCHORS,
   TYPE_WEIGHT_MAX,
   TYPE_WEIGHT_MIN,
+  type TypeAnchor,
   type TypeComposition,
   type TypeState,
 } from "../core/typeState";
@@ -76,12 +78,17 @@ function slider(
   return { input, valueEl };
 }
 
-function cartesianPad(
+function nearestAnchor(nx: number, ny: number): TypeAnchor {
+  const col = nx < -17 ? "l" : nx > 17 ? "r" : "c";
+  const row = ny < -17 ? "t" : ny > 17 ? "b" : "m";
+  return `${row}${col}` as TypeAnchor;
+}
+
+function anchorPad(
   parent: HTMLElement,
-  x: number,
-  y: number,
-  onChange: (x: number, y: number) => void,
-): { set: (x: number, y: number) => void } {
+  current: TypeAnchor,
+  onChange: (anchor: TypeAnchor) => void,
+): { set: (anchor: TypeAnchor) => void } {
   const row = document.createElement("div");
   row.className = "control-row type-xy-row";
   const lab = document.createElement("label");
@@ -89,14 +96,15 @@ function cartesianPad(
   row.appendChild(lab);
 
   const SIZE = 88;
-  const CX = SIZE / 2;
-  const CY = SIZE / 2;
+  const PAD = 14;
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${SIZE} ${SIZE}`);
   svg.setAttribute("width", String(SIZE));
   svg.setAttribute("height", String(SIZE));
   svg.classList.add("type-xy-svg");
+  svg.setAttribute("role", "group");
+  svg.setAttribute("aria-label", "Position");
 
   const bg = document.createElementNS(svgNS, "rect");
   bg.setAttribute("x", "1");
@@ -106,42 +114,38 @@ function cartesianPad(
   bg.setAttribute("class", "type-xy-frame");
   svg.appendChild(bg);
 
-  const h = document.createElementNS(svgNS, "line");
-  h.setAttribute("x1", "4");
-  h.setAttribute("x2", String(SIZE - 4));
-  h.setAttribute("y1", String(CY));
-  h.setAttribute("y2", String(CY));
-  h.setAttribute("class", "type-xy-cross");
-  svg.appendChild(h);
-  const v = document.createElementNS(svgNS, "line");
-  v.setAttribute("x1", String(CX));
-  v.setAttribute("x2", String(CX));
-  v.setAttribute("y1", "4");
-  v.setAttribute("y2", String(SIZE - 4));
-  v.setAttribute("class", "type-xy-cross");
-  svg.appendChild(v);
-
-  const puck = document.createElementNS(svgNS, "circle");
-  puck.setAttribute("r", "5");
-  puck.setAttribute("class", "type-xy-puck");
-  svg.appendChild(puck);
-
-  function place(nx: number, ny: number): void {
-    const px = CX + (nx / 50) * (CX - 8);
-    const py = CY + (ny / 50) * (CY - 8);
-    puck.setAttribute("cx", String(px));
-    puck.setAttribute("cy", String(py));
+  const dots = new Map<TypeAnchor, SVGCircleElement>();
+  for (const anchor of TYPE_ANCHORS) {
+    const col = anchor[1] === "l" ? 0 : anchor[1] === "r" ? 2 : 1;
+    const rowI = anchor[0] === "t" ? 0 : anchor[0] === "b" ? 2 : 1;
+    const cx = PAD + (col * (SIZE - PAD * 2)) / 2;
+    const cy = PAD + (rowI * (SIZE - PAD * 2)) / 2;
+    const dot = document.createElementNS(svgNS, "circle");
+    dot.setAttribute("cx", String(cx));
+    dot.setAttribute("cy", String(cy));
+    dot.setAttribute("r", "4");
+    dot.setAttribute("data-anchor", anchor);
+    dot.setAttribute("class", "type-anchor-dot");
+    svg.appendChild(dot);
+    dots.set(anchor, dot);
   }
-  place(x, y);
+
+  function mark(anchor: TypeAnchor): void {
+    for (const [id, dot] of dots) {
+      dot.classList.toggle("active", id === anchor);
+    }
+  }
+  mark(current);
 
   function fromPointer(clientX: number, clientY: number): void {
     const rect = svg.getBoundingClientRect();
-    const px = ((clientX - rect.left) / rect.width) * SIZE - CX;
-    const py = ((clientY - rect.top) / rect.height) * SIZE - CY;
-    const nx = Math.max(-50, Math.min(50, (px / (CX - 8)) * 50));
-    const ny = Math.max(-50, Math.min(50, (py / (CY - 8)) * 50));
-    place(nx, ny);
-    onChange(Number(nx.toFixed(1)), Number(ny.toFixed(1)));
+    const px = ((clientX - rect.left) / rect.width) * SIZE - SIZE / 2;
+    const py = ((clientY - rect.top) / rect.height) * SIZE - SIZE / 2;
+    const nx = (px / (SIZE / 2 - PAD)) * 50;
+    const ny = (py / (SIZE / 2 - PAD)) * 50;
+    const next = nearestAnchor(nx, ny);
+    mark(next);
+    onChange(next);
   }
 
   let dragging = false;
@@ -164,7 +168,7 @@ function cartesianPad(
 
   row.appendChild(svg);
   parent.appendChild(row);
-  return { set: place };
+  return { set: mark };
 }
 
 export function buildTypePanel(
@@ -222,22 +226,10 @@ export function buildTypePanel(
     { value: "folio", label: "Folio" },
   ], initial.composition, (v) => onChange({ composition: v as TypeComposition }));
 
-  const alignSeg = seg(body, "Align", [
-    { value: "left", label: "Left" },
-    { value: "center", label: "Center" },
-    { value: "right", label: "Right" },
-  ], initial.align, (v) => onChange({ align: v as TypeState["align"] }));
-
-  const valignSeg = seg(body, "Vertical", [
-    { value: "top", label: "Top" },
-    { value: "center", label: "Center" },
-    { value: "bottom", label: "Bottom" },
-  ], initial.valign, (v) => onChange({ valign: v as TypeState["valign"] }));
-
   const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ scale: v }));
   const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ weight: v }));
   const spacing = slider(body, "Spacing", 0, 100, 1, initial.spacing, (v) => onChange({ spacing: v }));
-  const xy = cartesianPad(body, initial.x, initial.y, (x, y) => onChange({ x, y }));
+  const pos = anchorPad(body, initial.anchor, (anchor) => onChange({ anchor }));
 
   const colorRow = document.createElement("div");
   colorRow.className = "control-row bg-colour-row";
@@ -266,15 +258,13 @@ export function buildTypePanel(
       container.classList.toggle("type-disabled", !s.enabled);
       textarea.value = s.text;
       markSeg(compositionSeg, s.composition);
-      markSeg(alignSeg, s.align);
-      markSeg(valignSeg, s.valign);
       scale.input.value = String(s.scale);
       scale.valueEl.textContent = String(s.scale);
       weight.input.value = String(s.weight);
       weight.valueEl.textContent = String(s.weight);
       spacing.input.value = String(s.spacing);
       spacing.valueEl.textContent = String(s.spacing);
-      xy.set(s.x, s.y);
+      pos.set(s.anchor);
       color.value = s.color;
     },
   };

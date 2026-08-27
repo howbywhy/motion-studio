@@ -616,6 +616,15 @@ body {
   fill: var(--text);
 }
 
+.type-anchor-dot {
+  fill: var(--panel-border);
+  stroke: none;
+}
+
+.type-anchor-dot.active {
+  fill: var(--text);
+}
+
 @font-face {
   font-family: "Switzer";
   src: url("/fonts/Switzer-Variable.woff2") format("woff2"),

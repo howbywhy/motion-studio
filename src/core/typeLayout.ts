@@ -1,5 +1,6 @@
 import { switzerFont, SWITZER_FAMILY } from "./typeFont";
-import type { TypeAlign, TypeRole, TypeState, TypeValign } from "./typeState";
+import type { TypeAlign, TypeAnchor, TypeRole, TypeState } from "./typeState";
+import { alignFromAnchor } from "./typeState";
 
 export interface TypeLine {
   text: string;
@@ -25,18 +26,13 @@ export interface TypeLayout {
   composition: TypeRole;
 }
 
-/** Layout is authored in this square-width space, then projected to pixels. */
 const UNIT = 1000;
-
-/** Optical frame: 10 CSS pixels at a 500px-wide preview. */
 const PREVIEW_REF_PX = 500;
 const PREVIEW_MARGIN_PX = 10;
+/** 10px at a ~500px preview. Scales with canvas width. */
 const FRAME = UNIT * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
-const AWKWARD_CROP = UNIT * (8 / PREVIEW_REF_PX);
-const CONFIDENT_CROP = UNIT * (22 / PREVIEW_REF_PX);
-
 const COLS = 4;
-const ROWS = 8;
+const FIT_PAD = 4;
 
 const TRAILING_WEAK = new Set(["BY", "X"]);
 const LEADING_WEAK = new Set(["OR", "AND", "TO", "THE", "A", "OF"]);
@@ -49,32 +45,28 @@ interface GlyphMetrics {
   descent: number;
 }
 
-interface Box {
-  l: number;
-  t: number;
-  r: number;
-  b: number;
-}
-
-interface Grid {
-  innerL: number;
-  innerT: number;
-  innerW: number;
-  innerH: number;
-  colW: number;
-  rowH: number;
-  col: (i: number) => number;
-  row: (j: number) => number;
-}
-
 interface PreparedLine {
   text: string;
   m: GlyphMetrics;
 }
 
+interface Solution {
+  lines: string[];
+  prepared: PreparedLine[];
+  fontSize: number;
+  tracking: number;
+  leading: number;
+  localXs: number[];
+  localYs: number[];
+  bboxL: number;
+  bboxT: number;
+  bboxR: number;
+  bboxB: number;
+}
+
 interface CacheEntry {
   key: string;
-  layout: TypeLayout;
+  solution: Solution;
 }
 
 let cache: CacheEntry | null = null;
@@ -156,39 +148,29 @@ function splitTwo(words: string[]): [string, string] | null {
   const n = words.length;
   if (n < 2) return null;
   let cut = Math.ceil(n / 2);
-  if (cut < n && isLeadingWeak(words[cut])) cut += 1;
-  if (cut > 1 && isTrailingWeak(words[cut - 1]) && tokenKey(words[cut - 1]) !== "BY") cut -= 1;
   if (cut > 1 && isLeadingWeak(words[cut - 1])) cut -= 1;
+  if (cut > 1 && isTrailingWeak(words[cut - 1]) && tokenKey(words[cut - 1]) !== "BY") cut -= 1;
   cut = Math.min(n - 1, Math.max(1, cut));
   return [join(words, 0, cut), join(words, cut, n)];
 }
 
 function splitThree(words: string[]): string[] {
   const n = words.length;
-  if (n < 3) return [words.join(" ")];
-  const pair = splitTwo(words);
-  if (!pair) return [words.join(" ")];
-  const left = pair[0].split(/\s+/).filter(Boolean);
-  const right = pair[1].split(/\s+/).filter(Boolean);
-  if (left.length >= 3) {
-    const a = splitTwo(left);
-    if (a) return [a[0], a[1], pair[1]];
-  }
-  if (right.length >= 3) {
-    const b = splitTwo(right);
-    if (b) return [pair[0], b[0], b[1]];
-  }
-  return [pair[0], pair[1]];
-}
-
-function displayLines(words: string[]): string[] {
-  const n = words.length;
-  if (n <= 3) return [words.join(" ")];
-  if (n <= 8) {
+  if (n < 3) {
     const pair = splitTwo(words);
     return pair ? [pair[0], pair[1]] : [words.join(" ")];
   }
-  return splitThree(words);
+  let a = Math.round(n / 3);
+  let b = Math.round((2 * n) / 3);
+  a = Math.min(n - 2, Math.max(1, a));
+  b = Math.min(n - 1, Math.max(a + 1, b));
+  if (a > 1 && isLeadingWeak(words[a - 1])) a -= 1;
+  if (b > a + 1 && isLeadingWeak(words[b - 1])) b -= 1;
+  if (a > 1 && isTrailingWeak(words[a - 1]) && tokenKey(words[a - 1]) !== "BY") a -= 1;
+  if (b > a + 1 && isTrailingWeak(words[b - 1]) && tokenKey(words[b - 1]) !== "BY") b -= 1;
+  a = Math.min(n - 2, Math.max(1, a));
+  b = Math.min(n - 1, Math.max(a + 1, b));
+  return [join(words, 0, a), join(words, a, b), join(words, b, n)];
 }
 
 function editorialLines(words: string[]): string[] {
@@ -210,23 +192,30 @@ function editorialLines(words: string[]): string[] {
   return three;
 }
 
-function breakCopy(text: string, role: TypeRole): string[] {
+function displayCandidates(words: string[]): string[][] {
+  const n = words.length;
+  const one = [words.join(" ")];
+  if (n <= 3) return [one];
+  const cands: string[][] = [];
+  const pair = splitTwo(words);
+  if (pair) cands.push([pair[0], pair[1]]);
+  if (n >= 7) {
+    const three = splitThree(words);
+    if (three.length >= 3) cands.push(three);
+  }
+  if (n <= 6 && pair) cands.unshift(one);
+  return cands.length > 0 ? cands : [one];
+}
+
+function authoredOrBroken(text: string, role: TypeRole): string[][] {
   const blocks = hardBlocks(text);
   if (blocks.length === 0) return [];
   const userBroke = blocks.length > 1;
-  const lines: string[] = [];
-  for (const words of blocks) {
-    if (userBroke || role === "caption" || role === "folio") {
-      lines.push(words.join(" "));
-      continue;
-    }
-    if (role === "editorial") {
-      lines.push(...editorialLines(words));
-      continue;
-    }
-    lines.push(...displayLines(words));
-  }
-  return lines.filter(Boolean);
+  if (userBroke) return [blocks.map((w) => w.join(" "))];
+  const words = blocks[0];
+  if (role === "caption" || role === "folio") return [[words.join(" ")]];
+  if (role === "editorial") return [editorialLines(words)];
+  return displayCandidates(words);
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -237,364 +226,280 @@ function u01(v: number): number {
   return Math.min(1, Math.max(0, v / 100));
 }
 
-function makeGrid(unitW: number, unitH: number): Grid {
-  const innerL = FRAME;
-  const innerT = FRAME;
-  const innerW = unitW - FRAME * 2;
-  const innerH = unitH - FRAME * 2;
-  const colW = innerW / COLS;
-  const rowH = innerH / ROWS;
-  return {
-    innerL,
-    innerT,
-    innerW,
-    innerH,
-    colW,
-    rowH,
-    col: (i: number) => innerL + i * colW,
-    row: (j: number) => innerT + j * rowH,
-  };
-}
-
-function folioOversized(scale: number): boolean {
-  return scale >= 55;
-}
-
-function roleBox(role: TypeRole, align: TypeAlign, valign: TypeValign, g: Grid, scale: number): Box {
-  if (role === "display" || (role === "folio" && folioOversized(scale))) {
-    return { l: g.innerL, t: g.innerT, r: g.innerL + g.innerW, b: g.innerT + g.innerH };
-  }
-  if (role === "editorial") {
-    let c0 = 0;
-    let c1 = 4;
-    if (align === "left") {
-      c0 = 0;
-      c1 = 3;
-    } else if (align === "right") {
-      c0 = 1;
-      c1 = 4;
-    }
-    let r0 = 1;
-    let r1 = 7;
-    if (valign === "top") {
-      r0 = 0;
-      r1 = 5;
-    } else if (valign === "bottom") {
-      r0 = 3;
-      r1 = 8;
-    }
-    return { l: g.col(c0), t: g.row(r0), r: g.col(c1), b: g.row(r1) };
-  }
-  return { l: g.innerL, t: g.innerT, r: g.innerL + g.innerW, b: g.innerT + g.innerH };
-}
-
-function displayFill(scale: number): number {
-  const u = u01(scale);
-  if (u <= 0.5) return lerp(0.52, 1.0, u / 0.5);
-  return lerp(1.0, 1.38, (u - 0.5) / 0.5);
-}
-
 function trackingEm(role: TypeRole, spacing: number): number {
   const s = u01(spacing);
-  if (role === "display") return lerp(-0.045, 0.055, s);
-  if (role === "caption") return lerp(0.02, 0.12, s);
-  if (role === "folio") return lerp(-0.02, 0.08, s);
-  return lerp(-0.02, 0.05, s);
+  if (role === "display") return lerp(-0.04, 0.05, s);
+  if (role === "caption") return lerp(0.02, 0.1, s);
+  if (role === "folio") return lerp(-0.02, 0.06, s);
+  return lerp(-0.02, 0.04, s);
 }
 
 function leadingRatio(role: TypeRole, spacing: number): number {
   const s = u01(spacing);
-  if (role === "display") return lerp(0.78, 1.04, s);
-  if (role === "caption") return lerp(1.12, 1.28, s);
-  if (role === "folio") return lerp(0.82, 1.08, s);
-  return lerp(0.92, 1.28, Math.min(1, s / 0.5));
+  if (role === "display") return lerp(0.8, 1.05, s);
+  if (role === "caption") return lerp(1.12, 1.22, s);
+  if (role === "folio") return lerp(0.84, 1.05, s);
+  return lerp(0.95, 1.18, Math.min(1, s / 0.55));
 }
 
-function sizeToFill(lines: string[], weight: number, targetW: number, trackingEmVal: number): number {
-  const probe = 200;
-  const tracking = trackingEmVal * probe;
-  let longest = 1;
-  for (const line of lines) {
-    longest = Math.max(longest, inkWidth(measureLine(line, weight, probe, tracking)));
-  }
-  const size = (targetW / longest) * probe;
-  if (!Number.isFinite(size) || size <= 0) return 24;
-  return size;
+function prepareLines(lines: string[], weight: number, fontSize: number, tracking: number): PreparedLine[] {
+  return lines.map((text) => ({ text, m: measureLine(text, weight, fontSize, tracking) }));
 }
 
-function resolveSize(
-  role: TypeRole,
-  scale: number,
-  lines: string[],
-  weight: number,
-  trackingEmVal: number,
-  unitW: number,
-  box: Box,
-): number {
-  const boxW = Math.max(8, box.r - box.l);
-  const u = u01(scale);
-  if (role === "caption") {
-    return unitW * lerp(0.024, 0.052, u);
-  }
-  if (role === "folio") {
-    if (u < 0.35) return unitW * lerp(0.022, 0.048, u / 0.35);
-    if (u < 0.55) return unitW * lerp(0.048, 0.09, (u - 0.35) / 0.2);
-    const fill = lerp(0.72, 1.32, (u - 0.55) / 0.45);
-    const size = sizeToFill(lines, weight, boxW * fill, trackingEmVal);
-    const min = unitW * 0.08;
-    const max = unitW * lerp(0.28, 1.1, (u - 0.55) / 0.45);
-    return Math.min(max, Math.max(min, size));
-  }
-  if (role === "editorial") {
-    const fill = lerp(0.72, 0.96, u);
-    const size = sizeToFill(lines, weight, boxW * fill, trackingEmVal);
-    const min = unitW * 0.042;
-    const max = unitW * 0.155;
-    return Math.min(max, Math.max(min, size));
-  }
-  const fill = displayFill(scale);
-  const size = sizeToFill(lines, weight, boxW * fill, trackingEmVal);
-  const min = unitW * lerp(0.055, 0.09, u);
-  const max = unitW * lerp(0.42, 1.15, u);
-  return Math.min(max, Math.max(min, size));
-}
-
-function snapOverflow(overflow: number, grow: boolean): { fitInside: boolean; overflow: number } {
-  if (overflow <= 0) return { fitInside: true, overflow: 0 };
-  if (overflow < AWKWARD_CROP) return { fitInside: true, overflow: 0 };
-  if (grow && overflow < CONFIDENT_CROP) return { fitInside: false, overflow: CONFIDENT_CROP };
-  return { fitInside: false, overflow };
-}
-
-function placeInkX(
-  inkW: number,
-  align: TypeAlign,
-  boxL: number,
-  boxR: number,
-  canvasW: number,
-  allowOverscan: boolean,
-): { inkLeft: number; fitScale: number } {
-  const innerW = boxR - boxL;
-  if (!allowOverscan || inkW <= innerW) {
-    const fit = inkW > innerW ? innerW / Math.max(inkW, 1) : 1;
-    const w = inkW * fit;
-    const inkLeft =
-      align === "left" ? boxL :
-      align === "right" ? boxR - w :
-      boxL + (innerW - w) / 2;
-    return { inkLeft, fitScale: fit };
-  }
-  const canvasOverflow =
-    align === "center" ? inkW - canvasW :
-    inkW - (canvasW - boxL);
-  const snapped = snapOverflow(Math.max(0, canvasOverflow), true);
-  if (snapped.fitInside) {
-    const fit = innerW / Math.max(inkW, 1);
-    const w = inkW * fit;
-    const inkLeft =
-      align === "left" ? boxL :
-      align === "right" ? boxR - w :
-      boxL + (innerW - w) / 2;
-    return { inkLeft, fitScale: fit };
-  }
-  const want = snapped.overflow;
-  let grow = 1;
-  if (align === "center") {
-    const current = Math.max(0, inkW - canvasW);
-    if (current < want) grow = (canvasW + want) / Math.max(inkW, 1);
-    const w = inkW * grow;
-    return { inkLeft: (canvasW - w) / 2, fitScale: grow };
-  }
-  const current = Math.max(0, inkW - (canvasW - boxL));
-  if (current < want) grow = (canvasW - boxL + want) / Math.max(inkW, 1);
-  const w = inkW * grow;
-  if (align === "left") return { inkLeft: boxL, fitScale: grow };
-  return { inkLeft: canvasW - boxL - w, fitScale: grow };
-}
-
-function placeInkY(
-  inkH: number,
-  valign: TypeValign,
-  boxT: number,
-  boxB: number,
-  canvasH: number,
-  allowOverscan: boolean,
-): { inkTop: number; fitScale: number } {
-  const innerH = boxB - boxT;
-  if (!allowOverscan || inkH <= innerH) {
-    const fit = inkH > innerH ? innerH / Math.max(inkH, 1) : 1;
-    const h = inkH * fit;
-    const inkTop =
-      valign === "top" ? boxT :
-      valign === "bottom" ? boxB - h :
-      boxT + (innerH - h) / 2;
-    return { inkTop, fitScale: fit };
-  }
-  const canvasOverflow =
-    valign === "center" ? inkH - canvasH :
-    inkH - (canvasH - boxT);
-  const snapped = snapOverflow(Math.max(0, canvasOverflow), true);
-  if (snapped.fitInside) {
-    const fit = innerH / Math.max(inkH, 1);
-    const h = inkH * fit;
-    const inkTop =
-      valign === "top" ? boxT :
-      valign === "bottom" ? boxB - h :
-      boxT + (innerH - h) / 2;
-    return { inkTop, fitScale: fit };
-  }
-  const want = snapped.overflow;
-  let grow = 1;
-  if (valign === "center") {
-    const current = Math.max(0, inkH - canvasH);
-    if (current < want) grow = (canvasH + want) / Math.max(inkH, 1);
-    const h = inkH * grow;
-    return { inkTop: (canvasH - h) / 2, fitScale: grow };
-  }
-  const current = Math.max(0, inkH - (canvasH - boxT));
-  if (current < want) grow = (canvasH - boxT + want) / Math.max(inkH, 1);
-  const h = inkH * grow;
-  if (valign === "top") return { inkTop: boxT, fitScale: grow };
-  return { inkTop: canvasH - boxT - h, fitScale: grow };
-}
-
-function lockupMetrics(prepared: PreparedLine[], lineHeight: number): {
-  blockW: number;
-  blockH: number;
-  ascent: number;
-  descent: number;
-} {
-  let blockW = 0;
+function lockupHeight(prepared: PreparedLine[], leading: number, gap: number): { h: number; ascent: number; descent: number } {
   let ascent = 0;
   let descent = 0;
   for (const line of prepared) {
-    blockW = Math.max(blockW, inkWidth(line.m));
     ascent = Math.max(ascent, line.m.ascent);
     descent = Math.max(descent, line.m.descent);
   }
   const n = prepared.length;
-  const blockH = n <= 1 ? ascent + descent : ascent + descent + (n - 1) * lineHeight;
-  return { blockW, blockH, ascent, descent };
+  const h = n <= 1 ? ascent + descent : ascent + descent + (n - 1) * (leading + gap);
+  return { h, ascent, descent };
 }
 
-function placeLockup(
-  prepared: PreparedLine[],
-  lineHeight: number,
-  align: TypeAlign,
-  valign: TypeValign,
-  box: Box,
+function measureWidth(lines: string[], weight: number, size: number, trackingEmVal: number): number {
+  const tracking = trackingEmVal * size;
+  let longest = 1;
+  for (const line of lines) longest = Math.max(longest, inkWidth(measureLine(line, weight, size, tracking)));
+  return longest;
+}
+
+function maxLegalSize(
+  lines: string[],
+  weight: number,
+  trackingEmVal: number,
+  leadRatio: number,
+  maxW: number,
+  maxH: number,
+): number {
+  const probe = 200;
+  const widthAtProbe = measureWidth(lines, weight, probe, trackingEmVal);
+  let size = (maxW / Math.max(1, widthAtProbe)) * probe;
+  if (!Number.isFinite(size) || size <= 0) size = 24;
+  const fit = (s: number): boolean => {
+    const tracking = trackingEmVal * s;
+    const prepared = prepareLines(lines, weight, s, tracking);
+    const box = lockupHeight(prepared, s * leadRatio, 0);
+    const w = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
+    return w <= maxW + 0.25 && box.h <= maxH + 0.25;
+  };
+  if (!fit(size)) {
+    let lo = 4;
+    let hi = size;
+    for (let i = 0; i < 16; i++) {
+      const mid = (lo + hi) / 2;
+      if (fit(mid)) lo = mid;
+      else hi = mid;
+    }
+    size = lo;
+  } else {
+    let lo = size;
+    let hi = size * 1.08;
+    if (fit(hi)) {
+      for (let i = 0; i < 8; i++) {
+        const mid = (lo + hi) / 2;
+        if (fit(mid * 1.04)) lo = mid * 1.04;
+        else hi = mid;
+      }
+      size = lo;
+    }
+  }
+  return Math.max(8, size);
+}
+
+function pickDisplayLines(
+  candidates: string[][],
+  weight: number,
+  trackingEmVal: number,
+  leadRatio: number,
+  maxW: number,
+  maxH: number,
+): string[] {
+  let best = candidates[0];
+  let bestScore = -1;
+  for (const lines of candidates) {
+    const size = maxLegalSize(lines, weight, trackingEmVal, leadRatio, maxW, maxH);
+    const fewer = lines.length === 1 ? 1.03 : lines.length === 2 ? 1.01 : 1;
+    const score = size * fewer;
+    if (score > bestScore) {
+      bestScore = score;
+      best = lines;
+    }
+  }
+  return best;
+}
+
+function localXs(prepared: PreparedLine[]): number[] {
+  return prepared.map((line) => line.m.inkLeft);
+}
+
+function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[]): {
+  l: number;
+  t: number;
+  r: number;
+  b: number;
+} {
+  let l = Infinity;
+  let t = Infinity;
+  let r = -Infinity;
+  let b = -Infinity;
+  for (let i = 0; i < prepared.length; i++) {
+    const m = prepared[i].m;
+    l = Math.min(l, xs[i] - m.inkLeft);
+    r = Math.max(r, xs[i] + m.inkRight);
+    t = Math.min(t, ys[i] - m.ascent);
+    b = Math.max(b, ys[i] + m.descent);
+  }
+  return { l, t, r, b };
+}
+
+function extraGapFor(
+  role: TypeRole,
+  spacing: number,
+  n: number,
+  minH: number,
+  innerH: number,
+): number {
+  if (n <= 1) return 0;
+  const room = Math.max(0, innerH - minH);
+  const s = u01(spacing);
+  if (role === "caption" || role === "display") return 0;
+  if (role === "editorial") {
+    const t = Math.max(0, (s - 0.4) / 0.6);
+    return (t * room * 0.55) / (n - 1);
+  }
+  return (s * room) / (n - 1);
+}
+
+function composeSolution(
+  lines: string[],
+  role: TypeRole,
+  scale: number,
+  spacing: number,
+  weight: number,
   unitW: number,
   unitH: number,
-  allowOverscan: boolean,
-): { xs: number[]; ys: number[]; fontScale: number } {
-  const metrics = lockupMetrics(prepared, lineHeight);
-  const px = placeInkX(metrics.blockW, align, box.l, box.r, unitW, allowOverscan);
-  const py = placeInkY(metrics.blockH, valign, box.t, box.b, unitH, allowOverscan);
-  const fontScale = Math.min(px.fitScale, py.fitScale);
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < prepared.length; i++) {
-    const line = prepared[i];
-    const w = inkWidth(line.m) * fontScale;
-    const inkLeft =
-      align === "left" ? px.inkLeft :
-      align === "right" ? px.inkLeft + metrics.blockW * fontScale - w :
-      px.inkLeft + (metrics.blockW * fontScale - w) / 2;
-    xs.push(inkLeft + line.m.inkLeft * fontScale);
-    ys.push(py.inkTop + line.m.ascent * fontScale + i * lineHeight * fontScale);
+): Solution {
+  const innerW = unitW - FRAME * 2 - FIT_PAD * 2;
+  const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
+  const tEm = trackingEm(role, spacing);
+  const lead = leadingRatio(role, spacing);
+  const measure =
+    role === "editorial" ? innerW * 0.74 :
+    role === "caption" ? innerW * 0.92 :
+    innerW;
+  const legal = maxLegalSize(lines, weight, tEm, lead, measure, innerH);
+  const u = u01(scale);
+  let fontSize: number;
+  if (role === "caption") {
+    fontSize = Math.min(legal, unitW * lerp(0.022, 0.05, u));
+  } else if (role === "editorial") {
+    fontSize = legal * lerp(0.42, 0.82, u);
+  } else if (role === "folio") {
+    fontSize = legal * lerp(0.16, 1, u);
+  } else {
+    fontSize = legal * lerp(0.32, 1, u);
   }
-  return { xs, ys, fontScale };
-}
-
-function pinX(align: TypeAlign, inkW: number, col: number, g: Grid): number {
-  if (align === "left") return g.col(col);
-  if (align === "right") return g.col(col + 1) - inkW;
-  return g.col(col) + (g.colW - inkW) / 2;
-}
-
-function editorialPins(
-  prepared: PreparedLine[],
-  align: TypeAlign,
-  g: Grid,
-): { left: number; top: number }[] {
-  const n = prepared.length;
-  const colA = align === "right" ? 2 : 0;
-  const colB = align === "right" ? 1 : 2;
-  const rows =
-    n === 2 ? [0, 6] :
-    n === 3 ? [0, 3, 7] :
-    [0, 2, 5, 7];
-  return prepared.map((line, i) => {
-    const inkW = inkWidth(line.m);
-    const inkH = line.m.ascent + line.m.descent;
-    const stagger = n > 1 && i % 2 === 1;
-    const col = stagger ? colB : colA;
-    const row = rows[Math.min(i, rows.length - 1)] ?? 0;
-    let left = pinX(align === "center" ? (stagger ? "right" : "left") : align, inkW, col, g);
-    if (align === "center") {
-      left = stagger ? g.col(2) + (g.colW * 2 - inkW) / 2 : g.col(0) + (g.colW * 2 - inkW) / 2;
-    }
-    const top = g.row(row);
-    void inkH;
-    return { left, top };
-  });
-}
-
-function folioPins(
-  prepared: PreparedLine[],
-  align: TypeAlign,
-  g: Grid,
-): { left: number; top: number }[] {
-  const n = prepared.length;
-  const rows =
-    n === 2 ? [0, 7] :
-    n === 3 ? [0, 4, 7] :
-    [0, 2, 5, 7];
-  return prepared.map((line, i) => {
-    const inkW = inkWidth(line.m);
-    const inkH = line.m.ascent + line.m.descent;
-    const left =
-      align === "left" ? g.innerL :
-      align === "right" ? g.innerL + g.innerW - inkW :
-      g.innerL + (g.innerW - inkW) / 2;
-    const top = g.row(rows[Math.min(i, rows.length - 1)] ?? 0);
-    void inkH;
-    return { left, top };
-  });
-}
-
-function placeDistributed(
-  prepared: PreparedLine[],
-  role: TypeRole,
-  align: TypeAlign,
-  g: Grid,
-): { xs: number[]; ys: number[] } {
-  const pins = role === "folio" ? folioPins(prepared, align, g) : editorialPins(prepared, align, g);
+  fontSize = Math.min(fontSize, legal);
+  let tracking = tEm * fontSize;
+  let prepared = prepareLines(lines, weight, fontSize, tracking);
+  let leading = fontSize * lead;
+  let box = lockupHeight(prepared, leading, 0);
+  let width = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
+  if (width > measure || box.h > innerH) {
+    const sx = Math.min(1, measure / Math.max(1, width));
+    const sy = Math.min(1, innerH / Math.max(1, box.h));
+    fontSize *= Math.min(sx, sy);
+    tracking = tEm * fontSize;
+    prepared = prepareLines(lines, weight, fontSize, tracking);
+    leading = fontSize * lead;
+    box = lockupHeight(prepared, leading, 0);
+  }
+  const gap = extraGapFor(role, spacing, prepared.length, box.h, innerH);
+  box = lockupHeight(prepared, leading, gap);
+  const xs = localXs(prepared);
+  const localYs: number[] = [];
+  for (let i = 0; i < prepared.length; i++) {
+    localYs.push(box.ascent + i * (leading + gap));
+  }
+  const bounds = inkBounds(xs, localYs, prepared);
   return {
-    xs: prepared.map((line, i) => pins[i].left + line.m.inkLeft),
-    ys: prepared.map((line, i) => pins[i].top + line.m.ascent),
+    lines,
+    prepared,
+    fontSize,
+    tracking,
+    leading,
+    localXs: xs,
+    localYs,
+    bboxL: bounds.l,
+    bboxT: bounds.t,
+    bboxR: bounds.r,
+    bboxB: bounds.b,
   };
 }
 
-/** Lockup vs distributed: derived from Spacing (and Folio scale). Not a UI mode. */
-function distributeT(role: TypeRole, spacing: number, scale: number, n: number): number {
-  if (n < 2) return 0;
-  if (role === "editorial") return Math.max(0, (u01(spacing) - 0.5) / 0.5);
-  if (role === "folio") {
-    if (folioOversized(scale)) return u01(spacing);
-    return Math.max(0, (u01(spacing) - 0.5) / 0.5);
-  }
-  return 0;
+function anchorFractions(anchor: TypeAnchor): { hx: number; hy: number } {
+  const row = anchor[0];
+  const col = anchor[1];
+  return {
+    hx: col === "l" ? 0 : col === "r" ? 1 : 0.5,
+    hy: row === "t" ? 0 : row === "b" ? 1 : 0.5,
+  };
 }
 
-function cacheKey(state: TypeState, aspectKey: number): string {
+function nudgeIntoFrame(
+  xs: number[],
+  ys: number[],
+  prepared: PreparedLine[],
+  unitW: number,
+  unitH: number,
+): void {
+  const innerL = FRAME + FIT_PAD;
+  const innerT = FRAME + FIT_PAD;
+  const innerR = unitW - FRAME - FIT_PAD;
+  const innerB = unitH - FRAME - FIT_PAD;
+  const box = inkBounds(xs, ys, prepared);
+  let dx = 0;
+  let dy = 0;
+  if (box.l < innerL) dx += innerL - box.l;
+  if (box.r > innerR) dx -= box.r - innerR;
+  if (box.t < innerT) dy += innerT - box.t;
+  if (box.b > innerB) dy -= box.b - innerB;
+  if (dx === 0 && dy === 0) return;
+  for (let i = 0; i < xs.length; i++) {
+    xs[i] += dx;
+    ys[i] += dy;
+  }
+}
+
+function placeSolution(sol: Solution, anchor: TypeAnchor, unitW: number, unitH: number): {
+  xs: number[];
+  ys: number[];
+} {
+  const innerL = FRAME + FIT_PAD;
+  const innerT = FRAME + FIT_PAD;
+  const innerW = unitW - FRAME * 2 - FIT_PAD * 2;
+  const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
+  const bw = sol.bboxR - sol.bboxL;
+  const bh = sol.bboxB - sol.bboxT;
+  const { hx, hy } = anchorFractions(anchor);
+  const left = innerL + hx * Math.max(0, innerW - bw);
+  const top = innerT + hy * Math.max(0, innerH - bh);
+  const dx = left - sol.bboxL;
+  const dy = top - sol.bboxT;
+  const xs = sol.localXs.map((x) => x + dx);
+  const ys = sol.localYs.map((y) => y + dy);
+  nudgeIntoFrame(xs, ys, sol.prepared, unitW, unitH);
+  return { xs, ys };
+}
+
+function composeKey(state: TypeState, aspectKey: number): string {
   return [
-    "v9",
+    "v11",
     aspectKey,
     state.text,
     state.composition,
-    state.align,
-    state.valign,
     state.scale,
     state.spacing,
     state.weight,
@@ -610,117 +515,65 @@ export function layoutTypography(state: TypeState, canvasW: number, canvasH: num
   const aspectKey = Math.round((h / w) * 10000);
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
-  const key = cacheKey(state, aspectKey);
-  const ox = (state.x / 50) * unitW * 0.12;
-  const oy = (state.y / 50) * unitH * 0.12;
+  const key = composeKey(state, aspectKey);
+
+  let sol: Solution;
   if (cache && cache.key === key) {
-    return projectLayout(cache.layout, w, h, ox, oy, state.color, state.opacity / 100);
-  }
-
-  const role = state.composition;
-  let lines = breakCopy(text, role);
-  if (lines.length === 0) return null;
-
-  const g = makeGrid(unitW, unitH);
-  const box = roleBox(role, state.align, state.valign, g, state.scale);
-  const tEm = trackingEm(role, state.spacing);
-  let fontSize = resolveSize(role, state.scale, lines, state.weight, tEm, unitW, box);
-  let tracking = tEm * fontSize;
-  let prepared = prepareLines(lines, state.weight, fontSize, tracking);
-
-  if (role === "caption" && lines.length === 1) {
-    const words = lines[0].split(/\s+/).filter(Boolean);
-    if (words.length >= 5 && inkWidth(prepared[0].m) > box.r - box.l) {
-      const pair = splitTwo(words);
-      if (pair) {
-        lines = pair;
-        fontSize = resolveSize(role, state.scale, lines, state.weight, tEm, unitW, box);
-        tracking = tEm * fontSize;
-        prepared = prepareLines(lines, state.weight, fontSize, tracking);
+    sol = cache.solution;
+  } else {
+    const role = state.composition;
+    const candidates = authoredOrBroken(text, role);
+    if (candidates.length === 0) return null;
+    const tEm = trackingEm(role, state.spacing);
+    const lead = leadingRatio(role, state.spacing);
+    const innerW = unitW - FRAME * 2 - FIT_PAD * 2;
+    const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
+    const measure = role === "editorial" ? innerW * 0.74 : innerW;
+    let lines = [...(role === "display" && candidates.length > 1
+      ? pickDisplayLines(candidates, state.weight, tEm, lead, measure, innerH)
+      : candidates[0])];
+    if (role === "caption" && lines.length === 1) {
+      const words = lines[0].split(/\s+/).filter(Boolean);
+      const cap = unitW * 0.05;
+      const probe = prepareLines(lines, state.weight, cap, tEm * cap);
+      if (words.length >= 5 && inkWidth(probe[0].m) > innerW * 0.92) {
+        const pair = splitTwo(words);
+        if (pair) lines = [pair[0], pair[1]];
       }
     }
+    sol = composeSolution(lines, role, state.scale, state.spacing, state.weight, unitW, unitH);
+    cache = { key, solution: sol };
   }
 
-  const longest = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
-  const maxW = role === "display" || (role === "folio" && folioOversized(state.scale))
-    ? unitW * 1.4
-    : box.r - box.l;
-  if (role !== "display" && longest > maxW) {
-    fontSize *= maxW / longest;
-    tracking = tEm * fontSize;
-    prepared = prepareLines(lines, state.weight, fontSize, tracking);
-  }
-
-  const leading = fontSize * leadingRatio(role, state.spacing);
-  const allowOverscan = role === "display" || (role === "folio" && folioOversized(state.scale));
-  let placed = placeLockup(prepared, leading, state.align, state.valign, box, unitW, unitH, allowOverscan);
-  if (Math.abs(placed.fontScale - 1) > 0.002) {
-    const grow = placed.fontScale;
-    fontSize *= grow;
-    tracking = tEm * fontSize;
-    prepared = prepareLines(lines, state.weight, fontSize, tracking);
-    const nextLeading = fontSize * leadingRatio(role, state.spacing);
-    placed = placeLockup(
-      prepared,
-      nextLeading,
-      state.align,
-      state.valign,
-      box,
-      unitW,
-      unitH,
-      allowOverscan && grow >= 1,
-    );
-  }
-
-  const t = distributeT(role, state.spacing, state.scale, prepared.length);
-  let xs = placed.xs;
-  let ys = placed.ys;
-  if (t > 0) {
-    const dist = placeDistributed(prepared, role, state.align, g);
-    xs = placed.xs.map((x, i) => lerp(x, dist.xs[i], t));
-    ys = placed.ys.map((y, i) => lerp(y, dist.ys[i], t));
-  }
-
-  const laid: TypeLine[] = lines.map((textLine, i) => ({
+  const placed = alignFromAnchor(state.anchor);
+  const pts = placeSolution(sol, state.anchor, unitW, unitH);
+  const laid: TypeLine[] = sol.lines.map((textLine, i) => ({
     text: textLine,
-    width: prepared[i].m.advance,
-    height: fontSize,
-    x: xs[i],
-    y: ys[i],
+    width: sol.prepared[i].m.advance,
+    height: sol.fontSize,
+    x: pts.xs[i],
+    y: pts.ys[i],
   }));
 
   const layout: TypeLayout = {
     lines: laid,
-    fontSize,
+    fontSize: sol.fontSize,
     weight: state.weight,
-    tracking,
-    lineHeight: leading,
+    tracking: sol.tracking,
+    lineHeight: sol.leading,
     canvasW: unitW,
     canvasH: unitH,
     color: state.color,
     opacity: state.opacity / 100,
-    align: state.align,
-    offsetX: ox,
-    offsetY: oy,
-    composition: role,
+    align: placed.align,
+    offsetX: 0,
+    offsetY: 0,
+    composition: state.composition,
   };
-  cache = { key, layout };
-  return projectLayout(layout, w, h, ox, oy, state.color, state.opacity / 100);
+  return clampProjected(projectLayout(layout, w, h), w, h, state.weight);
 }
 
-function prepareLines(lines: string[], weight: number, fontSize: number, tracking: number): PreparedLine[] {
-  return lines.map((text) => ({ text, m: measureLine(text, weight, fontSize, tracking) }));
-}
-
-function projectLayout(
-  unit: TypeLayout,
-  canvasW: number,
-  canvasH: number,
-  ox: number,
-  oy: number,
-  color: string,
-  opacity: number,
-): TypeLayout {
+function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): TypeLayout {
   const s = canvasW / UNIT;
   return {
     lines: unit.lines.map((l) => ({
@@ -736,12 +589,43 @@ function projectLayout(
     lineHeight: unit.lineHeight * s,
     canvasW,
     canvasH,
-    color,
-    opacity,
+    color: unit.color,
+    opacity: unit.opacity,
     align: unit.align,
-    offsetX: ox * s,
-    offsetY: oy * s,
+    offsetX: 0,
+    offsetY: 0,
     composition: unit.composition,
+  };
+}
+
+function clampProjected(
+  layout: TypeLayout,
+  canvasW: number,
+  canvasH: number,
+  weight: number,
+): TypeLayout {
+  const frame = opticalFramePx(canvasW) + 2;
+  const xs = layout.lines.map((l) => l.x);
+  const ys = layout.lines.map((l) => l.y);
+  const pxPrepared = layout.lines.map((line) => ({
+    text: line.text,
+    m: measureLine(line.text, weight, layout.fontSize, layout.tracking),
+  }));
+  const innerL = frame;
+  const innerT = frame;
+  const innerR = canvasW - frame;
+  const innerB = canvasH - frame;
+  const box = inkBounds(xs, ys, pxPrepared);
+  let dx = 0;
+  let dy = 0;
+  if (box.l < innerL) dx += innerL - box.l;
+  if (box.r + dx > innerR) dx -= box.r + dx - innerR;
+  if (box.t < innerT) dy += innerT - box.t;
+  if (box.b + dy > innerB) dy -= box.b + dy - innerB;
+  if (dx === 0 && dy === 0) return layout;
+  return {
+    ...layout,
+    lines: layout.lines.map((l) => ({ ...l, x: l.x + dx, y: l.y + dy })),
   };
 }
 
@@ -766,10 +650,24 @@ export function opticalFramePx(canvasW: number): number {
   return canvasW * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
 }
 
-/** Eval-only: column x positions in pixels. */
 export function editorialColumnsPx(canvasW: number): number[] {
   const inner = canvasW - opticalFramePx(canvasW) * 2;
   const colW = inner / COLS;
   const m = opticalFramePx(canvasW);
   return [0, 1, 2, 3, 4].map((i) => m + i * colW);
+}
+
+export function typeInkBox(layout: TypeLayout): { l: number; t: number; r: number; b: number } {
+  let l = Infinity;
+  let t = Infinity;
+  let r = -Infinity;
+  let b = -Infinity;
+  for (const line of layout.lines) {
+    const m = measureLine(line.text, layout.weight, layout.fontSize, layout.tracking);
+    l = Math.min(l, line.x - m.inkLeft);
+    r = Math.max(r, line.x + m.inkRight);
+    t = Math.min(t, line.y - m.ascent);
+    b = Math.max(b, line.y + m.descent);
+  }
+  return { l, t, r, b };
 }

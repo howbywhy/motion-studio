@@ -1,5 +1,5 @@
 import { switzerFont, switzerReady } from "./typeFont";
-import type { TypeLayout } from "./typeLayout";
+import { opticalFramePx, type TypeLayout } from "./typeLayout";
 
 let overlayCanvas: HTMLCanvasElement | null = null;
 let overlayCtx: CanvasRenderingContext2D | null = null;
@@ -55,6 +55,14 @@ export function paintTypeLayer(
   overlayCtx.globalCompositeOperation = "source-over";
   overlayCtx.clearRect(0, 0, w, h);
   overlayCtx.save();
+  const frame = opticalFramePx(w);
+  const clipL = Math.ceil(frame);
+  const clipT = Math.ceil(frame);
+  const clipR = Math.floor(w - frame);
+  const clipB = Math.floor(h - frame);
+  overlayCtx.beginPath();
+  overlayCtx.rect(clipL, clipT, Math.max(0, clipR - clipL), Math.max(0, clipB - clipT));
+  overlayCtx.clip();
   overlayCtx.translate(layout.offsetX, layout.offsetY);
   overlayCtx.fillStyle = color;
   overlayCtx.textBaseline = "alphabetic";

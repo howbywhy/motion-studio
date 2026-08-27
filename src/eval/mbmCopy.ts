@@ -7,7 +7,9 @@ export interface MbmCopy {
 /** Fixed Made by Madelen campaign evaluation set. No lorem. */
 export const MBM_COPY: MbmCopy[] = [
   { id: "new", group: "Display", text: "NEW" },
+  { id: "hello", group: "Display", text: "HELLO" },
   { id: "coming-soon", group: "Display", text: "COMING SOON" },
+  { id: "welcome", group: "Display", text: "WELCOME TO THE MBM WORLD MADE BY MADELEN" },
   { id: "coming-soon-break", group: "Display", text: "COMING\nSOON" },
   { id: "name", group: "Display", text: "MADE BY MADELEN" },
   { id: "name-break", group: "Display", text: "MADE BY\nMADELEN" },
