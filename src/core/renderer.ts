@@ -8,6 +8,7 @@ import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypeDocument } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
+import { typeStateAtPhase } from "./typePages";
 import {
   applyEndBehaviour,
   clampEndBehaviourSettings,
@@ -1465,7 +1466,7 @@ export class Renderer {
     const tPrep = mark();
 
     const paintType = (): void => {
-      const type = this.typeState;
+      const type = typeStateAtPhase(this.typeState, this.getLoopPhase());
       const laid = layoutTypeDocument(type, width, height);
       if (laid.length === 0) return;
       for (const item of laid) {

@@ -658,6 +658,22 @@ body {
   width: 100%;
 }
 
+.type-states {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.type-states > label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+
+.type-state-remove {
+  margin-top: 6px;
+}
+
 .type-panel .type-seg button {
   flex: 1;
   font-size: 9px;

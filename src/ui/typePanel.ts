@@ -548,7 +548,7 @@ function buildBlock(
 export function buildTypePanel(
   container: HTMLElement,
   initial: TypeState,
-  onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean }) => void,
+  onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean; typePage?: "add" | "remove" }) => void,
 ): { sync: (state: TypeState) => void } {
   container.innerHTML = "";
   container.className = "type-panel";
@@ -582,6 +582,47 @@ export function buildTypePanel(
   body.className = "type-panel-body";
   container.appendChild(body);
 
+  const statesHost = document.createElement("div");
+  statesHost.className = "type-states";
+  body.appendChild(statesHost);
+
+  function paintStates(): void {
+    statesHost.innerHTML = "";
+    const lab = document.createElement("label");
+    lab.textContent = "Type States";
+    statesHost.appendChild(lab);
+    const row = document.createElement("div");
+    row.className = "seg-toggle type-seg type-states-row";
+    const n = state.pages.length;
+    for (let i = 0; i < n; i++) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = String(i + 1).padStart(2, "0");
+      if (i === state.selected) btn.classList.add("active");
+      btn.addEventListener("click", () => onChange({ selected: i }));
+      row.appendChild(btn);
+    }
+    if (n < 3) {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "type-state-add";
+      add.textContent = "+";
+      add.title = "Duplicate current state";
+      add.addEventListener("click", () => onChange({ typePage: "add" }));
+      row.appendChild(add);
+    }
+    statesHost.appendChild(row);
+    if (state.selected > 0) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "reset-btn type-state-remove";
+      remove.textContent = `Remove ${String(state.selected + 1).padStart(2, "0")}`;
+      remove.addEventListener("click", () => onChange({ typePage: "remove" }));
+      statesHost.appendChild(remove);
+    }
+  }
+  paintStates();
+
   const applyExpanded = (): void => {
     block0.setExpanded(expanded === 0);
     block1.setExpanded(expanded === 1);
@@ -607,6 +648,7 @@ export function buildTypePanel(
       toggle.classList.toggle("active", state.enabled);
       toggle.textContent = state.enabled ? "On" : "Off";
       container.classList.toggle("type-disabled", !state.enabled);
+      paintStates();
       block0.sync(state.blocks[0]);
       block1.sync(state.blocks[1]);
     },

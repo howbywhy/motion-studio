@@ -767,7 +767,12 @@ export function invalidateTypeLayout(): void {
 }
 
 export function typeHasCopy(state: TypeState): boolean {
-  return activeTypeBlocks(state).length > 0;
+  if (!state.enabled) return false;
+  const pages = state.pages?.length ? state.pages : [state.blocks];
+  return pages.some((page) =>
+    (page[0]!.enabled && page[0]!.text.trim().length > 0) ||
+    (page[1]!.enabled && page[1]!.text.trim().length > 0),
+  );
 }
 
 export function ensureSwitzerMeasure(): void {

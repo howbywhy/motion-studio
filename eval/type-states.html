@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Type States</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 64em; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 12px 0 36px; }
+      figure { margin: 0; }
+      canvas { width: 100%; height: auto; background: #000; display: block; }
+      figcaption { margin-top: 6px; color: #888; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Type States</h1>
+    <p>Editorial pages in time. Hard cuts. No travelling type. One-state documents are production-identical.</p>
+    <div id="root">Loading Switzer…</div>
+    <pre id="out"></pre>
+    <script type="module">
+      import { runTypeStatesSheet } from "/src/eval/typeStates.ts";
+      const root = document.getElementById("root");
+      const out = document.getElementById("out");
+      void (async () => {
+        try {
+          const report = await runTypeStatesSheet(root);
+          window.__TYPE_STATES__ = report;
+          const { details, ...summary } = report;
+          out.textContent = JSON.stringify({ summary, details }, null, 2);
+        } catch (e) {
+          const err = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ""}` : String(e);
+          root.textContent = err;
+          console.error(e);
+        }
+      })();
+    </script>
+  </body>
+</html>

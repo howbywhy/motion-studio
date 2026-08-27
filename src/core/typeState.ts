@@ -1,3 +1,5 @@
+import { cloneTypePage, TYPE_PAGE_MAX, type TypePage } from "./typePages";
+
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
 export type TypeTextAlign = "left" | "center" | "right";
@@ -45,6 +47,10 @@ export interface TypeState {
   enabled: boolean;
   blocks: [TypeBlock, TypeBlock];
   activeIndex: 0 | 1;
+  /** 1–3 editorial pages. Length 1 is production-identical. */
+  pages: [TypeBlock, TypeBlock][];
+  /** Which page the Type inspector is editing. */
+  selected: number;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -305,10 +311,13 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
 }
 
 export function defaultTypeState(): TypeState {
+  const blocks: TypePage = [defaultTypeBlock(true, "headline"), defaultTypeBlock(false, "headline")];
   return {
     enabled: false,
-    blocks: [defaultTypeBlock(true, "headline"), defaultTypeBlock(false, "headline")],
+    blocks,
     activeIndex: 0,
+    pages: [cloneTypePage(blocks)],
+    selected: 0,
   };
 }
 
@@ -378,7 +387,7 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   if (!raw) return d;
   const rec = raw as Record<string, unknown>;
   const activeIndex: 0 | 1 = rec.activeIndex === 1 ? 1 : 0;
-  let blocks: [TypeBlock, TypeBlock];
+  let blocks: TypePage;
   if (Array.isArray(rec.blocks) && rec.blocks.length >= 1) {
     blocks = [
       clampTypeBlock(rec.blocks[0] as Partial<TypeBlock>, true),
@@ -387,17 +396,49 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   } else if (looksLikeLegacyBlock(rec)) {
     blocks = [clampTypeBlock({ ...(rec as Partial<TypeBlock>), enabled: true }, true), defaultTypeBlock(false)];
   } else {
-    blocks = d.blocks;
+    blocks = cloneTypePage(d.blocks);
   }
+
+  let pages: TypePage[];
+  if (Array.isArray(rec.pages) && rec.pages.length >= 1) {
+    const home = cloneTypePage(blocks);
+    pages = rec.pages.slice(0, TYPE_PAGE_MAX).map((page) => {
+      if (!Array.isArray(page)) return cloneTypePage(home);
+      return [
+        clampTypeBlock(page[0] as Partial<TypeBlock>, true),
+        clampTypeBlock((page[1] as Partial<TypeBlock> | undefined) ?? defaultTypeBlock(false), false),
+      ];
+    });
+  } else {
+    pages = [cloneTypePage(blocks)];
+  }
+  if (pages.length < 1) pages = [cloneTypePage(blocks)];
+
+  let selected = typeof rec.selected === "number" && Number.isFinite(rec.selected) ? Math.round(rec.selected) : 0;
+  selected = Math.min(pages.length - 1, Math.max(0, selected));
+
+  if (rec.typePage === "add" && pages.length < TYPE_PAGE_MAX) {
+    pages = [...pages.map(cloneTypePage), cloneTypePage(pages[selected]!)];
+    selected = pages.length - 1;
+  } else if (rec.typePage === "remove" && pages.length > 1 && selected > 0) {
+    pages = pages.filter((_, i) => i !== selected).map(cloneTypePage);
+    selected = Math.min(selected, pages.length - 1);
+  }
+
+  blocks = cloneTypePage(pages[selected]!);
   const blockPatch = pickBlockPatch(rec);
-  if (Array.isArray(rec.blocks) && blockPatch) {
+  if (blockPatch) {
     const i = activeIndex;
     blocks[i] = clampTypeBlock({ ...blocks[i], ...blockPatch }, blocks[i].enabled);
+    pages[selected] = cloneTypePage(blocks);
   }
+
   return {
     enabled: rec.enabled === true,
     blocks,
     activeIndex,
+    pages,
+    selected,
   };
 }
 
@@ -416,10 +457,14 @@ export function patchTypeState(current: TypeState, patch: Partial<TypeState> & P
 }
 
 export function cloneTypeState(state: TypeState): TypeState {
+  const pages = (state.pages ?? [state.blocks]).map(cloneTypePage);
+  const selected = Math.min(pages.length - 1, Math.max(0, state.selected ?? 0));
   return {
     enabled: state.enabled,
     activeIndex: state.activeIndex,
-    blocks: [{ ...state.blocks[0] }, { ...state.blocks[1] }],
+    pages,
+    selected,
+    blocks: cloneTypePage(pages[selected]!),
   };
 }
 
