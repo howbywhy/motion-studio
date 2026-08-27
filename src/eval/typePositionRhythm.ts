@@ -405,6 +405,20 @@ export async function runTypePositionRhythmSheet(root: HTMLElement): Promise<Typ
   const a95 = hashPixels(settle(renderer));
   const autoMoves = a17 !== a63 && a63 !== a95;
 
+  const liveCanvas = host.querySelector("canvas");
+  if (liveCanvas instanceof HTMLCanvasElement) {
+    renderer.setClockMode("auto");
+    renderer.play();
+    liveCanvas.style.display = "block";
+    const fig = document.createElement("figure");
+    fig.style.maxWidth = "320px";
+    const cap = document.createElement("figcaption");
+    cap.textContent = "Live loop — Bloom Expressive · Limit 60 · Registration 70 · Flicker 100";
+    fig.appendChild(liveCanvas);
+    fig.appendChild(cap);
+    live.after(fig);
+  }
+
   const tLayout0 = performance.now();
   for (let i = 0; i < 40; i++) layoutTypeDocument(off, W45, H45);
   const offMs = performance.now() - tLayout0;

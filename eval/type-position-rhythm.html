@@ -22,15 +22,18 @@
       import { runTypePositionRhythmSheet } from "/src/eval/typePositionRhythm.ts";
       const root = document.getElementById("root");
       const out = document.getElementById("out");
-      try {
-        const report = await runTypePositionRhythmSheet(root);
-        window.__TYPE_POSITION_RHYTHM__ = report;
-        const { details, ...summary } = report;
-        out.textContent = JSON.stringify({ summary, details }, null, 2);
-      } catch (e) {
-        root.textContent = e && e.stack ? e.stack : String(e);
-        console.error(e);
-      }
+      void (async () => {
+        try {
+          const report = await runTypePositionRhythmSheet(root);
+          window.__TYPE_POSITION_RHYTHM__ = report;
+          const { details, ...summary } = report;
+          out.textContent = JSON.stringify({ summary, details }, null, 2);
+        } catch (e) {
+          const err = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ""}` : String(e);
+          root.textContent = err;
+          console.error(e);
+        }
+      })();
     </script>
   </body>
 </html>
