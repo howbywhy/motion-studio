@@ -592,7 +592,8 @@ body {
   display: none;
 }
 
-.type-disabled .type-group {
+.type-disabled .type-group,
+.type-disabled .type-panel-body {
   display: none;
 }
 

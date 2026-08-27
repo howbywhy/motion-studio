@@ -38,6 +38,7 @@ export function paintTypeLayer(
     color,
     opacity,
     layout.fontSize,
+    layout.tracking,
     layout.offsetX,
     layout.offsetY,
     layout.weight,
@@ -60,8 +61,20 @@ export function paintTypeLayer(
   overlayCtx.textAlign = "left";
   overlayCtx.globalAlpha = Math.min(1, Math.max(0, opacity));
   overlayCtx.font = switzerFont(layout.weight, layout.fontSize);
+  const spaced = overlayCtx as CanvasRenderingContext2D & { letterSpacing?: string };
+  if (typeof spaced.letterSpacing === "string") {
+    spaced.letterSpacing = `${layout.tracking}px`;
+  }
   for (const line of layout.lines) {
-    overlayCtx.fillText(line.text, line.x, line.y);
+    if (layout.tracking !== 0 && typeof spaced.letterSpacing !== "string") {
+      let x = line.x;
+      for (const ch of line.text) {
+        overlayCtx.fillText(ch, x, line.y);
+        x += overlayCtx.measureText(ch).width + layout.tracking;
+      }
+    } else {
+      overlayCtx.fillText(line.text, line.x, line.y);
+    }
   }
   overlayCtx.restore();
   overlayKey = key;

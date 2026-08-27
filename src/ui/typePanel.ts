@@ -3,6 +3,7 @@ import {
   defaultTypeState,
   TYPE_WEIGHT_MAX,
   TYPE_WEIGHT_MIN,
+  type TypeComposition,
   type TypeState,
 } from "../core/typeState";
 
@@ -45,7 +46,6 @@ function slider(
   max: number,
   step: number,
   value: number,
-  unit: string,
   onInput: (v: number) => void,
 ): { input: HTMLInputElement; valueEl: HTMLSpanElement } {
   const row = document.createElement("div");
@@ -55,8 +55,7 @@ function slider(
   row.appendChild(lab);
   const valueEl = document.createElement("span");
   valueEl.className = "control-value";
-  const fmt = (v: number): string => `${Number(v.toFixed(step < 1 ? 2 : 0))}${unit}`;
-  valueEl.textContent = fmt(value);
+  valueEl.textContent = String(value);
   const input = document.createElement("input");
   input.type = "range";
   input.min = String(min);
@@ -65,7 +64,7 @@ function slider(
   input.value = String(value);
   input.addEventListener("input", () => {
     const v = parseFloat(input.value);
-    valueEl.textContent = fmt(v);
+    valueEl.textContent = String(Number(v.toFixed(step < 1 ? 2 : 0)));
     onInput(v);
   });
   const inputRow = document.createElement("div");
@@ -75,20 +74,6 @@ function slider(
   row.appendChild(inputRow);
   parent.appendChild(row);
   return { input, valueEl };
-}
-
-function group(parent: HTMLElement, title: string, open: boolean): HTMLElement {
-  const details = document.createElement("details");
-  details.className = "type-group";
-  details.open = open;
-  const summary = document.createElement("summary");
-  summary.textContent = title;
-  details.appendChild(summary);
-  const body = document.createElement("div");
-  body.className = "type-group-body";
-  details.appendChild(body);
-  parent.appendChild(details);
-  return body;
 }
 
 function cartesianPad(
@@ -188,7 +173,7 @@ export function buildTypePanel(
   onChange: (patch: Partial<TypeState>) => void,
 ): { sync: (state: TypeState) => void } {
   container.innerHTML = "";
-  container.classList.add("type-panel");
+  container.className = "type-panel";
 
   const head = document.createElement("div");
   head.className = "panel-label-row";
@@ -212,43 +197,48 @@ export function buildTypePanel(
   container.appendChild(head);
   container.classList.toggle("type-disabled", !initial.enabled);
 
-  const content = group(container, "Content", true);
+  const body = document.createElement("div");
+  body.className = "type-panel-body";
+  container.appendChild(body);
+
   const textRow = document.createElement("div");
   textRow.className = "control-row";
   const textLab = document.createElement("label");
-  textLab.textContent = "Text";
+  textLab.textContent = "Copy";
   textRow.appendChild(textLab);
   const textarea = document.createElement("textarea");
   textarea.className = "type-text";
-  textarea.rows = 4;
+  textarea.rows = 5;
   textarea.placeholder = "";
   textarea.value = initial.text;
   textarea.addEventListener("input", () => onChange({ text: textarea.value }));
   textRow.appendChild(textarea);
-  content.appendChild(textRow);
+  body.appendChild(textRow);
 
-  const layout = group(container, "Layout", true);
-  const modeSeg = seg(layout, "Mode", [
-    { value: "responsive", label: "Responsive" },
-    { value: "fixed", label: "Fixed" },
-  ], initial.mode, (v) => onChange({ mode: v as TypeState["mode"] }));
-  const alignSeg = seg(layout, "Align", [
+  const compositionSeg = seg(body, "Composition", [
+    { value: "display", label: "Display" },
+    { value: "stack", label: "Stack" },
+    { value: "spread", label: "Spread" },
+    { value: "quiet", label: "Quiet" },
+  ], initial.composition, (v) => onChange({ composition: v as TypeComposition }));
+
+  const alignSeg = seg(body, "Align", [
     { value: "left", label: "Left" },
     { value: "center", label: "Center" },
     { value: "right", label: "Right" },
   ], initial.align, (v) => onChange({ align: v as TypeState["align"] }));
-  const valignSeg = seg(layout, "Vertical", [
+
+  const valignSeg = seg(body, "Vertical", [
     { value: "top", label: "Top" },
     { value: "center", label: "Center" },
     { value: "bottom", label: "Bottom" },
   ], initial.valign, (v) => onChange({ valign: v as TypeState["valign"] }));
-  const scale = slider(layout, "Scale", 0, 100, 1, initial.scale, "", (v) => onChange({ scale: v }));
-  const spread = slider(layout, "Spread", 0, 100, 1, initial.spread, "", (v) => onChange({ spread: v }));
-  const rhythm = slider(layout, "Rhythm", 0, 100, 1, initial.rhythm, "", (v) => onChange({ rhythm: v }));
-  const xy = cartesianPad(layout, initial.x, initial.y, (x, y) => onChange({ x, y }));
 
-  const type = group(container, "Type", true);
-  const weight = slider(type, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, "", (v) => onChange({ weight: v }));
+  const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ scale: v }));
+  const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ weight: v }));
+  const spacing = slider(body, "Spacing", 0, 100, 1, initial.spacing, (v) => onChange({ spacing: v }));
+  const xy = cartesianPad(body, initial.x, initial.y, (x, y) => onChange({ x, y }));
+
   const colorRow = document.createElement("div");
   colorRow.className = "control-row bg-colour-row";
   const colorLab = document.createElement("label");
@@ -260,7 +250,7 @@ export function buildTypePanel(
   color.title = "Type colour";
   color.addEventListener("input", () => onChange({ color: color.value }));
   colorRow.appendChild(color);
-  type.appendChild(colorRow);
+  body.appendChild(colorRow);
 
   function markSeg(el: HTMLDivElement, value: string): void {
     for (const b of el.querySelectorAll("button")) {
@@ -275,18 +265,16 @@ export function buildTypePanel(
       toggle.textContent = s.enabled ? "On" : "Off";
       container.classList.toggle("type-disabled", !s.enabled);
       textarea.value = s.text;
-      markSeg(modeSeg, s.mode);
+      markSeg(compositionSeg, s.composition);
       markSeg(alignSeg, s.align);
       markSeg(valignSeg, s.valign);
       scale.input.value = String(s.scale);
       scale.valueEl.textContent = String(s.scale);
-      spread.input.value = String(s.spread);
-      spread.valueEl.textContent = String(s.spread);
-      rhythm.input.value = String(s.rhythm);
-      rhythm.valueEl.textContent = String(s.rhythm);
-      xy.set(s.x, s.y);
       weight.input.value = String(s.weight);
       weight.valueEl.textContent = String(s.weight);
+      spacing.input.value = String(s.spacing);
+      spacing.valueEl.textContent = String(s.spacing);
+      xy.set(s.x, s.y);
       color.value = s.color;
     },
   };

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MBM type sheet</title>
+    <style>
+      body { margin: 24px; background: #111; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.04em; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0 48px; }
+      figure { margin: 0; }
+      canvas { width: 100%; height: auto; background: #000; display: block; }
+      figcaption { margin-top: 6px; color: #aaa; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <div id="root">Loading Switzer…</div>
+    <pre id="out"></pre>
+    <script type="module">
+      import { runTypeSheet } from "/src/eval/typeSheet.ts";
+      const root = document.getElementById("root");
+      const out = document.getElementById("out");
+      try {
+        const report = await runTypeSheet(root);
+        window.__TYPE_SHEET__ = report;
+        out.textContent = JSON.stringify(report.exportParity, null, 2);
+      } catch (e) {
+        root.textContent = String(e);
+      }
+    </script>
+  </body>
+</html>
