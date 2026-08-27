@@ -29,8 +29,27 @@ export interface TypeLayout {
  * Preview / 1080 / 2160 share the same unit plan. */
 const UNIT = 1000;
 
+/**
+ * Optical frame: 10 CSS pixels at a 500px-wide preview.
+ * Projects to 21.6px at 1080 and 43.2px at 2160 — identical visual relationship.
+ * Not a website safe area.
+ */
+const PREVIEW_REF_PX = 500;
+const PREVIEW_MARGIN_PX = 10;
+const FRAME = UNIT * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
+const AWKWARD_CROP = UNIT * (8 / PREVIEW_REF_PX);
+const CONFIDENT_CROP = UNIT * (22 / PREVIEW_REF_PX);
+
 const TRAILING_WEAK = new Set(["BY", "X"]);
 const LEADING_WEAK = new Set(["OR", "AND", "TO", "THE", "A", "OF"]);
+
+interface GlyphMetrics {
+  advance: number;
+  inkLeft: number;
+  inkRight: number;
+  ascent: number;
+  descent: number;
+}
 
 interface CacheEntry {
   key: string;
@@ -63,31 +82,41 @@ function isLeadingWeak(word: string): boolean {
   return LEADING_WEAK.has(tokenKey(word));
 }
 
-function setMeasureFont(weight: number, size: number, tracking: number): string {
+function setMeasureFont(weight: number, size: number, tracking: number): void {
   const ctx = measureContext();
-  const font = switzerFont(weight, size);
-  ctx.font = font;
+  ctx.font = switzerFont(weight, size);
   const ls = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
   if (typeof ls.letterSpacing === "string") ls.letterSpacing = `${tracking}px`;
-  return font;
 }
 
-function measureWidth(text: string, weight: number, size: number, tracking: number): number {
+function measureLine(text: string, weight: number, size: number, tracking: number): GlyphMetrics {
   setMeasureFont(weight, size, tracking);
   const ctx = measureContext();
   const ls = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+  let advance = 0;
   if (typeof ls.letterSpacing === "string") {
-    const w = ctx.measureText(text).width;
-    return Number.isFinite(w) ? w : 0;
+    advance = ctx.measureText(text).width;
+  } else if (tracking === 0) {
+    advance = ctx.measureText(text).width;
+  } else {
+    for (const ch of text) advance += ctx.measureText(ch).width;
+    if (text.length > 1) advance += tracking * (text.length - 1);
   }
-  if (tracking === 0) {
-    const w = ctx.measureText(text).width;
-    return Number.isFinite(w) ? w : 0;
-  }
-  let w = 0;
-  for (const ch of text) w += ctx.measureText(ch).width;
-  if (text.length > 1) w += tracking * (text.length - 1);
-  return w;
+  if (!Number.isFinite(advance) || advance < 0) advance = 0;
+  const m = ctx.measureText(text);
+  const inkLeft = Number.isFinite(m.actualBoundingBoxLeft) ? m.actualBoundingBoxLeft : 0;
+  const inkRight = Number.isFinite(m.actualBoundingBoxRight) ? m.actualBoundingBoxRight : advance;
+  const ascent = Number.isFinite(m.actualBoundingBoxAscent) && m.actualBoundingBoxAscent > 0
+    ? m.actualBoundingBoxAscent
+    : size * 0.78;
+  const descent = Number.isFinite(m.actualBoundingBoxDescent) && m.actualBoundingBoxDescent > 0
+    ? m.actualBoundingBoxDescent
+    : size * 0.22;
+  return { advance, inkLeft, inkRight, ascent, descent };
+}
+
+function inkWidth(m: GlyphMetrics): number {
+  return Math.max(m.advance, m.inkLeft + m.inkRight);
 }
 
 function hardBlocks(raw: string): string[][] {
@@ -98,23 +127,6 @@ function hardBlocks(raw: string): string[][] {
     .filter((words) => words.length > 0);
 }
 
-/** Split a no-newline block on sentence boundaries when there are 2+ units. */
-function sentenceUnits(words: string[]): string[][] {
-  const joined = words.join(" ");
-  const parts = joined.split(/(?<=[.!?])\s+/).map((p) => p.trim()).filter(Boolean);
-  if (parts.length < 2) return [words];
-  const units = parts.map((p) => p.split(/\s+/).filter(Boolean));
-  const last = units[units.length - 1];
-  if (last && last.length === 1 && (isTrailingWeak(last[0]) || last[0].length <= 1)) {
-    const prev = units[units.length - 2];
-    if (prev) {
-      prev.push(...last);
-      units.pop();
-    }
-  }
-  return units.length >= 2 ? units : [words];
-}
-
 function join(words: string[], a: number, b: number): string {
   return words.slice(a, b).join(" ");
 }
@@ -123,9 +135,9 @@ function splitTwo(words: string[]): [string, string] | null {
   const n = words.length;
   if (n < 2) return null;
   let cut = Math.ceil(n / 2);
-  if (cut > 1 && isLeadingWeak(words[cut - 1])) {
-    cut -= 1;
-  }
+  if (cut < n && isLeadingWeak(words[cut])) cut += 1;
+  if (cut > 1 && isTrailingWeak(words[cut - 1]) && tokenKey(words[cut - 1]) !== "BY") cut -= 1;
+  if (cut > 1 && isLeadingWeak(words[cut - 1])) cut -= 1;
   cut = Math.min(n - 1, Math.max(1, cut));
   return [join(words, 0, cut), join(words, cut, n)];
 }
@@ -133,88 +145,29 @@ function splitTwo(words: string[]): [string, string] | null {
 function splitThree(words: string[]): string[] {
   const n = words.length;
   if (n < 3) return [words.join(" ")];
-  const a = Math.max(1, Math.round(n / 3));
-  let b = Math.max(a + 1, Math.round((2 * n) / 3));
-  if (b < n && isLeadingWeak(words[b])) b += 1;
-  if (a < n && isLeadingWeak(words[a])) {
-    return splitTwo(words) ? [...(splitTwo(words) as [string, string])] : [words.join(" ")];
+  const pair = splitTwo(words);
+  if (!pair) return [words.join(" ")];
+  const left = pair[0].split(/\s+/).filter(Boolean);
+  const right = pair[1].split(/\s+/).filter(Boolean);
+  if (left.length >= 3) {
+    const a = splitTwo(left);
+    if (a) return [a[0], a[1], pair[1]];
   }
-  b = Math.min(n - 1, Math.max(a + 1, b));
-  return [join(words, 0, a), join(words, a, b), join(words, b, n)];
-}
-
-function sizeToFill(lines: string[], weight: number, targetW: number, trackingEm: number): number {
-  const probe = 200;
-  const tracking = trackingEm * probe;
-  let longest = 1;
-  for (const line of lines) {
-    longest = Math.max(longest, measureWidth(line, weight, probe, tracking));
+  if (right.length >= 3) {
+    const b = splitTwo(right);
+    if (b) return [pair[0], b[0], b[1]];
   }
-  const size = (targetW / longest) * probe;
-  if (!Number.isFinite(size) || size <= 0) return 24;
-  return size;
+  return [pair[0], pair[1]];
 }
 
-function fillWidth(composition: TypeComposition, scale: number, unitW: number): number {
-  const u = Math.min(1, Math.max(0, scale / 100));
-  const frac =
-    composition === "display" ? 0.22 + u * 1.08 :
-    composition === "stack" ? 0.20 + u * 0.62 :
-    composition === "spread" ? 0.22 + u * 0.50 :
-    0.10 + u * 0.32;
-  return unitW * frac;
-}
-
-function trackingEm(composition: TypeComposition, spacing: number): number {
-  const s = Math.min(1, Math.max(0, spacing / 100));
-  if (composition === "display") return -0.04 + s * 0.10;
-  if (composition === "stack") return -0.02 + s * 0.04;
-  if (composition === "quiet") return 0.02 + s * 0.12;
-  return 0;
-}
-
-function leadingRatio(composition: TypeComposition, spacing: number): number {
-  const s = Math.min(1, Math.max(0, spacing / 100));
-  if (composition === "display") return 0.78 + s * 0.16;
-  if (composition === "stack") return 0.70 + s * 0.58;
-  if (composition === "quiet") return 1.08 + s * 0.38;
-  return 1;
-}
-
-function composeBlock(words: string[], composition: TypeComposition, allowSplit: boolean): string[] {
-  if (words.length === 0) return [];
-  if (!allowSplit || words.length === 1) return [words.join(" ")];
-
-  if (composition === "display") {
-    if (words.length <= 3) return [words.join(" ")];
+function headlineLines(words: string[]): string[] {
+  const n = words.length;
+  if (n <= 3) return [words.join(" ")];
+  if (n <= 8) {
     const pair = splitTwo(words);
     return pair ? [pair[0], pair[1]] : [words.join(" ")];
   }
-
-  if (composition === "quiet") {
-    if (words.length <= 4) return [words.join(" ")];
-    const pair = splitTwo(words);
-    return pair ? [pair[0], pair[1]] : [words.join(" ")];
-  }
-
-  if (composition === "stack" || composition === "spread") {
-    const sentences = sentenceUnits(words);
-    if (sentences.length >= 2) return sentences.map((u) => u.join(" "));
-    if (words.length === 2) return [words[0], words[1]];
-    if (words.length === 3) {
-      const pair = splitTwo(words);
-      return pair ? [pair[0], pair[1]] : [words.join(" ")];
-    }
-    if (words.length === 4) {
-      const pair = splitTwo(words);
-      return pair ? [pair[0], pair[1]] : [words.join(" ")];
-    }
-    if (words.length >= 6) return splitThree(words);
-    const pair = splitTwo(words);
-    return pair ? [pair[0], pair[1]] : [words.join(" ")];
-  }
-
-  return [words.join(" ")];
+  return splitThree(words);
 }
 
 function breakCopy(text: string, composition: TypeComposition): string[] {
@@ -223,208 +176,344 @@ function breakCopy(text: string, composition: TypeComposition): string[] {
   const userBroke = blocks.length > 1;
   const lines: string[] = [];
   for (const words of blocks) {
-    const short = words.join(" ").length <= 22 && words.length <= 4;
-    const allow = userBroke ? false : true;
-    if (userBroke && short) {
+    if (userBroke || composition === "spread" || composition === "caption") {
       lines.push(words.join(" "));
-    } else {
-      lines.push(...composeBlock(words, composition, allow));
+      continue;
     }
-  }
-  if (composition === "display" && !userBroke && lines.length > 2) {
-    return [lines[0], lines.slice(1).join(" ")];
+    lines.push(...headlineLines(words));
   }
   return lines.filter(Boolean);
 }
 
-function maybeSplitForWeight(
-  lines: string[],
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function u01(v: number): number {
+  return Math.min(1, Math.max(0, v / 100));
+}
+
+function headlineFill(scale: number): number {
+  const u = u01(scale);
+  if (u <= 0.5) return lerp(0.52, 1.0, u / 0.5);
+  return lerp(1.0, 1.38, (u - 0.5) / 0.5);
+}
+
+function spreadEm(scale: number, unitW: number): number {
+  return unitW * lerp(0.07, 0.16, u01(scale));
+}
+
+function captionEm(scale: number, unitW: number): number {
+  return unitW * lerp(0.026, 0.062, u01(scale));
+}
+
+function captionInset(scale: number): number {
+  return FRAME * lerp(3, 1, u01(scale));
+}
+
+function trackingEm(composition: TypeComposition, spacing: number): number {
+  const s = u01(spacing);
+  if (composition === "headline") return lerp(-0.045, 0.055, s);
+  if (composition === "caption") return lerp(0.02, 0.12, s);
+  return lerp(-0.01, 0.04, s);
+}
+
+function leadingRatio(composition: TypeComposition, spacing: number): number {
+  const s = u01(spacing);
+  if (composition === "headline") return lerp(0.78, 1.04, s);
+  if (composition === "caption") return lerp(1.12, 1.32, s);
+  return lerp(0.88, 1.08, s);
+}
+
+function sizeToFill(lines: string[], weight: number, targetW: number, trackingEmVal: number): number {
+  const probe = 200;
+  const tracking = trackingEmVal * probe;
+  let longest = 1;
+  for (const line of lines) {
+    longest = Math.max(longest, inkWidth(measureLine(line, weight, probe, tracking)));
+  }
+  const size = (targetW / longest) * probe;
+  if (!Number.isFinite(size) || size <= 0) return 24;
+  return size;
+}
+
+function resolveSize(
   composition: TypeComposition,
-  weight: number,
-  targetW: number,
-  trackingEmVal: number,
-  userBroke: boolean,
-): string[] {
-  if (userBroke || lines.length !== 1 || composition === "quiet") return lines;
-  const line = lines[0];
-  const words = line.split(/\s+/).filter(Boolean);
-  if (words.length < 3) return lines;
-  const size = sizeToFill(lines, weight, targetW, trackingEmVal);
-  const tracking = trackingEmVal * size;
-  const width = measureWidth(line, weight, size, tracking);
-  const limit = composition === "display" ? targetW * 1.18 : targetW * 1.02;
-  if (width <= limit) return lines;
-  const pair = splitTwo(words);
-  return pair ? [pair[0], pair[1]] : lines;
-}
-
-function quietWrap(
+  scale: number,
   lines: string[],
   weight: number,
-  targetW: number,
   trackingEmVal: number,
-): string[] {
-  if (lines.length !== 1) return lines;
-  const line = lines[0];
-  const words = line.split(/\s+/).filter(Boolean);
-  if (words.length < 5) return lines;
-  const size = sizeToFill(lines, weight, targetW, trackingEmVal);
-  const width = measureWidth(line, weight, size, trackingEmVal * size);
-  if (width <= targetW) return lines;
-  const pair = splitTwo(words);
-  return pair ? [pair[0], pair[1]] : lines;
-}
-
-function clampSize(size: number, composition: TypeComposition, unitW: number, unitH: number): number {
-  const min = composition === "quiet" ? unitW * 0.022 : unitW * 0.032;
-  const max =
-    composition === "display" ? unitH * 1.28 :
-    composition === "stack" ? unitH * 0.24 :
-    composition === "spread" ? unitH * 0.20 :
-    unitH * 0.12;
+  unitW: number,
+): number {
+  const inner = unitW - FRAME * 2;
+  if (composition === "caption") {
+    return captionEm(scale, unitW);
+  }
+  if (composition === "spread") {
+    const size = spreadEm(scale, unitW);
+    const fit = sizeToFill(lines, weight, inner, trackingEmVal);
+    return Math.min(size, fit);
+  }
+  const fill = headlineFill(scale);
+  const size = sizeToFill(lines, weight, inner * fill, trackingEmVal);
+  const min = unitW * lerp(0.055, 0.09, u01(scale));
+  const max = unitW * lerp(0.42, 1.15, u01(scale));
   return Math.min(max, Math.max(min, size));
 }
 
-function confidentCrop(x: number, w: number, frameW: number, fontSize: number, scale: number, composition: TypeComposition): number {
-  if (composition === "quiet") {
-    const inset = frameW * 0.08;
-    if (x < inset) return inset;
-    if (x + w > frameW - inset) return Math.max(inset, frameW - inset - w);
-    return x;
-  }
-  const left = x;
-  const right = x + w;
-  const awkward = fontSize * 0.08;
-  const confident = fontSize * 0.38;
-  const overflowL = Math.max(0, -left);
-  const overflowR = Math.max(0, right - frameW);
-  const preferBleed = composition === "display" && scale >= 70;
-  let nx = x;
-  if (overflowL > 0 && overflowL < awkward) {
-    nx = preferBleed ? x - (confident - overflowL) : 0;
-  }
-  if (overflowR > 0 && overflowR < awkward) {
-    nx = preferBleed ? x + (confident - overflowR) : frameW - w;
-  }
-  return nx;
+/** If a calculated crop is tiny, fit inside the optical frame. If it is real, push it to a confident overscan. */
+function snapOverflow(overflow: number, grow: boolean): { fitInside: boolean; overflow: number } {
+  if (overflow <= 0) return { fitInside: true, overflow: 0 };
+  if (overflow < AWKWARD_CROP) return { fitInside: true, overflow: 0 };
+  if (grow && overflow < CONFIDENT_CROP) return { fitInside: false, overflow: CONFIDENT_CROP };
+  return { fitInside: false, overflow };
 }
 
-function placeBlock(
-  widths: number[],
-  fontSize: number,
-  leading: number,
+function placeInkX(
+  inkW: number,
+  align: TypeAlign,
   unitW: number,
+  allowOverscan: boolean,
+  margin: number,
+): { inkLeft: number; fitScale: number } {
+  const innerL = margin;
+  const innerR = unitW - margin;
+  const innerW = innerR - innerL;
+  if (!allowOverscan || inkW <= innerW) {
+    const fit = inkW > innerW ? innerW / Math.max(inkW, 1) : 1;
+    const w = inkW * fit;
+    const inkLeft =
+      align === "left" ? innerL :
+      align === "right" ? innerR - w :
+      innerL + (innerW - w) / 2;
+    return { inkLeft, fitScale: fit };
+  }
+
+  const canvasOverflow =
+    align === "center" ? inkW - unitW :
+    inkW - (unitW - margin);
+  const snapped = snapOverflow(Math.max(0, canvasOverflow), true);
+  if (snapped.fitInside) {
+    const fit = innerW / Math.max(inkW, 1);
+    const w = inkW * fit;
+    const inkLeft =
+      align === "left" ? innerL :
+      align === "right" ? innerR - w :
+      innerL + (innerW - w) / 2;
+    return { inkLeft, fitScale: fit };
+  }
+
+  const want = snapped.overflow;
+  let grow = 1;
+  if (align === "center") {
+    const current = Math.max(0, inkW - unitW);
+    if (current < want) grow = (unitW + want) / Math.max(inkW, 1);
+    const w = inkW * grow;
+    return { inkLeft: (unitW - w) / 2, fitScale: grow };
+  }
+  const current = Math.max(0, inkW - (unitW - margin));
+  if (current < want) grow = (unitW - margin + want) / Math.max(inkW, 1);
+  const w = inkW * grow;
+  if (align === "left") return { inkLeft: margin, fitScale: grow };
+  return { inkLeft: unitW - margin - w, fitScale: grow };
+}
+
+function placeInkY(
+  inkH: number,
+  valign: TypeValign,
   unitH: number,
+  allowOverscan: boolean,
+  margin: number,
+): { inkTop: number; fitScale: number } {
+  const innerT = margin;
+  const innerB = unitH - margin;
+  const innerH = innerB - innerT;
+  if (!allowOverscan || inkH <= innerH) {
+    const fit = inkH > innerH ? innerH / Math.max(inkH, 1) : 1;
+    const h = inkH * fit;
+    const inkTop =
+      valign === "top" ? innerT :
+      valign === "bottom" ? innerB - h :
+      innerT + (innerH - h) / 2;
+    return { inkTop, fitScale: fit };
+  }
+
+  const canvasOverflow =
+    valign === "center" ? inkH - unitH :
+    inkH - (unitH - margin);
+  const snapped = snapOverflow(Math.max(0, canvasOverflow), true);
+  if (snapped.fitInside) {
+    const fit = innerH / Math.max(inkH, 1);
+    const h = inkH * fit;
+    const inkTop =
+      valign === "top" ? innerT :
+      valign === "bottom" ? innerB - h :
+      innerT + (innerH - h) / 2;
+    return { inkTop, fitScale: fit };
+  }
+  const want = snapped.overflow;
+  let grow = 1;
+  if (valign === "center") {
+    const current = Math.max(0, inkH - unitH);
+    if (current < want) grow = (unitH + want) / Math.max(inkH, 1);
+    const h = inkH * grow;
+    return { inkTop: (unitH - h) / 2, fitScale: grow };
+  }
+  const current = Math.max(0, inkH - (unitH - margin));
+  if (current < want) grow = (unitH - margin + want) / Math.max(inkH, 1);
+  const h = inkH * grow;
+  if (valign === "top") return { inkTop: margin, fitScale: grow };
+  return { inkTop: unitH - margin - h, fitScale: grow };
+}
+
+interface PreparedLine {
+  text: string;
+  m: GlyphMetrics;
+}
+
+function prepareLines(lines: string[], weight: number, fontSize: number, tracking: number): PreparedLine[] {
+  return lines.map((text) => ({ text, m: measureLine(text, weight, fontSize, tracking) }));
+}
+
+function lockupMetrics(prepared: PreparedLine[], lineHeight: number): {
+  blockW: number;
+  blockH: number;
+  ascent: number;
+  descent: number;
+} {
+  let blockW = 0;
+  let ascent = 0;
+  let descent = 0;
+  for (const line of prepared) {
+    blockW = Math.max(blockW, inkWidth(line.m));
+    ascent = Math.max(ascent, line.m.ascent);
+    descent = Math.max(descent, line.m.descent);
+  }
+  const n = prepared.length;
+  const blockH = n <= 1 ? ascent + descent : ascent + descent + (n - 1) * lineHeight;
+  return { blockW, blockH, ascent, descent };
+}
+
+function placeLockup(
+  prepared: PreparedLine[],
+  lineHeight: number,
   align: TypeAlign,
   valign: TypeValign,
-  composition: TypeComposition,
-  scale: number,
-): { xs: number[]; ys: number[] } {
-  const n = widths.length;
-  const ascent = fontSize * 0.78;
-  const lineBox = fontSize;
-  const gap = Math.max(fontSize * 0.02, leading - lineBox);
-  const blockH = n * lineBox + Math.max(0, n - 1) * gap;
-  const bleed =
-    composition === "display" ? Math.min(0.12, (scale / 100) * 0.14) :
-    composition === "stack" && scale >= 90 ? 0.04 :
-    0;
-  const insetX =
-    composition === "quiet" ? unitW * 0.10 :
-    composition === "display" ? unitW * (0.04 - bleed * 0.4) :
-    unitW * 0.06;
-  const insetY =
-    composition === "quiet" ? unitH * 0.12 :
-    composition === "display" ? unitH * (0.05 - bleed * 0.5) :
-    unitH * 0.07;
-  const frameW = unitW - insetX * 2;
-  const top = insetY - unitH * bleed;
-  const bottom = unitH - insetY + unitH * bleed;
-  let origin = top;
-  if (valign === "center") origin = (unitH - blockH) / 2;
-  else if (valign === "bottom") origin = bottom - blockH;
+  unitW: number,
+  unitH: number,
+  allowOverscan: boolean,
+  margin: number,
+): { xs: number[]; ys: number[]; fontScale: number } {
+  const box = lockupMetrics(prepared, lineHeight);
+  const px = placeInkX(box.blockW, align, unitW, allowOverscan, margin);
+  const py = placeInkY(box.blockH, valign, unitH, allowOverscan, margin);
+  const fontScale = Math.min(px.fitScale, py.fitScale);
+  const xs: number[] = [];
   const ys: number[] = [];
-  for (let i = 0; i < n; i++) ys.push(origin + i * (lineBox + gap) + ascent);
-  const innerW = unitW - insetX * 2;
-  const xs = widths.map((lineW) => {
-    const local =
-      align === "left" ? insetX :
-      align === "right" ? unitW - insetX - lineW :
-      insetX + (innerW - lineW) / 2;
-    return confidentCrop(local, lineW, unitW, fontSize, scale, composition);
-  });
-  void frameW;
-  return { xs, ys };
+  for (let i = 0; i < prepared.length; i++) {
+    const line = prepared[i];
+    const w = inkWidth(line.m) * fontScale;
+    const inkLeft =
+      align === "left" ? px.inkLeft :
+      align === "right" ? px.inkLeft + box.blockW * fontScale - w :
+      px.inkLeft + (box.blockW * fontScale - w) / 2;
+    const fillX = inkLeft + line.m.inkLeft * fontScale;
+    const fillY = py.inkTop + line.m.ascent * fontScale + i * lineHeight * fontScale;
+    xs.push(fillX);
+    ys.push(fillY);
+  }
+  return { xs, ys, fontScale };
 }
 
-function spreadPattern(n: number, align: TypeAlign): { x: number; y: number }[] {
-  const yFor = (count: number): number[] => {
-    if (count <= 1) return [0.5];
-    if (count === 2) return [0.20, 0.80];
-    if (count === 3) return [0.16, 0.50, 0.84];
-    return [0.12, 0.38, 0.64, 0.88].slice(0, count);
+interface Pin {
+  hx: number;
+  hy: number;
+}
+
+function spreadPins(n: number, align: TypeAlign): Pin[] {
+  const mirror = (pins: Pin[]): Pin[] =>
+    align === "right" ? pins.map((p) => ({ hx: 1 - p.hx, hy: p.hy })) : pins;
+  if (n <= 1) return [{ hx: align === "left" ? 0 : align === "right" ? 1 : 0.5, hy: 0.5 }];
+  if (n === 2) {
+    if (align === "center") return [{ hx: 0.08, hy: 0.06 }, { hx: 0.92, hy: 0.94 }];
+    return mirror([{ hx: 0, hy: 0 }, { hx: 1, hy: 1 }]);
+  }
+  if (n === 3) {
+    if (align === "center") return [{ hx: 0, hy: 0.04 }, { hx: 1, hy: 0.5 }, { hx: 0, hy: 0.96 }];
+    return mirror([{ hx: 0, hy: 0 }, { hx: 1, hy: 0.5 }, { hx: 0, hy: 1 }]);
+  }
+  return mirror([{ hx: 0, hy: 0 }, { hx: 1, hy: 0 }, { hx: 0, hy: 1 }, { hx: 1, hy: 1 }]);
+}
+
+function clusterAnchor(align: TypeAlign, valign: TypeValign): Pin {
+  return {
+    hx: align === "left" ? 0 : align === "right" ? 1 : 0.5,
+    hy: valign === "top" ? 0 : valign === "bottom" ? 1 : 0.5,
   };
-  const ys = yFor(n);
-  const leftSeq = n === 2 ? [0, 1] : n === 3 ? [0, 1, 0] : n === 4 ? [0, 1, 0, 1] : [0.5];
-  const rightSeq = leftSeq.map((v) => 1 - v);
-  const centerSeq = n === 2 ? [0.18, 0.82] : n === 3 ? [0.12, 0.88, 0.22] : n === 4 ? [0.10, 0.90, 0.14, 0.86] : [0.5];
-  const seq = align === "left" ? leftSeq : align === "right" ? rightSeq : centerSeq;
-  return ys.map((y, i) => ({ x: seq[i] ?? 0.5, y }));
+}
+
+function pinInk(
+  pin: Pin,
+  inkW: number,
+  inkH: number,
+  unitW: number,
+  unitH: number,
+): { left: number; top: number } {
+  const innerL = FRAME;
+  const innerT = FRAME;
+  const innerW = unitW - FRAME * 2;
+  const innerH = unitH - FRAME * 2;
+  const left = innerL + pin.hx * (innerW - inkW);
+  const top = innerT + pin.hy * (innerH - inkH);
+  return { left, top };
 }
 
 function placeSpread(
-  widths: number[],
+  prepared: PreparedLine[],
   fontSize: number,
-  unitW: number,
-  unitH: number,
   align: TypeAlign,
   valign: TypeValign,
   spacing: number,
-  scale: number,
+  unitW: number,
+  unitH: number,
 ): { xs: number[]; ys: number[] } {
-  const n = widths.length;
-  const s = Math.min(1, Math.max(0, spacing / 100));
-  const authored = spreadPattern(n, align);
-  const inset = unitW * 0.06;
-  const compactY0 =
-    valign === "top" ? unitH * 0.18 :
-    valign === "bottom" ? unitH * 0.62 :
-    unitH * 0.38;
+  const n = prepared.length;
+  if (n <= 1) {
+    const lineHeight = fontSize;
+    const placed = placeLockup(prepared, lineHeight, align, valign, unitW, unitH, false, FRAME);
+    return { xs: placed.xs, ys: placed.ys };
+  }
+
+  const t = u01(spacing);
+  const pins = spreadPins(n, align);
+  const cluster = clusterAnchor(align, valign);
   const xs: number[] = [];
   const ys: number[] = [];
-  const extreme = s > 0.5 ? (s - 0.5) / 0.5 : 0;
-  const towardAuth = s <= 0.5 ? s / 0.5 : 1;
-  const valignShift =
-    valign === "top" ? -unitH * 0.08 :
-    valign === "bottom" ? unitH * 0.08 :
-    0;
+  const compactGap = fontSize * 0.92;
+
   for (let i = 0; i < n; i++) {
-    const lineW = widths[i];
-    const ax = authored[i].x;
-    const ay = authored[i].y;
-    const compactX =
-      align === "left" ? 0 :
-      align === "right" ? 1 :
-      0.5;
-    const t = towardAuth;
-    const xAmt = compactX + (ax - compactX) * t;
-    const xAmt2 = xAmt + (ax === 0 ? -0.04 * extreme : ax === 1 ? 0.04 * extreme : (xAmt - 0.5) * 0.15 * extreme);
-    let x = inset + xAmt2 * (unitW - inset * 2 - lineW);
-    if (align === "left" && ax < 0.5) x = inset + extreme * (inset * -0.4);
-    if (align === "right" && ax > 0.5) x = unitW - inset - lineW - extreme * (inset * -0.4);
-    const compactY = compactY0 + i * fontSize * 0.95;
-    const authY = ay * unitH;
-    const yMix = compactY + (authY - compactY) * t;
-    const y = yMix + valignShift + (ay - 0.5) * unitH * 0.06 * extreme;
-    xs.push(confidentCrop(x, lineW, unitW, fontSize, scale, "spread"));
-    ys.push(y);
+    const line = prepared[i];
+    const inkW = inkWidth(line.m);
+    const inkH = line.m.ascent + line.m.descent;
+    const authored = pinInk(pins[i] ?? pins[pins.length - 1], inkW, inkH, unitW, unitH);
+    const stackedTop =
+      valign === "top" ? FRAME :
+      valign === "bottom" ? unitH - FRAME - (n * inkH + (n - 1) * (compactGap - inkH)) :
+      (unitH - (n * inkH + (n - 1) * (compactGap - inkH))) / 2;
+    const clusterPos = pinInk(cluster, inkW, inkH, unitW, unitH);
+    const compactLeft = clusterPos.left;
+    const compactTop = stackedTop + i * compactGap;
+    const left = lerp(compactLeft, authored.left, t);
+    const top = lerp(compactTop, authored.top, t);
+    xs.push(left + line.m.inkLeft);
+    ys.push(top + line.m.ascent);
   }
   return { xs, ys };
 }
 
 function cacheKey(state: TypeState, aspectKey: number): string {
   return [
-    "v7",
+    "v8",
     aspectKey,
     state.text,
     state.composition,
@@ -446,39 +535,94 @@ export function layoutTypography(state: TypeState, canvasW: number, canvasH: num
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
   const key = cacheKey(state, aspectKey);
-  const ox = (state.x / 50) * unitW * 0.16;
-  const oy = (state.y / 50) * unitH * 0.16;
+  const ox = (state.x / 50) * unitW * 0.12;
+  const oy = (state.y / 50) * unitH * 0.12;
   if (cache && cache.key === key) {
     return projectLayout(cache.layout, w, h, ox, oy, state.color, state.opacity / 100);
   }
 
-  const userBroke = hardBlocks(text).length > 1;
   const composition = state.composition;
   let lines = breakCopy(text, composition);
   if (lines.length === 0) return null;
 
   const tEm = trackingEm(composition, state.spacing);
-  const targetW = fillWidth(composition, state.scale, unitW);
-  lines = maybeSplitForWeight(lines, composition, state.weight, targetW, tEm, userBroke);
-  if (composition === "quiet") lines = quietWrap(lines, state.weight, targetW, tEm);
+  let fontSize = resolveSize(composition, state.scale, lines, state.weight, tEm, unitW);
+  let tracking = tEm * fontSize;
+  let prepared = prepareLines(lines, state.weight, fontSize, tracking);
 
-  let fontSize = sizeToFill(lines, state.weight, targetW, tEm);
-  fontSize = clampSize(fontSize, composition, unitW, unitH);
-  const tracking = tEm * fontSize;
-  const widths = lines.map((l) => measureWidth(l, state.weight, fontSize, tracking));
+  if (composition === "caption" && lines.length === 1) {
+    const words = lines[0].split(/\s+/).filter(Boolean);
+    const capInner = unitW - captionInset(state.scale) * 2;
+    if (words.length >= 5 && inkWidth(prepared[0].m) > capInner) {
+      const pair = splitTwo(words);
+      if (pair) {
+        lines = pair;
+        fontSize = resolveSize(composition, state.scale, lines, state.weight, tEm, unitW);
+        tracking = tEm * fontSize;
+        prepared = prepareLines(lines, state.weight, fontSize, tracking);
+      }
+    }
+  }
+
+  if (composition === "spread") {
+    const longest = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
+    const inner = unitW - FRAME * 2;
+    if (longest > inner) {
+      fontSize *= inner / longest;
+      tracking = tEm * fontSize;
+      prepared = prepareLines(lines, state.weight, fontSize, tracking);
+    }
+  }
+
   const leading = fontSize * leadingRatio(composition, state.spacing);
 
-  const placed =
-    composition === "spread" && lines.length >= 2
-      ? placeSpread(widths, fontSize, unitW, unitH, state.align, state.valign, state.spacing, state.scale)
-      : placeBlock(widths, fontSize, leading, unitW, unitH, state.align, state.valign, composition, state.scale);
+  let xs: number[];
+  let ys: number[];
+
+  if (composition === "spread") {
+    const placed = placeSpread(prepared, fontSize, state.align, state.valign, state.spacing, unitW, unitH);
+    xs = placed.xs;
+    ys = placed.ys;
+  } else {
+    const allowOverscan = composition === "headline";
+    const margin = composition === "caption" ? captionInset(state.scale) : FRAME;
+    let placed = placeLockup(
+      prepared,
+      leading,
+      state.align,
+      state.valign,
+      unitW,
+      unitH,
+      allowOverscan,
+      margin,
+    );
+    if (Math.abs(placed.fontScale - 1) > 0.002) {
+      const grow = placed.fontScale;
+      fontSize *= grow;
+      tracking = tEm * fontSize;
+      prepared = prepareLines(lines, state.weight, fontSize, tracking);
+      const nextLeading = fontSize * leadingRatio(composition, state.spacing);
+      placed = placeLockup(
+        prepared,
+        nextLeading,
+        state.align,
+        state.valign,
+        unitW,
+        unitH,
+        allowOverscan && grow >= 1,
+        margin,
+      );
+    }
+    xs = placed.xs;
+    ys = placed.ys;
+  }
 
   const laid: TypeLine[] = lines.map((textLine, i) => ({
     text: textLine,
-    width: widths[i],
+    width: prepared[i].m.advance,
     height: fontSize,
-    x: placed.xs[i],
-    y: placed.ys[i],
+    x: xs[i],
+    y: ys[i],
   }));
 
   const layout: TypeLayout = {
@@ -548,4 +692,9 @@ export function ensureSwitzerMeasure(): void {
 export function debugLinePlan(state: TypeState, canvasW: number, canvasH: number): string[] {
   const layout = layoutTypography(state, canvasW, canvasH);
   return layout ? layout.lines.map((l) => l.text) : [];
+}
+
+/** Optical frame in pixels for a given canvas width. Eval-only diagnostics. */
+export function opticalFramePx(canvasW: number): number {
+  return canvasW * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
 }

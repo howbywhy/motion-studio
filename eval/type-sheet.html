@@ -22,7 +22,7 @@
       try {
         const report = await runTypeSheet(root);
         window.__TYPE_SHEET__ = report;
-        out.textContent = JSON.stringify(report.exportParity, null, 2);
+        out.textContent = JSON.stringify({ framePx: report.framePx, exportParity: report.exportParity, plans: report.plans }, null, 2);
       } catch (e) {
         root.textContent = String(e);
       }

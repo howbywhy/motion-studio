@@ -1,6 +1,6 @@
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
-export type TypeComposition = "display" | "stack" | "spread" | "quiet";
+export type TypeComposition = "headline" | "spread" | "caption";
 /** COMPAT — mapped from composition for older Saved States. */
 export type TypeMode = "responsive" | "fixed";
 export type TypeInMotion = "none" | "rise" | "slide" | "reveal" | "assemble";
@@ -38,7 +38,7 @@ export const TYPE_WEIGHT_MIN = 100;
 export const TYPE_WEIGHT_MAX = 900;
 export const TYPE_WEIGHT_DEFAULT = 500;
 
-export const TYPE_COMPOSITIONS: TypeComposition[] = ["display", "stack", "spread", "quiet"];
+export const TYPE_COMPOSITIONS: TypeComposition[] = ["headline", "spread", "caption"];
 
 export function defaultTypeState(): TypeState {
   return {
@@ -46,7 +46,7 @@ export function defaultTypeState(): TypeState {
     text: "",
     align: "center",
     valign: "center",
-    composition: "display",
+    composition: "headline",
     scale: 50,
     spacing: 50,
     weight: TYPE_WEIGHT_DEFAULT,
@@ -70,9 +70,11 @@ export function defaultTypeState(): TypeState {
 
 function parseComposition(raw: Partial<TypeState> | null | undefined): TypeComposition {
   const c = raw && (raw as { composition?: unknown }).composition;
-  if (c === "display" || c === "stack" || c === "spread" || c === "quiet") return c;
-  if (raw?.mode === "fixed") return "quiet";
-  return "display";
+  if (c === "headline" || c === "spread" || c === "caption") return c;
+  if (c === "display" || c === "stack") return "headline";
+  if (c === "quiet") return "caption";
+  if (raw?.mode === "fixed") return "caption";
+  return "headline";
 }
 
 export function clampTypeState(raw: Partial<TypeState> | null | undefined): TypeState {
@@ -101,7 +103,7 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
     opacity: num(raw.opacity, 0, 100, d.opacity),
     x: num(raw.x, -50, 50, d.x),
     y: num(raw.y, -50, 50, d.y),
-    mode: composition === "quiet" ? "fixed" : "responsive",
+    mode: composition === "caption" ? "fixed" : "responsive",
     spread: spacing,
     rhythm: 0,
     inMotion: "none",
