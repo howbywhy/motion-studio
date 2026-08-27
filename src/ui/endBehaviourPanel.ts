@@ -16,9 +16,11 @@ function seg(
 ): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "control-row";
-  const lab = document.createElement("label");
-  lab.textContent = label;
-  row.appendChild(lab);
+  if (label) {
+    const lab = document.createElement("label");
+    lab.textContent = label;
+    row.appendChild(lab);
+  }
   const toggle = document.createElement("div");
   toggle.className = "seg-toggle";
   for (const opt of options) {
@@ -129,7 +131,7 @@ export function mountEndBehaviourPanel(
     modeHost.innerHTML = "";
     seg(
       modeHost,
-      "Mode",
+      "",
       [
         { value: "off", label: "Off" },
         { value: "flicker", label: "Flicker" },

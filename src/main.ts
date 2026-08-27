@@ -143,8 +143,8 @@ app.innerHTML = `
               <input type="color" id="bg-colour" value="#8a5a3a" title="Placeholder background colour" />
               <button type="button" class="reset-btn" id="bg-colour-reset" title="Restore the default background colour">Reset</button>
             </div>
-            <div id="end-behaviour-panel"></div>
           </div>
+          <div id="end-behaviour-panel"></div>
           <div class="saved-panel">
             <div class="panel-label-row">
               <label class="panel-label">Saved States</label>
