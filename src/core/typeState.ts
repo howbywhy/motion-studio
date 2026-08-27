@@ -37,6 +37,9 @@ export interface TypeBlock {
   mode: TypeMode;
   /** COMPAT — old saves. Mapped onto `tracking`. */
   spacing: number;
+  /** Position Rhythm. Off is a true bypass. Legacy saves omit these. */
+  positionRhythm: boolean;
+  positionRhythmStops: TypeAnchor[];
 }
 
 /** Document: two independent editorial blocks. Sequence / arrangement
@@ -136,6 +139,18 @@ function parseAnchor(raw: Partial<TypeBlock> | null | undefined, fallback: TypeA
     return `${row}${col}` as TypeAnchor;
   }
   return fallback;
+}
+
+function parseStops(raw: unknown, home: TypeAnchor): TypeAnchor[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const stops: TypeAnchor[] = [home];
+  for (const item of list.slice(1)) {
+    if (stops.length >= 3) break;
+    if (typeof item === "string" && (TYPE_ANCHORS as string[]).includes(item)) {
+      stops.push(item as TypeAnchor);
+    }
+  }
+  return stops;
 }
 
 function parseTextAlign(raw: unknown, fallback: TypeTextAlign): TypeTextAlign {
@@ -262,6 +277,8 @@ export function defaultTypeBlock(enabled: boolean, style: TypeStyle = "headline"
     y: placed.y,
     mode: style === "footnote" ? "fixed" : "responsive",
     spacing: defs.tracking,
+    positionRhythm: false,
+    positionRhythmStops: [defs.anchor],
   };
 }
 
@@ -301,6 +318,8 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
     y: placed.y,
     mode: composition === "footnote" ? "fixed" : "responsive",
     spacing: tracking,
+    positionRhythm: raw.positionRhythm === true,
+    positionRhythmStops: parseStops(raw.positionRhythmStops, anchor),
   };
 }
 
@@ -334,6 +353,8 @@ const BLOCK_PATCH_KEYS = [
   "y",
   "mode",
   "spacing",
+  "positionRhythm",
+  "positionRhythmStops",
 ] as const;
 
 function pickBlockPatch(raw: Record<string, unknown>): Partial<TypeBlock> | null {
@@ -419,7 +440,10 @@ export function cloneTypeState(state: TypeState): TypeState {
   return {
     enabled: state.enabled,
     activeIndex: state.activeIndex,
-    blocks: [{ ...state.blocks[0] }, { ...state.blocks[1] }],
+    blocks: [
+      { ...state.blocks[0], positionRhythmStops: [...state.blocks[0].positionRhythmStops] },
+      { ...state.blocks[1], positionRhythmStops: [...state.blocks[1].positionRhythmStops] },
+    ],
   };
 }
 

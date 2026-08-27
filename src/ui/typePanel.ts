@@ -16,6 +16,7 @@ import {
   type TypeStyle,
   type TypeTextAlign,
 } from "../core/typeState";
+import { clampRhythmStops, oppositeAnchor } from "../core/typeRhythm";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
   normal: "Normal",
@@ -105,15 +106,17 @@ function frameAlignPad(
   parent: HTMLElement,
   current: TypeAnchor,
   onChange: (anchor: TypeAnchor) => void,
-): { set: (anchor: TypeAnchor) => void } {
+  label = "Frame Align",
+  size = 84,
+): { set: (anchor: TypeAnchor) => void; setLabel: (text: string) => void; row: HTMLDivElement } {
   const row = document.createElement("div");
   row.className = "control-row type-xy-row";
   const lab = document.createElement("label");
-  lab.textContent = "Frame Align";
+  lab.textContent = label;
   row.appendChild(lab);
 
-  const SIZE = 84;
-  const PAD = 12;
+  const SIZE = size;
+  const PAD = size >= 84 ? 12 : 10;
   const CELL = (SIZE - PAD * 2) / 2;
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
@@ -210,7 +213,7 @@ function frameAlignPad(
 
   row.appendChild(svg);
   parent.appendChild(row);
-  return { set: mark };
+  return { set: mark, setLabel: (text: string) => { lab.textContent = text; }, row };
 }
 
 function markSeg(el: HTMLDivElement, value: string): void {
@@ -383,9 +386,94 @@ function buildBlock(
 
   const pos = frameAlignPad(body, initial.anchor, (anchor) => {
     currentAnchor = anchor;
+    if (currentRhythm) {
+      currentStops = [anchor, ...currentStops.slice(1)];
+      extraPads.forEach((pad, i) => pad.set(currentStops[i + 1]!));
+      onChange({ activeIndex: index, anchor, positionRhythmStops: currentStops });
+    } else {
+      onChange({ activeIndex: index, anchor });
+    }
     refreshSummary();
-    onChange({ activeIndex: index, anchor });
   });
+
+  let currentRhythm = initial.positionRhythm === true;
+  let currentStops = clampRhythmStops(initial.positionRhythmStops, initial.anchor);
+  const extraPads: { set: (anchor: TypeAnchor) => void; row: HTMLDivElement }[] = [];
+
+  const rhythmHost = document.createElement("div");
+  rhythmHost.className = "type-rhythm";
+  body.appendChild(rhythmHost);
+
+  const extraHost = document.createElement("div");
+  extraHost.className = "type-rhythm-stops";
+  body.appendChild(extraHost);
+
+  function emitStops(): void {
+    onChange({
+      activeIndex: index,
+      positionRhythm: currentRhythm,
+      positionRhythmStops: currentStops,
+      anchor: currentAnchor,
+    });
+    refreshSummary();
+  }
+
+  function rebuildStops(): void {
+    extraHost.innerHTML = "";
+    extraPads.length = 0;
+    pos.setLabel(currentRhythm ? "Position 01" : "Frame Align");
+    extraHost.hidden = !currentRhythm;
+    if (!currentRhythm) return;
+    for (let i = 1; i < currentStops.length; i++) {
+      const stopIndex = i;
+      const pad = frameAlignPad(extraHost, currentStops[i]!, (anchor) => {
+        currentStops[stopIndex] = anchor;
+        emitStops();
+      }, `Position 0${stopIndex + 1}`, 72);
+      extraPads.push(pad);
+    }
+    if (currentStops.length < 3) {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "reset-btn type-rhythm-add";
+      add.textContent = "+ Add Position";
+      add.addEventListener("click", () => {
+        const last = currentStops[currentStops.length - 1] ?? currentAnchor;
+        currentStops = [...currentStops, oppositeAnchor(last)];
+        emitStops();
+        rebuildStops();
+      });
+      extraHost.appendChild(add);
+    }
+    if (currentStops.length > 1) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "reset-btn type-rhythm-add";
+      remove.textContent = currentStops.length === 3 ? "Remove Position 03" : "Remove Position 02";
+      remove.addEventListener("click", () => {
+        currentStops = currentStops.slice(0, -1);
+        emitStops();
+        rebuildStops();
+      });
+      extraHost.appendChild(remove);
+    }
+  }
+
+  const rhythmSeg = seg(rhythmHost, "Position Rhythm", [
+    { value: "off", label: "Off" },
+    { value: "on", label: "On" },
+  ], currentRhythm ? "on" : "off", (v) => {
+    currentRhythm = v === "on";
+    if (currentRhythm && currentStops.length < 2) {
+      currentStops = [currentAnchor, oppositeAnchor(currentAnchor)];
+    } else {
+      currentStops = [currentAnchor, ...currentStops.slice(1)];
+    }
+    emitStops();
+    rebuildStops();
+  });
+  void rhythmSeg;
+  rebuildStops();
 
   const widthSeg = seg(body, "Width", [
     { value: "narrow", label: "Narrow" },
@@ -537,6 +625,10 @@ function buildBlock(
       padding.valueEl.textContent = String(block.padding);
       currentAnchor = block.anchor;
       pos.set(block.anchor);
+      currentRhythm = block.positionRhythm === true;
+      currentStops = clampRhythmStops(block.positionRhythmStops, block.anchor);
+      markSeg(rhythmSeg, currentRhythm ? "on" : "off");
+      rebuildStops();
       color.value = block.color;
       blend.value = block.blendMode;
       paintContext();

@@ -53,6 +53,7 @@ export interface SavedState {
   endBehaviourDuration?: number;
   /** Master Registration presence 0–100. Legacy saves omit this and load as 50. */
   registrationAmount?: number;
+  /** Typography includes per-block Position Rhythm. Legacy type saves load Rhythm Off. */
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;
