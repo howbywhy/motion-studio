@@ -2,10 +2,14 @@ import { mbmById } from "./mbmCopy";
 import {
   clampTypeState,
   primaryBlock,
+  roleDefaults,
   TYPE_ANCHORS,
+  TYPE_TEXT_ALIGNS,
   type TypeAnchor,
+  type TypeBlock,
   type TypeRole,
   type TypeState,
+  type TypeTextAlign,
 } from "../core/typeState";
 import { editorialColumnsPx, layoutTypography, layoutTypeDocument, opticalFramePx, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
@@ -16,6 +20,13 @@ const ASPECTS: { id: string; w: number; h: number }[] = [
   { id: "9:16", w: 360, h: 640 },
 ];
 
+const SCALES = [0, 25, 50, 75, 100] as const;
+const ALIGN_LABEL: Record<TypeTextAlign, string> = {
+  left: "Left",
+  center: "Centre",
+  right: "Right",
+};
+
 interface SheetCase {
   copyId: string;
   role: TypeRole;
@@ -23,89 +34,16 @@ interface SheetCase {
   scale?: number;
   spacing?: number;
   weight?: number;
+  textAlign?: TypeTextAlign;
   note?: string;
 }
 
-const DISPLAY: SheetCase[] = [
-  { copyId: "new", role: "display", scale: 50 },
-  { copyId: "new", role: "display", scale: 100, note: "max legal" },
-  { copyId: "hello", role: "display", scale: 50 },
-  { copyId: "hello", role: "display", scale: 100, note: "max legal" },
-  { copyId: "coming-soon", role: "display", scale: 50 },
-  { copyId: "coming-soon", role: "display", scale: 100, note: "max legal" },
-  { copyId: "name", role: "display", scale: 50 },
-  { copyId: "name", role: "display", scale: 100, note: "max legal" },
-  { copyId: "welcome", role: "display", scale: 50, note: "long copy" },
-  { copyId: "welcome", role: "display", scale: 100, note: "2–3 line lockup" },
-  { copyId: "cold", role: "display", scale: 100 },
-  { copyId: "redy-break", role: "display", scale: 80 },
-];
-
-const EDITORIAL: SheetCase[] = [
-  { copyId: "flawed-break", role: "editorial", anchor: "ml", scale: 50, spacing: 40 },
-  { copyId: "flawed-break", role: "editorial", anchor: "ml", scale: 50, spacing: 90, note: "open rhythm" },
-  { copyId: "flawed-break", role: "editorial", anchor: "ml", scale: 100, spacing: 40, note: "max ≠ display" },
-  { copyId: "way", role: "editorial", anchor: "br", scale: 50, spacing: 40 },
-  { copyId: "free", role: "editorial", anchor: "ml", scale: 50, spacing: 40, note: "lockup" },
-  { copyId: "free", role: "editorial", anchor: "ml", scale: 50, spacing: 90, note: "open rhythm" },
-  { copyId: "welcome", role: "editorial", anchor: "ml", scale: 100, note: "vs display" },
-];
-
-const CAPTION: SheetCase[] = [
-  { copyId: "now", role: "caption", anchor: "bl", scale: 50 },
-  { copyId: "now", role: "caption", anchor: "bl", scale: 100, note: "never headline" },
-  { copyId: "worn", role: "caption", anchor: "bl", scale: 50 },
-  { copyId: "hello", role: "caption", anchor: "tr", scale: 100, note: "stays furniture" },
-  { copyId: "name", role: "caption", anchor: "bc", scale: 50 },
-];
-
-const FOLIO: SheetCase[] = [
-  { copyId: "date-split", role: "folio", anchor: "mc", scale: 20, spacing: 20, note: "furniture" },
-  { copyId: "date-split", role: "folio", anchor: "mc", scale: 100, spacing: 100, note: "distributed" },
-  { copyId: "date-md", role: "folio", anchor: "tl", scale: 100 },
-  { copyId: "year", role: "folio", anchor: "br", scale: 100 },
-  { copyId: "ss26-short", role: "folio", anchor: "bl", scale: 20, note: "furniture" },
-  { copyId: "ss26-short", role: "folio", anchor: "tl", scale: 100 },
-];
-
-const HIERARCHY: SheetCase[] = [
-  { copyId: "coming-soon", role: "display", scale: 100 },
-  { copyId: "coming-soon", role: "editorial", anchor: "ml", scale: 100, spacing: 40 },
-  { copyId: "coming-soon", role: "caption", anchor: "bl", scale: 100 },
-  { copyId: "coming-soon", role: "folio", anchor: "tl", scale: 100 },
-  { copyId: "hello", role: "display", scale: 100 },
-  { copyId: "hello", role: "editorial", anchor: "ml", scale: 100 },
-  { copyId: "hello", role: "caption", anchor: "bl", scale: 100 },
-  { copyId: "hello", role: "folio", anchor: "tl", scale: 100 },
-];
-
-const SCALE_SWEEP: SheetCase[] = [0, 25, 50, 75, 100].flatMap((scale) => [
-  { copyId: "hello", role: "display" as const, scale, note: `scale ${scale}` },
-  { copyId: "welcome", role: "display" as const, scale, note: `scale ${scale}` },
-]);
-
-const POSITION_HELLO: SheetCase[] = TYPE_ANCHORS.map((anchor) => ({
-  copyId: "hello",
-  role: "display" as const,
-  anchor,
-  scale: 50,
-  note: anchor,
-}));
-
-const POSITION_WELCOME: SheetCase[] = TYPE_ANCHORS.map((anchor) => ({
-  copyId: "welcome",
-  role: "display" as const,
-  anchor,
-  scale: 100,
-  note: anchor,
-}));
-
-function defaultAnchor(role: TypeRole): TypeAnchor {
-  if (role === "caption") return "bl";
-  if (role === "editorial") return "ml";
-  if (role === "folio") return "tl";
-  return "mc";
-}
+const ROLE_COPY: Record<TypeRole, { short: string; medium: string; multiline?: string }> = {
+  display: { short: "new", medium: "coming-soon", multiline: "welcome-authored" },
+  editorial: { short: "way", medium: "flawed", multiline: "flawed-break" },
+  caption: { short: "sydney", medium: "now", multiline: "worn" },
+  folio: { short: "num01", medium: "date-md", multiline: "date-split" },
+};
 
 function photoGround(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const g = ctx.createLinearGradient(0, 0, w, h);
@@ -141,16 +79,47 @@ function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 
 function stateFor(c: SheetCase): TypeState {
   const copy = mbmById(c.copyId);
+  const defs = roleDefaults(c.role);
   return clampTypeState({
     enabled: true,
     text: copy.text,
     composition: c.role,
-    anchor: c.anchor ?? defaultAnchor(c.role),
-    scale: c.scale ?? 50,
-    spacing: c.spacing ?? 50,
-    weight: c.weight ?? 500,
+    textAlign: c.textAlign ?? "left",
+    anchor: c.anchor ?? defs.anchor,
+    scale: c.scale ?? defs.scale,
+    spacing: c.spacing ?? defs.spacing,
+    weight: c.weight ?? defs.weight,
     color: "#f3efe6",
   });
+}
+
+function documentState(blocks: Partial<TypeBlock>[]): TypeState {
+  return clampTypeState({
+    enabled: true,
+    blocks: [
+      { enabled: true, color: "#f3efe6", ...blocks[0] },
+      { enabled: true, color: "#f3efe6", ...blocks[1] },
+    ],
+  });
+}
+
+function paintState(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  state: TypeState,
+  guide: boolean,
+): { lines: string[]; fontSize: number; tracking: number } {
+  photoGround(ctx, w, h);
+  const laid = layoutTypeDocument(state, w, h);
+  for (const item of laid) paintTypeLayer(ctx, item.layout, item.layout.color, item.layout.opacity, undefined, item.index);
+  if (guide) drawGrid(ctx, w, h);
+  const first = laid[0]?.layout;
+  return {
+    lines: laid.flatMap((item) => item.layout.lines.map((l) => l.text)),
+    fontSize: first?.fontSize ?? 0,
+    tracking: first?.tracking ?? 0,
+  };
 }
 
 function cell(
@@ -167,20 +136,13 @@ function cell(
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
-  photoGround(ctx, w, h);
-  const layout = layoutTypography(state, w, h);
-  if (layout) paintTypeLayer(ctx, layout, layout.color, layout.opacity);
-  if (guide) drawGrid(ctx, w, h);
+  const r = paintState(ctx, w, h, state, guide);
   const cap = document.createElement("figcaption");
   cap.textContent = label;
   wrap.appendChild(canvas);
   wrap.appendChild(cap);
   parent.appendChild(wrap);
-  return {
-    lines: layout?.lines.map((l) => l.text) ?? [],
-    fontSize: layout?.fontSize ?? 0,
-    tracking: layout?.tracking ?? 0,
-  };
+  return r;
 }
 
 function pages(
@@ -199,7 +161,7 @@ function pages(
     root.appendChild(row);
     const state = stateFor(c);
     const block = primaryBlock(state);
-    const extra = [c.note, `s${block.scale}`, `sp${block.spacing}`, block.anchor].filter(Boolean).join(" · ");
+    const extra = [c.note, `s${block.scale}`, `sp${block.spacing}`, block.anchor, ALIGN_LABEL[block.textAlign]].filter(Boolean).join(" · ");
     for (const aspect of ASPECTS) {
       const r = cell(row, `${c.copyId} · ${c.role} · ${aspect.id} · ${extra}`, aspect.w, aspect.h, state, guide);
       out.push({ copy: c.copyId, composition: c.role, aspect: aspect.id, lines: r.lines, fontSize: r.fontSize });
@@ -216,7 +178,7 @@ function countOutsidePixels(w: number, h: number, state: TypeState): number {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
   const laid = layoutTypeDocument(state, w, h);
-  for (const item of laid) paintTypeLayer(ctx, item.layout, "#ffffff", 1, null, item.index);
+  for (const item of laid) paintTypeLayer(ctx, item.layout, "#ffffff", 1, undefined, item.index);
   const frame = opticalFramePx(w);
   const insideL = Math.max(0, Math.ceil(frame));
   const insideT = Math.max(0, Math.ceil(frame));
@@ -253,68 +215,59 @@ interface ProofCase {
   fontSize: number;
 }
 
-const PROOF_SETS: { copyId: string; role: TypeRole; spacing?: number }[] = [
+const PROOF_SETS: { copyId: string; role: TypeRole }[] = [
   { copyId: "new", role: "display" },
-  { copyId: "hello", role: "display" },
   { copyId: "coming-soon", role: "display" },
-  { copyId: "name", role: "display" },
-  { copyId: "welcome", role: "display" },
+  { copyId: "welcome-authored", role: "display" },
   { copyId: "cold", role: "display" },
+  { copyId: "redy", role: "display" },
   { copyId: "flawed-break", role: "editorial" },
   { copyId: "way", role: "editorial" },
-  { copyId: "free", role: "editorial", spacing: 90 },
   { copyId: "now", role: "caption" },
-  { copyId: "date-split", role: "folio", spacing: 100 },
+  { copyId: "worn", role: "caption" },
+  { copyId: "date-md", role: "folio" },
+  { copyId: "date-split", role: "folio" },
   { copyId: "ss26-short", role: "folio" },
-  { copyId: "hello", role: "caption" },
-  { copyId: "hello", role: "folio" },
-  { copyId: "welcome", role: "editorial" },
 ];
 
 function runOverflowProof(): { cases: ProofCase[]; outsideTotal: number; inkOutsideTotal: number } {
   const cases: ProofCase[] = [];
   let outsideTotal = 0;
   let inkOutsideTotal = 0;
-  const scales = [0, 25, 50, 75, 100];
+  const check = (copyId: string, role: TypeRole, scale: number, anchor: TypeAnchor, aspect: { id: string; w: number; h: number }, tol: number): void => {
+    const state = stateFor({ copyId, role, anchor, scale });
+    const layout = layoutTypography(state, aspect.w, aspect.h);
+    const frame = opticalFramePx(aspect.w);
+    const box = layout ? typeInkBox(layout) : { l: frame, t: frame, r: aspect.w - frame, b: aspect.h - frame };
+    const inkOutside =
+      box.l < frame - tol ||
+      box.t < frame - tol ||
+      box.r > aspect.w - frame + tol ||
+      box.b > aspect.h - frame + tol;
+    const outside = inkOutside ? countOutsidePixels(aspect.w, aspect.h, state) : 0;
+    if (inkOutside) inkOutsideTotal += 1;
+    outsideTotal += outside;
+    if (outside > 0 || inkOutside) {
+      cases.push({
+        copy: copyId,
+        role,
+        scale,
+        spacing: roleDefaults(role).spacing,
+        anchor,
+        aspect: aspect.id,
+        w: aspect.w,
+        h: aspect.h,
+        outside,
+        inkOutside,
+        lines: layout?.lines.map((l) => l.text) ?? [],
+        fontSize: layout?.fontSize ?? 0,
+      });
+    }
+  };
   for (const set of PROOF_SETS) {
-    for (const scale of scales) {
+    for (const scale of SCALES) {
       for (const anchor of TYPE_ANCHORS) {
-        for (const aspect of ASPECTS) {
-          const state = stateFor({
-            copyId: set.copyId,
-            role: set.role,
-            anchor,
-            scale,
-            spacing: set.spacing ?? 50,
-          });
-          const layout = layoutTypography(state, aspect.w, aspect.h);
-          const frame = opticalFramePx(aspect.w);
-          const box = layout ? typeInkBox(layout) : { l: frame, t: frame, r: aspect.w - frame, b: aspect.h - frame };
-          const inkOutside =
-            box.l < frame - 0.6 ||
-            box.t < frame - 0.6 ||
-            box.r > aspect.w - frame + 0.6 ||
-            box.b > aspect.h - frame + 0.6;
-          const outside = countOutsidePixels(aspect.w, aspect.h, state);
-          if (inkOutside) inkOutsideTotal += 1;
-          outsideTotal += outside;
-          if (outside > 0 || inkOutside) {
-            cases.push({
-              copy: set.copyId,
-              role: set.role,
-              scale,
-              spacing: set.spacing ?? 50,
-              anchor,
-              aspect: aspect.id,
-              w: aspect.w,
-              h: aspect.h,
-              outside,
-              inkOutside,
-              lines: layout?.lines.map((l) => l.text) ?? [],
-              fontSize: layout?.fontSize ?? 0,
-            });
-          }
-        }
+        for (const aspect of ASPECTS) check(set.copyId, set.role, scale, anchor, aspect, 0.6);
       }
     }
   }
@@ -322,66 +275,134 @@ function runOverflowProof(): { cases: ProofCase[]; outsideTotal: number; inkOuts
     { id: "1080", w: 1080, h: 1350 },
     { id: "2160", w: 2160, h: 2700 },
   ]) {
-    for (const copyId of ["hello", "welcome", "date-split"] as const) {
+    for (const copyId of ["coming-soon", "welcome-authored", "date-split"] as const) {
       const role: TypeRole = copyId === "date-split" ? "folio" : "display";
-      const spacing = copyId === "date-split" ? 100 : 50;
-      for (const anchor of TYPE_ANCHORS) {
-        const state = stateFor({ copyId, role, anchor, scale: 100, spacing });
-        const layout = layoutTypography(state, size.w, size.h);
-        const frame = opticalFramePx(size.w);
-        const box = layout ? typeInkBox(layout) : { l: frame, t: frame, r: size.w - frame, b: size.h - frame };
-        const inkOutside =
-          box.l < frame - 1 ||
-          box.t < frame - 1 ||
-          box.r > size.w - frame + 1 ||
-          box.b > size.h - frame + 1;
-        const outside = countOutsidePixels(size.w, size.h, state);
-        if (inkOutside) inkOutsideTotal += 1;
-        outsideTotal += outside;
-        if (outside > 0 || inkOutside) {
-          cases.push({
-            copy: copyId,
-            role,
-            scale: 100,
-            spacing,
-            anchor,
-            aspect: size.id,
-            w: size.w,
-            h: size.h,
-            outside,
-            inkOutside,
-            lines: layout?.lines.map((l) => l.text) ?? [],
-            fontSize: layout?.fontSize ?? 0,
-          });
-        }
-      }
+      for (const anchor of TYPE_ANCHORS) check(copyId, role, 100, anchor, size, 1);
     }
   }
   return { cases, outsideTotal, inkOutsideTotal };
 }
 
-function positionInvariant(): { copy: string; match: boolean; fontSizes: number[]; lines: string[][] }[] {
-  const out: { copy: string; match: boolean; fontSizes: number[]; lines: string[][] }[] = [];
-  for (const copyId of ["hello", "welcome", "coming-soon"] as const) {
-    const fontSizes: number[] = [];
-    const lines: string[][] = [];
-    const trackings: number[] = [];
+function fingerprint(state: TypeState, w: number, h: number): { fontSize: number; tracking: number; leading: number; lines: string; weight: number } {
+  const layout = layoutTypography(state, w, h);
+  return {
+    fontSize: layout?.fontSize ?? 0,
+    tracking: layout?.tracking ?? 0,
+    leading: layout?.lineHeight ?? 0,
+    lines: layout?.lines.map((l) => l.text).join("|") ?? "",
+    weight: layout?.weight ?? 0,
+  };
+}
+
+function sameCompose(a: ReturnType<typeof fingerprint>, b: ReturnType<typeof fingerprint>): boolean {
+  return (
+    a.lines === b.lines &&
+    Math.abs(a.fontSize - b.fontSize) < 0.05 &&
+    Math.abs(a.tracking - b.tracking) < 0.05 &&
+    Math.abs(a.leading - b.leading) < 0.05 &&
+    a.weight === b.weight
+  );
+}
+
+function positionInvariant(): { copy: string; match: boolean; fontSizes: number[]; lines: string[] }[] {
+  const out: { copy: string; match: boolean; fontSizes: number[]; lines: string[] }[] = [];
+  const samples: { copyId: string; role: TypeRole; scale: number }[] = [
+    { copyId: "coming-soon", role: "display", scale: 100 },
+    { copyId: "welcome-authored", role: "display", scale: 100 },
+    { copyId: "flawed-break", role: "editorial", scale: 100 },
+    { copyId: "now", role: "caption", scale: 100 },
+    { copyId: "date-md", role: "folio", scale: 100 },
+  ];
+  for (const sample of samples) {
+    const fps: ReturnType<typeof fingerprint>[] = [];
     for (const anchor of TYPE_ANCHORS) {
-      const state = stateFor({ copyId, role: "display", anchor, scale: 100 });
-      const layout = layoutTypography(state, 500, 625);
-      fontSizes.push(layout?.fontSize ?? 0);
-      trackings.push(layout?.tracking ?? 0);
-      lines.push(layout?.lines.map((l) => l.text) ?? []);
+      fps.push(fingerprint(stateFor({ ...sample, anchor }), 500, 625));
     }
-    const lineKey = lines.map((l) => l.join("|"));
-    const match =
-      lineKey.every((k) => k === lineKey[0]) &&
-      fontSizes.every((s) => Math.abs(s - fontSizes[0]) < 0.05) &&
-      trackings.every((t) => Math.abs(t - trackings[0]) < 0.05);
-    out.push({ copy: copyId, match, fontSizes, lines });
+    out.push({
+      copy: `${sample.copyId}/${sample.role}`,
+      match: fps.every((f) => sameCompose(f, fps[0]!)),
+      fontSizes: fps.map((f) => f.fontSize),
+      lines: fps[0]!.lines.split("|"),
+    });
   }
   return out;
 }
+
+function alignInvariant(): { copy: string; match: boolean }[] {
+  const samples: { copyId: string; role: TypeRole }[] = [
+    { copyId: "welcome-authored", role: "display" },
+    { copyId: "flawed-break", role: "editorial" },
+    { copyId: "date-split", role: "folio" },
+  ];
+  return samples.map((sample) => {
+    const fps = TYPE_TEXT_ALIGNS.map((textAlign) =>
+      fingerprint(stateFor({ ...sample, textAlign, scale: 80, anchor: "br" }), 500, 625),
+    );
+    return { copy: sample.copyId, match: fps.every((f) => sameCompose(f, fps[0]!)) };
+  });
+}
+
+function independence(): { type01Stable: boolean; type02DoesNotMoveType01: boolean } {
+  const solo = documentState([
+    { enabled: true, text: "COMING SOON", composition: "display", scale: 78, anchor: "mc" },
+    { enabled: false, text: "", composition: "display" },
+  ]);
+  const pair = documentState([
+    { enabled: true, text: "COMING SOON", composition: "display", scale: 78, anchor: "mc" },
+    { enabled: true, text: "07.09", composition: "folio", scale: 100, anchor: "tl" },
+  ]);
+  const moved = documentState([
+    { enabled: true, text: "COMING SOON", composition: "display", scale: 78, anchor: "mc" },
+    { enabled: true, text: "WE'RE FLAWED\nAND FLAWLESS.", composition: "editorial", scale: 100, anchor: "br" },
+  ]);
+  const a = layoutTypeDocument(solo, 500, 625)[0]?.layout;
+  const b = layoutTypeDocument(pair, 500, 625)[0]?.layout;
+  const c = layoutTypeDocument(moved, 500, 625)[0]?.layout;
+  const key = (l: typeof a) =>
+    l ? `${l.fontSize}|${l.tracking}|${l.lineHeight}|${l.lines.map((x) => `${x.text}:${x.x.toFixed(2)}:${x.y.toFixed(2)}`).join("/")}` : "";
+  return {
+    type01Stable: key(a) === key(b),
+    type02DoesNotMoveType01: key(a) === key(c),
+  };
+}
+
+const TWO_BLOCK: { title: string; blocks: Partial<TypeBlock>[] }[] = [
+  {
+    title: "01 · 07.09 Folio TL / 2026 Folio BL",
+    blocks: [
+      { text: "07.09", composition: "folio", scale: 100, anchor: "tl" },
+      { text: "2026", composition: "folio", scale: 100, anchor: "bl" },
+    ],
+  },
+  {
+    title: "02 · MADE BY Caption TL / MADELEN Display BL",
+    blocks: [
+      { text: "MADE BY", composition: "caption", scale: 100, anchor: "tl" },
+      { text: "MADELEN", composition: "display", scale: 100, anchor: "bl" },
+    ],
+  },
+  {
+    title: "03 · SS26 Folio TR / COMING SOON Display BL",
+    blocks: [
+      { text: "SS26", composition: "folio", scale: 100, anchor: "tr" },
+      { text: "COMING SOON", composition: "display", scale: 100, anchor: "bl" },
+    ],
+  },
+  {
+    title: "04 · NOW AVAILABLE Caption BL / 07.09.2026 Folio BR",
+    blocks: [
+      { text: "NOW AVAILABLE", composition: "caption", scale: 100, anchor: "bl" },
+      { text: "07.09.2026", composition: "folio", scale: 100, anchor: "br" },
+    ],
+  },
+  {
+    title: "05 · WE'RE FLAWED Editorial TL / AND FLAWLESS. Editorial BR",
+    blocks: [
+      { text: "WE'RE FLAWED", composition: "editorial", scale: 100, anchor: "tl" },
+      { text: "AND FLAWLESS.", composition: "editorial", scale: 100, anchor: "br" },
+    ],
+  },
+];
 
 export interface SheetReport {
   plans: { copy: string; composition: TypeRole; aspect: string; lines: string[]; fontSize: number }[];
@@ -389,12 +410,11 @@ export interface SheetReport {
   framePx: { "4:5": number; "9:16": number; "1080": number; "2160": number };
   overflow: { outsideTotal: number; inkOutsideTotal: number; failures: ProofCase[] };
   positionInvariant: { copy: string; match: boolean; lines: string[] }[];
+  alignInvariant: { copy: string; match: boolean }[];
+  authoredNewlines: { expected: string[]; actual: string[]; match: boolean };
+  independence: { type01Stable: boolean; type02DoesNotMoveType01: boolean };
   longCopy: { text: string; lines: string[]; fontSize: number; lineCount: number };
-  twoBlocks: {
-    betweenV: boolean;
-    betweenH: boolean;
-    justify: { lines: number; lastGap: number; innerGap: number };
-  };
+  twoBlocks: { title: string; lines: string[] }[];
   proofCount: number;
   elapsedMs: number;
 }
@@ -408,60 +428,68 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
   root.innerHTML = "";
 
   const title = document.createElement("h1");
-  title.textContent = "MBM type constraint sheet";
+  title.textContent = "MBM type placement sheet";
   root.appendChild(title);
   const lead = document.createElement("p");
-  lead.textContent = "Eval-only. Hairline = 10px optical frame. Position is translation. Scale 100 = max legal. No crop.";
+  lead.textContent = "Eval-only. Static type. Hairline = 10px optical frame. Position translates. Align is internal. Scale 100 = max legal. No crop.";
   root.appendChild(lead);
 
-  plans.push(...pages(root, "DISPLAY", DISPLAY, true));
-  plans.push(...pages(root, "EDITORIAL", EDITORIAL, true));
-  plans.push(...pages(root, "CAPTION", CAPTION, true));
-  plans.push(...pages(root, "FOLIO", FOLIO, true));
-  plans.push(...pages(root, "SAME COPY · four roles", HIERARCHY, true));
-  plans.push(...pages(root, "SCALE 0 / 25 / 50 / 75 / 100", SCALE_SWEEP, true));
-  plans.push(...pages(root, "POSITION · HELLO scale 50 · 9 anchors", POSITION_HELLO, true));
-  plans.push(...pages(root, "POSITION · long copy scale 100 · 9 anchors", POSITION_WELCOME, true));
+  const roles: TypeRole[] = ["display", "editorial", "caption", "folio"];
+  for (const role of roles) {
+    const copies = ROLE_COPY[role];
+    const representative = copies.medium;
+    plans.push(...pages(root, `${role} · copy length`, [
+      { copyId: copies.short, role, note: "short" },
+      { copyId: copies.medium, role, note: "medium" },
+      ...(copies.multiline ? [{ copyId: copies.multiline, role, note: "authored lines" } satisfies SheetCase] : []),
+    ], true));
+    plans.push(...pages(root, `${role} · scale 0 / 25 / 50 / 75 / 100`, SCALES.map((scale) => ({
+      copyId: representative,
+      role,
+      scale,
+      note: `scale ${scale}`,
+    })), true));
+    plans.push(...pages(root, `${role} · nine positions`, TYPE_ANCHORS.map((anchor) => ({
+      copyId: representative,
+      role,
+      anchor,
+      note: anchor,
+    })), true));
+    plans.push(...pages(root, `${role} · align`, TYPE_TEXT_ALIGNS.map((textAlign) => ({
+      copyId: copies.multiline ?? representative,
+      role,
+      textAlign,
+      anchor: "br" as const,
+      note: ALIGN_LABEL[textAlign],
+    })), true));
+  }
 
-  const variants = document.createElement("h2");
-  variants.textContent = "Weight 300 / 500 / 700";
-  root.appendChild(variants);
-  const wgrid = document.createElement("div");
-  wgrid.className = "grid";
-  root.appendChild(wgrid);
-  for (const copyId of ["hello", "welcome", "date-split"]) {
-    const role: TypeRole = copyId === "date-split" ? "folio" : "display";
-    for (const weight of [300, 500, 700]) {
-      const state = stateFor({
-        copyId,
-        role,
-        weight,
-        scale: 100,
-        spacing: copyId === "date-split" ? 100 : 50,
-      });
-      cell(wgrid, `${copyId} · ${role} · w${weight}`, 400, 500, state, false);
+  const pairHead = document.createElement("h2");
+  pairHead.textContent = "Two-block pages";
+  root.appendChild(pairHead);
+  const twoBlocks: SheetReport["twoBlocks"] = [];
+  for (const pair of TWO_BLOCK) {
+    const row = document.createElement("div");
+    row.className = "page-row";
+    root.appendChild(row);
+    const state = documentState(pair.blocks);
+    for (const aspect of ASPECTS) {
+      const r = cell(row, `${pair.title} · ${aspect.id}`, aspect.w, aspect.h, state, true);
+      twoBlocks.push({ title: `${pair.title} · ${aspect.id}`, lines: r.lines });
     }
   }
 
   const exportParity: SheetReport["exportParity"] = [];
-  const parity: { id: string; role: TypeRole; scale: number; spacing: number }[] = [
-    { id: "new", role: "display", scale: 100, spacing: 50 },
-    { id: "hello", role: "display", scale: 100, spacing: 50 },
-    { id: "coming-soon", role: "display", scale: 100, spacing: 50 },
-    { id: "name", role: "display", scale: 100, spacing: 50 },
-    { id: "welcome", role: "display", scale: 100, spacing: 50 },
-    { id: "flawed-break", role: "editorial", scale: 50, spacing: 40 },
-    { id: "free", role: "editorial", scale: 50, spacing: 90 },
-    { id: "date-split", role: "folio", scale: 100, spacing: 100 },
-    { id: "now", role: "caption", scale: 100, spacing: 50 },
+  const parity: { id: string; role: TypeRole }[] = [
+    { id: "coming-soon", role: "display" },
+    { id: "welcome-authored", role: "display" },
+    { id: "flawed-break", role: "editorial" },
+    { id: "now", role: "caption" },
+    { id: "date-md", role: "folio" },
+    { id: "date-split", role: "folio" },
   ];
   for (const item of parity) {
-    const state = stateFor({
-      copyId: item.id,
-      role: item.role,
-      scale: item.scale,
-      spacing: item.spacing,
-    });
+    const state = stateFor({ copyId: item.id, role: item.role, scale: 100 });
     const a = layoutTypography(state, 500, 625);
     const b = layoutTypography(state, 1080, 1350);
     const c = layoutTypography(state, 2160, 2700);
@@ -478,60 +506,19 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
     });
   }
 
-  const welcome = stateFor({ copyId: "welcome", role: "display", scale: 100 });
+  const welcome = stateFor({ copyId: "welcome-authored", role: "display", scale: 100 });
   const welcomeLayout = layoutTypography(welcome, 500, 625);
+  const authored = welcomeLayout?.lines.map((l) => l.text) ?? [];
   const overflow = runOverflowProof();
   const invariant = positionInvariant();
-  const proofCount = PROOF_SETS.length * 5 * TYPE_ANCHORS.length * ASPECTS.length + 3 * TYPE_ANCHORS.length * 2;
+  const proofCount = PROOF_SETS.length * SCALES.length * TYPE_ANCHORS.length * ASPECTS.length + 3 * TYPE_ANCHORS.length * 2;
 
-  const twoFolio = clampTypeState({
-    enabled: true,
-    arrangement: "between-v",
-    blocks: [
-      { enabled: true, text: "07.09", composition: "folio", scale: 100, anchor: "tc", color: "#f3efe6" },
-      { enabled: true, text: "2026", composition: "folio", scale: 100, anchor: "bc", color: "#f3efe6" },
-    ],
-  });
-  const twoH = clampTypeState({
-    enabled: true,
-    arrangement: "between-h",
-    blocks: [
-      { enabled: true, text: "MADE BY MADELEN", composition: "display", scale: 50, anchor: "ml", color: "#f3efe6" },
-      { enabled: true, text: "07.09.2026", composition: "folio", scale: 40, anchor: "mr", color: "#f3efe6" },
-    ],
-  });
-  const justState = clampTypeState({
-    enabled: true,
-    blocks: [{
-      enabled: true,
-      text: "WELCOME TO THE MBM WORLD MADE BY MADELEN",
-      composition: "editorial",
-      textAlign: "justify",
-      scale: 80,
-      spacing: 50,
-      color: "#f3efe6",
-      anchor: "ml",
-    }],
-  });
-  const vLaid = layoutTypeDocument(twoFolio, 500, 625);
-  const hLaid = layoutTypeDocument(twoH, 500, 625);
-  const justLayout = layoutTypography(justState, 500, 625);
-  const vTop = vLaid[0]?.layout;
-  const vBot = vLaid[1]?.layout;
-  const hLeft = hLaid[0]?.layout;
-  const hRight = hLaid[1]?.layout;
-  const betweenV = Boolean(vTop && vBot && vBot.lines[0]!.y - vTop.lines[0]!.y > 200 && vTop.lines[0]!.y < vBot.lines[0]!.y);
-  const betweenH = Boolean(hLeft && hRight && hRight.lines[0]!.x - hLeft.lines[0]!.x > 40);
-
-  for (const pair of [twoFolio, twoH, justState]) {
+  for (const pair of TWO_BLOCK) {
+    const state = documentState(pair.blocks);
     for (const aspect of [...ASPECTS, { id: "1080", w: 1080, h: 1350 }]) {
-      const outside = countOutsidePixels(aspect.w, aspect.h, pair);
-      if (outside > 0) overflow.outsideTotal += outside;
+      overflow.outsideTotal += countOutsidePixels(aspect.w, aspect.h, state);
     }
   }
-
-  const justInner = justLayout?.lines.slice(0, -1).reduce((m, l) => Math.max(m, l.wordGap), 0) ?? 0;
-  const justLast = justLayout?.lines.length ? justLayout.lines[justLayout.lines.length - 1]!.wordGap : 0;
 
   return {
     plans,
@@ -547,22 +534,21 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
       inkOutsideTotal: overflow.inkOutsideTotal,
       failures: overflow.cases,
     },
-    positionInvariant: invariant.map((p) => ({ copy: p.copy, match: p.match, lines: p.lines[0] })),
+    positionInvariant: invariant.map((p) => ({ copy: p.copy, match: p.match, lines: p.lines })),
+    alignInvariant: alignInvariant(),
+    authoredNewlines: {
+      expected: ["WELCOME TO", "THE MBM WORLD", "MADE BY MADELEN"],
+      actual: authored,
+      match: authored.join("|") === "WELCOME TO|THE MBM WORLD|MADE BY MADELEN",
+    },
+    independence: independence(),
     longCopy: {
-      text: mbmById("welcome").text,
-      lines: welcomeLayout?.lines.map((l) => l.text) ?? [],
+      text: mbmById("welcome-authored").text,
+      lines: authored,
       fontSize: welcomeLayout?.fontSize ?? 0,
-      lineCount: welcomeLayout?.lines.length ?? 0,
+      lineCount: authored.length,
     },
-    twoBlocks: {
-      betweenV,
-      betweenH,
-      justify: {
-        lines: justLayout?.lines.length ?? 0,
-        lastGap: justLast,
-        innerGap: justInner,
-      },
-    },
+    twoBlocks,
     proofCount,
     elapsedMs: Math.round(performance.now() - t0),
   };

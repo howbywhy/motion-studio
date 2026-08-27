@@ -8,7 +8,6 @@ import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypeDocument } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
-import { evaluateTypeSequences } from "./typeMotion";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -1409,10 +1408,8 @@ export class Renderer {
       const type = this.typeState;
       const laid = layoutTypeDocument(type, width, height);
       if (laid.length === 0) return;
-      const sequences = evaluateTypeSequences(type, laid.map((item) => item.layout), this.getLoopPhase());
-      for (let i = 0; i < laid.length; i++) {
-        const item = laid[i]!;
-        paintTypeLayer(composedCtx, item.layout, item.layout.color, item.layout.opacity, sequences[i], item.index);
+      for (const item of laid) {
+        paintTypeLayer(composedCtx, item.layout, item.layout.color, item.layout.opacity, undefined, item.index);
       }
     };
 

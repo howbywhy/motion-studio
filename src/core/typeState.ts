@@ -1,12 +1,10 @@
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
-export type TypeTextAlign = "left" | "center" | "right" | "justify";
+export type TypeTextAlign = "left" | "center" | "right";
 export type TypeAnchor = "tl" | "tc" | "tr" | "ml" | "mc" | "mr" | "bl" | "bc" | "br";
 export type TypeRole = "display" | "editorial" | "caption" | "folio";
 export type TypeComposition = TypeRole;
 export type TypeMode = "responsive" | "fixed";
-export type TypeSequenceMode = "together" | "stagger" | "hold" | "alternate";
-export type TypeArrangement = "independent" | "between-v" | "between-h";
 
 export interface TypeBlock {
   enabled: boolean;
@@ -27,14 +25,12 @@ export interface TypeBlock {
   mode: TypeMode;
 }
 
-/** Document: two editorial blocks + arrangement + sequence. */
+/** Document: two independent editorial blocks. Sequence / arrangement
+ * fields on old saves are ignored. */
 export interface TypeState {
   enabled: boolean;
   blocks: [TypeBlock, TypeBlock];
   activeIndex: 0 | 1;
-  arrangement: TypeArrangement;
-  typeSequenceMode: TypeSequenceMode;
-  typeSequencePace: number;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -44,9 +40,7 @@ export const TYPE_WEIGHT_DEFAULT = 500;
 export const TYPE_ROLES: TypeRole[] = ["display", "editorial", "caption", "folio"];
 export const TYPE_COMPOSITIONS = TYPE_ROLES;
 export const TYPE_ANCHORS: TypeAnchor[] = ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"];
-export const TYPE_SEQUENCE_MODES: TypeSequenceMode[] = ["together", "stagger", "hold", "alternate"];
-export const TYPE_TEXT_ALIGNS: TypeTextAlign[] = ["left", "center", "right", "justify"];
-export const TYPE_ARRANGEMENTS: TypeArrangement[] = ["independent", "between-v", "between-h"];
+export const TYPE_TEXT_ALIGNS: TypeTextAlign[] = ["left", "center", "right"];
 
 function num(v: unknown, lo: number, hi: number, fb: number): number {
   const n = typeof v === "number" ? v : Number(v);
@@ -86,7 +80,7 @@ export function alignFromAnchor(anchor: TypeAnchor): { align: TypeAlign; valign:
   return { align, valign, x, y };
 }
 
-function parseAnchor(raw: Partial<TypeBlock> | null | undefined): TypeAnchor {
+function parseAnchor(raw: Partial<TypeBlock> | null | undefined, fallback: TypeAnchor): TypeAnchor {
   const a = raw && (raw as { anchor?: unknown }).anchor;
   if (typeof a === "string" && (TYPE_ANCHORS as string[]).includes(a)) return a as TypeAnchor;
   if (raw?.align || raw?.valign) {
@@ -101,55 +95,74 @@ function parseAnchor(raw: Partial<TypeBlock> | null | undefined): TypeAnchor {
     const row = hy === 0 ? "t" : hy === 1 ? "b" : "m";
     return `${row}${col}` as TypeAnchor;
   }
-  return "mc";
-}
-
-function parseTextAlign(raw: unknown, fallback: TypeTextAlign): TypeTextAlign {
-  if (raw === "left" || raw === "center" || raw === "right" || raw === "justify") return raw;
   return fallback;
 }
 
-function parseArrangement(raw: unknown): TypeArrangement {
-  if (raw === "between-v" || raw === "between-h" || raw === "independent") return raw;
-  return "independent";
+function parseTextAlign(raw: unknown, fallback: TypeTextAlign): TypeTextAlign {
+  if (raw === "left" || raw === "center" || raw === "right") return raw;
+  if (raw === "justify") return "left";
+  return fallback;
 }
 
-export function defaultTypeBlock(enabled: boolean): TypeBlock {
-  const placed = alignFromAnchor("mc");
+export function applyRoleChange(
+  current: { composition: TypeRole; anchor: TypeAnchor },
+  role: TypeRole,
+): Partial<TypeBlock> {
+  const prev = roleDefaults(current.composition);
+  const next = roleDefaults(role);
+  const patch: Partial<TypeBlock> = {
+    composition: role,
+    scale: next.scale,
+    spacing: next.spacing,
+    weight: next.weight,
+  };
+  if (current.anchor === prev.anchor) patch.anchor = next.anchor;
+  return patch;
+}
+
+/** Editorial defaults loaded when a Role is chosen. Copy and colour stay. */
+export function roleDefaults(role: TypeRole): Pick<TypeBlock, "scale" | "spacing" | "weight" | "anchor"> {
+  if (role === "editorial") return { scale: 52, spacing: 48, weight: 400, anchor: "ml" };
+  if (role === "caption") return { scale: 42, spacing: 58, weight: 500, anchor: "bl" };
+  if (role === "folio") return { scale: 55, spacing: 32, weight: 500, anchor: "tl" };
+  return { scale: 78, spacing: 38, weight: 500, anchor: "mc" };
+}
+
+export function defaultTypeBlock(enabled: boolean, role: TypeRole = "display"): TypeBlock {
+  const defs = roleDefaults(role);
+  const placed = alignFromAnchor(defs.anchor);
   return {
     enabled,
     text: "",
-    composition: "display",
+    composition: role,
     textAlign: "left",
-    anchor: "mc",
-    scale: 50,
-    spacing: 50,
-    weight: TYPE_WEIGHT_DEFAULT,
+    anchor: defs.anchor,
+    scale: defs.scale,
+    spacing: defs.spacing,
+    weight: defs.weight,
     color: "#f3efe6",
     opacity: 100,
     align: placed.align,
     valign: placed.valign,
     x: placed.x,
     y: placed.y,
-    mode: "responsive",
+    mode: role === "caption" || role === "folio" ? "fixed" : "responsive",
   };
 }
 
 export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallbackEnabled = false): TypeBlock {
-  const d = defaultTypeBlock(fallbackEnabled);
-  if (!raw) return d;
   const composition = parseRole(raw);
-  const anchor = parseAnchor(raw);
+  const d = defaultTypeBlock(fallbackEnabled, composition);
+  if (!raw) return d;
+  const anchor = parseAnchor(raw, d.anchor);
   const placed = alignFromAnchor(anchor);
   const color = typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : d.color;
-  let spacing = num(raw.spacing ?? (raw as { spread?: number }).spread, 0, 100, d.spacing);
-  if ((raw as { composition?: unknown }).composition === "spread" && spacing < 70) spacing = 80;
-  const textAlign = parseTextAlign((raw as { textAlign?: unknown }).textAlign, d.textAlign);
+  const spacing = num(raw.spacing ?? (raw as { spread?: number }).spread, 0, 100, d.spacing);
   return {
     enabled: raw.enabled === true,
     text: typeof raw.text === "string" ? raw.text : d.text,
     composition,
-    textAlign,
+    textAlign: parseTextAlign((raw as { textAlign?: unknown }).textAlign, d.textAlign),
     anchor,
     scale: num(raw.scale, 0, 100, d.scale),
     spacing,
@@ -167,11 +180,8 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
 export function defaultTypeState(): TypeState {
   return {
     enabled: false,
-    blocks: [defaultTypeBlock(true), defaultTypeBlock(false)],
+    blocks: [defaultTypeBlock(true, "display"), defaultTypeBlock(false, "display")],
     activeIndex: 0,
-    arrangement: "independent",
-    typeSequenceMode: "together",
-    typeSequencePace: 50,
   };
 }
 
@@ -221,11 +231,6 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   const d = defaultTypeState();
   if (!raw) return d;
   const rec = raw as Record<string, unknown>;
-  const seqRaw = rec.typeSequenceMode;
-  const typeSequenceMode: TypeSequenceMode =
-    seqRaw === "stagger" || seqRaw === "hold" || seqRaw === "alternate" || seqRaw === "together"
-      ? seqRaw
-      : "together";
   const activeIndex: 0 | 1 = rec.activeIndex === 1 ? 1 : 0;
   let blocks: [TypeBlock, TypeBlock];
   if (Array.isArray(rec.blocks) && rec.blocks.length >= 1) {
@@ -247,9 +252,6 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     enabled: rec.enabled === true,
     blocks,
     activeIndex,
-    arrangement: parseArrangement(rec.arrangement),
-    typeSequenceMode,
-    typeSequencePace: num(rec.typeSequencePace, 0, 100, d.typeSequencePace),
   };
 }
 
@@ -271,9 +273,6 @@ export function cloneTypeState(state: TypeState): TypeState {
   return {
     enabled: state.enabled,
     activeIndex: state.activeIndex,
-    arrangement: state.arrangement,
-    typeSequenceMode: state.typeSequenceMode,
-    typeSequencePace: state.typeSequencePace,
     blocks: [{ ...state.blocks[0] }, { ...state.blocks[1] }],
   };
 }

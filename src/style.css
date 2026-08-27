@@ -633,15 +633,37 @@ body {
   display: none;
 }
 
+.type-block {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.type-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.type-block-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .type-block-on {
   margin-left: auto;
   font-size: 9px;
 }
 
-.type-arrange {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid var(--panel-border);
+.type-block.is-off .type-block-body {
+  display: none;
+}
+
+.type-block.is-off .type-block-title {
+  opacity: 0.55;
 }
 
 .type-xy-svg {

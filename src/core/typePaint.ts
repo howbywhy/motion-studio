@@ -1,6 +1,5 @@
 import { switzerFont, switzerReady } from "./typeFont";
 import { opticalFramePx, type TypeLayout } from "./typeLayout";
-import type { TypeSequenceState } from "./typeMotion";
 
 const overlays: [HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null];
 const overlayCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null];
@@ -32,7 +31,7 @@ function staticKey(layout: TypeLayout, color: string, opacity: number): string {
     layout.offsetY,
     layout.weight,
     layout.textAlign,
-    layout.lines.map((l) => `${l.text}:${l.x}:${l.y}:${l.width}:${l.wordGap}`).join("|"),
+    layout.lines.map((l) => `${l.text}:${l.x}:${l.y}:${l.width}`).join("|"),
   ].join("\t");
 }
 
@@ -52,19 +51,6 @@ function drawLine(
   layout: TypeLayout,
   line: TypeLayout["lines"][number],
 ): void {
-  if (line.wordGap > 0.05) {
-    const words = line.text.split(/\s+/).filter(Boolean);
-    if (words.length >= 2) {
-      let x = line.x;
-      const space = ctx.measureText(" ").width;
-      for (let i = 0; i < words.length; i++) {
-        ctx.fillText(words[i]!, x, line.y);
-        x += ctx.measureText(words[i]!).width;
-        if (i < words.length - 1) x += space + line.wordGap;
-      }
-      return;
-    }
-  }
   if (layout.tracking !== 0 && typeof (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing !== "string") {
     let x = line.x;
     for (const ch of line.text) {
@@ -122,53 +108,20 @@ function ensureOverlay(
   return overlays[slot]!;
 }
 
-function paintStatic(
-  dest: CanvasRenderingContext2D,
-  layout: TypeLayout,
-  color: string,
-  opacity: number,
-  slot: 0 | 1,
-): void {
-  dest.drawImage(ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height), 0, 0);
-}
-
-function paintSequenced(
-  dest: CanvasRenderingContext2D,
-  layout: TypeLayout,
-  color: string,
-  opacity: number,
-  sequence: TypeSequenceState,
-  slot: 0 | 1,
-): void {
-  const motion = sequence.units[0];
-  if (!motion || motion.opacity < 0.004) return;
-  const src = ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height);
-  dest.save();
-  clipOptical(dest, dest.canvas.width, dest.canvas.height);
-  dest.globalAlpha = Math.min(1, Math.max(0, motion.opacity));
-  dest.drawImage(src, motion.dx, motion.dy);
-  dest.restore();
-}
-
-/** PRODUCT: one clean Switzer silhouette per block. Sequencing may fade /
- * nudge the whole block. No scale, blur, tracking, or weight animation.
- * Typography paints after Registration and must not alter the photographic
+/** PRODUCT: one clean Switzer silhouette per block. Typography is static.
+ * Paints after Registration and must not alter the photographic
  * Registration algorithm (golden master 728ff08). */
 export function paintTypeLayer(
   dest: CanvasRenderingContext2D,
   layout: TypeLayout,
   color: string,
   opacity: number,
-  sequence?: TypeSequenceState | null,
+  _unused?: unknown,
   slot: 0 | 1 = 0,
 ): void {
   if (layout.lines.length === 0) return;
   if (!switzerReady()) return;
-  if (!sequence || sequence.identity) {
-    paintStatic(dest, layout, color, opacity, slot);
-    return;
-  }
-  paintSequenced(dest, layout, color, opacity, sequence, slot);
+  dest.drawImage(ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height), 0, 0);
 }
 
 export function disposeTypeScratch(): void {

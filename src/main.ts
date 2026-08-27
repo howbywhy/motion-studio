@@ -17,7 +17,6 @@ import { buildTypePanel } from "./ui/typePanel";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, cloneTypeState, defaultTypeState } from "./core/typeState";
 import { debugLinePlan, layoutTypeDocument } from "./core/typeLayout";
-import { evaluateTypeSequences } from "./core/typeMotion";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
@@ -1494,12 +1493,11 @@ Object.assign(window, {
       const ch = h ?? size.height;
       const state = renderer.getTypeState();
       const laid = layoutTypeDocument(state, cw, ch);
-      const sequences = evaluateTypeSequences(state, laid.map((item) => item.layout), renderer.getLoopPhase());
       return {
         lines: debugLinePlan(state, cw, ch),
         fontSize: laid[0]?.layout.fontSize ?? 0,
         canvas: { w: cw, h: ch },
-        blocks: laid.map((item, i) => ({
+        blocks: laid.map((item) => ({
           index: item.index,
           opacity: item.layout.opacity,
           offsetX: item.layout.offsetX,
@@ -1507,9 +1505,7 @@ Object.assign(window, {
           placed: item.layout.lines.map((l) => ({
             text: l.text, x: l.x, y: l.y, width: l.width, height: l.height, wordGap: l.wordGap, unit: l.unit,
           })),
-          sequence: sequences[i] ?? null,
         })),
-        phase: renderer.getLoopPhase(),
       };
     },
     lastFieldInk: () => renderer.lastFieldInk(),

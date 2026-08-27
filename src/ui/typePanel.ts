@@ -1,14 +1,13 @@
 import {
+  applyRoleChange,
   clampTypeState,
   defaultTypeState,
   TYPE_ANCHORS,
   TYPE_WEIGHT_MAX,
   TYPE_WEIGHT_MIN,
   type TypeAnchor,
-  type TypeArrangement,
   type TypeBlock,
   type TypeComposition,
-  type TypeSequenceMode,
   type TypeState,
   type TypeTextAlign,
 } from "../core/typeState";
@@ -96,7 +95,7 @@ function anchorPad(
   const row = document.createElement("div");
   row.className = "control-row type-xy-row";
   const lab = document.createElement("label");
-  lab.textContent = "Type Position";
+  lab.textContent = "Position";
   row.appendChild(lab);
 
   const SIZE = 88;
@@ -108,7 +107,7 @@ function anchorPad(
   svg.setAttribute("height", String(SIZE));
   svg.classList.add("type-xy-svg");
   svg.setAttribute("role", "group");
-  svg.setAttribute("aria-label", "Type Position");
+  svg.setAttribute("aria-label", "Position");
 
   const bg = document.createElementNS(svgNS, "rect");
   bg.setAttribute("x", "1");
@@ -175,6 +174,147 @@ function anchorPad(
   return { set: mark };
 }
 
+function markSeg(el: HTMLDivElement, value: string): void {
+  for (const b of el.querySelectorAll("button")) {
+    b.classList.toggle("active", b.getAttribute("data-value") === value);
+  }
+}
+
+function buildBlock(
+  parent: HTMLElement,
+  index: 0 | 1,
+  initial: TypeBlock,
+  onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean }) => void,
+): {
+  root: HTMLElement;
+  sync: (block: TypeBlock) => void;
+} {
+  const root = document.createElement("div");
+  root.className = "type-block";
+  root.classList.toggle("is-off", !initial.enabled);
+
+  const head = document.createElement("div");
+  head.className = "type-block-head";
+  const title = document.createElement("span");
+  title.className = "type-block-title";
+  title.textContent = index === 0 ? "Type 01" : "Type 02";
+  head.appendChild(title);
+  const onBtn = document.createElement("button");
+  onBtn.type = "button";
+  onBtn.className = "diagnostic-toggle type-block-on";
+  function paintOn(on: boolean): void {
+    onBtn.textContent = on ? "On" : "Off";
+    onBtn.classList.toggle("active", on);
+    root.classList.toggle("is-off", !on);
+  }
+  paintOn(initial.enabled);
+  onBtn.addEventListener("click", () => {
+    const next = !onBtn.classList.contains("active");
+    paintOn(next);
+    onChange({ activeIndex: index, blockEnabled: next });
+  });
+  head.appendChild(onBtn);
+  root.appendChild(head);
+
+  const body = document.createElement("div");
+  body.className = "type-block-body";
+  root.appendChild(body);
+
+  const textRow = document.createElement("div");
+  textRow.className = "control-row";
+  const textLab = document.createElement("label");
+  textLab.textContent = "Copy";
+  textRow.appendChild(textLab);
+  const textarea = document.createElement("textarea");
+  textarea.className = "type-text";
+  textarea.rows = 4;
+  textarea.value = initial.text;
+  textarea.addEventListener("input", () => onChange({ activeIndex: index, text: textarea.value }));
+  textRow.appendChild(textarea);
+  body.appendChild(textRow);
+
+  let currentRole = initial.composition;
+  let currentAnchor = initial.anchor;
+
+  const roleSeg = seg(body, "Role", [
+    { value: "display", label: "Display" },
+    { value: "editorial", label: "Editorial" },
+    { value: "caption", label: "Caption" },
+    { value: "folio", label: "Folio" },
+  ], initial.composition, (v) => {
+    const role = v as TypeComposition;
+    const patch = applyRoleChange({ composition: currentRole, anchor: currentAnchor }, role);
+    currentRole = role;
+    if (patch.scale !== undefined) {
+      scale.input.value = String(patch.scale);
+      scale.valueEl.textContent = String(patch.scale);
+    }
+    if (patch.spacing !== undefined) {
+      spacing.input.value = String(patch.spacing);
+      spacing.valueEl.textContent = String(patch.spacing);
+    }
+    if (patch.weight !== undefined) {
+      weight.input.value = String(patch.weight);
+      weight.valueEl.textContent = String(patch.weight);
+    }
+    if (patch.anchor) {
+      currentAnchor = patch.anchor;
+      pos.set(patch.anchor);
+    }
+    onChange({ activeIndex: index, ...patch });
+  });
+
+  const alignSeg = seg(body, "Align", [
+    { value: "left", label: "Left" },
+    { value: "center", label: "Centre" },
+    { value: "right", label: "Right" },
+  ], initial.textAlign, (v) => onChange({ activeIndex: index, textAlign: v as TypeTextAlign }));
+
+  const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
+  const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
+  const spacing = slider(body, "Spacing", 0, 100, 1, initial.spacing, (v) => onChange({ activeIndex: index, spacing: v }));
+
+  const pos = anchorPad(body, initial.anchor, (anchor) => {
+    currentAnchor = anchor;
+    onChange({ activeIndex: index, anchor });
+  });
+
+  const colorRow = document.createElement("div");
+  colorRow.className = "control-row bg-colour-row";
+  const colorLab = document.createElement("label");
+  colorLab.textContent = "Colour";
+  colorRow.appendChild(colorLab);
+  const color = document.createElement("input");
+  color.type = "color";
+  color.value = initial.color;
+  color.title = "Type colour";
+  color.addEventListener("input", () => onChange({ activeIndex: index, color: color.value }));
+  colorRow.appendChild(color);
+  body.appendChild(colorRow);
+
+  parent.appendChild(root);
+
+  return {
+    root,
+    sync(block: TypeBlock) {
+      paintOn(block.enabled);
+      textarea.value = block.text;
+      markSeg(roleSeg, block.composition);
+      markSeg(alignSeg, block.textAlign);
+      currentRole = block.composition;
+      scale.input.value = String(block.scale);
+      scale.valueEl.textContent = String(block.scale);
+      weight.input.value = String(block.weight);
+      weight.valueEl.textContent = String(block.weight);
+      spacing.input.value = String(block.spacing);
+      spacing.valueEl.textContent = String(block.spacing);
+      currentAnchor = block.anchor;
+      pos.set(block.anchor);
+      color.value = block.color;
+    },
+  };
+}
+
 export function buildTypePanel(
   container: HTMLElement,
   initial: TypeState,
@@ -184,7 +324,6 @@ export function buildTypePanel(
   container.className = "type-panel";
 
   let state = clampTypeState(initial);
-  let active = state.activeIndex;
 
   const head = document.createElement("div");
   head.className = "panel-label-row";
@@ -212,140 +351,17 @@ export function buildTypePanel(
   body.className = "type-panel-body";
   container.appendChild(body);
 
-  const slotSeg = seg(body, "Block", [
-    { value: "0", label: "Type 01" },
-    { value: "1", label: "Type 02" },
-  ], String(active), (v) => {
-    active = v === "1" ? 1 : 0;
-    state = { ...state, activeIndex: active };
-    paintBlockFields(state);
-    onChange({ activeIndex: active });
-  });
-
-  const blockOn = document.createElement("button");
-  blockOn.type = "button";
-  blockOn.className = "diagnostic-toggle type-block-on";
-  function paintBlockOn(): void {
-    const on = state.blocks[active].enabled;
-    blockOn.textContent = on ? "On" : "Off";
-    blockOn.classList.toggle("active", on);
-  }
-  blockOn.addEventListener("click", () => {
-    const next = !state.blocks[active].enabled;
-    state.blocks[active] = { ...state.blocks[active], enabled: next };
-    paintBlockOn();
-    arrangeWrap.hidden = !bothOn(state);
-    onChange({ activeIndex: active, blockEnabled: next });
-  });
-  slotSeg.parentElement?.appendChild(blockOn);
-
-  const textRow = document.createElement("div");
-  textRow.className = "control-row";
-  const textLab = document.createElement("label");
-  textLab.textContent = "Copy";
-  textRow.appendChild(textLab);
-  const textarea = document.createElement("textarea");
-  textarea.className = "type-text";
-  textarea.rows = 4;
-  textarea.placeholder = "";
-  textarea.value = state.blocks[active].text;
-  textarea.addEventListener("input", () => onChange({ activeIndex: active, text: textarea.value }));
-  textRow.appendChild(textarea);
-  body.appendChild(textRow);
-
-  const compositionSeg = seg(body, "Role", [
-    { value: "display", label: "Display" },
-    { value: "editorial", label: "Editorial" },
-    { value: "caption", label: "Caption" },
-    { value: "folio", label: "Folio" },
-  ], state.blocks[active].composition, (v) => onChange({ activeIndex: active, composition: v as TypeComposition }));
-
-  const alignSeg = seg(body, "Align", [
-    { value: "left", label: "Left" },
-    { value: "center", label: "Centre" },
-    { value: "right", label: "Right" },
-    { value: "justify", label: "Justify" },
-  ], state.blocks[active].textAlign, (v) => onChange({ activeIndex: active, textAlign: v as TypeTextAlign }));
-
-  const scale = slider(body, "Scale", 0, 100, 1, state.blocks[active].scale, (v) => onChange({ activeIndex: active, scale: v }));
-  const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, state.blocks[active].weight, (v) => onChange({ activeIndex: active, weight: v }));
-  const spacing = slider(body, "Spacing", 0, 100, 1, state.blocks[active].spacing, (v) => onChange({ activeIndex: active, spacing: v }));
-  const pos = anchorPad(body, state.blocks[active].anchor, (anchor) => onChange({ activeIndex: active, anchor }));
-
-  const colorRow = document.createElement("div");
-  colorRow.className = "control-row bg-colour-row";
-  const colorLab = document.createElement("label");
-  colorLab.textContent = "Colour";
-  colorRow.appendChild(colorLab);
-  const color = document.createElement("input");
-  color.type = "color";
-  color.value = state.blocks[active].color;
-  color.title = "Type colour";
-  color.addEventListener("input", () => onChange({ activeIndex: active, color: color.value }));
-  colorRow.appendChild(color);
-  body.appendChild(colorRow);
-
-  const arrangeWrap = document.createElement("div");
-  arrangeWrap.className = "type-arrange";
-  body.appendChild(arrangeWrap);
-  const arrangeSeg = seg(arrangeWrap, "Arrangement", [
-    { value: "independent", label: "Independent" },
-    { value: "between-v", label: "Between V" },
-    { value: "between-h", label: "Between H" },
-  ], state.arrangement, (v) => onChange({ arrangement: v as TypeArrangement }));
-
-  const sequenceSeg = seg(body, "Sequence", [
-    { value: "together", label: "Together" },
-    { value: "stagger", label: "Stagger" },
-    { value: "hold", label: "Hold" },
-    { value: "alternate", label: "Alternate" },
-  ], state.typeSequenceMode, (v) => onChange({ typeSequenceMode: v as TypeSequenceMode }));
-
-  const pace = slider(body, "Pace", 0, 100, 1, state.typeSequencePace, (v) => onChange({ typeSequencePace: v }));
-
-  function markSeg(el: HTMLDivElement, value: string): void {
-    for (const b of el.querySelectorAll("button")) {
-      b.classList.toggle("active", b.getAttribute("data-value") === value);
-    }
-  }
-
-  function bothOn(s: TypeState): boolean {
-    return s.blocks[0].enabled && s.blocks[1].enabled;
-  }
-
-  function paintBlockFields(s: TypeState): void {
-    const b = s.blocks[s.activeIndex];
-    textarea.value = b.text;
-    markSeg(compositionSeg, b.composition);
-    markSeg(alignSeg, b.textAlign);
-    scale.input.value = String(b.scale);
-    scale.valueEl.textContent = String(b.scale);
-    weight.input.value = String(b.weight);
-    weight.valueEl.textContent = String(b.weight);
-    spacing.input.value = String(b.spacing);
-    spacing.valueEl.textContent = String(b.spacing);
-    pos.set(b.anchor);
-    color.value = b.color;
-    paintBlockOn();
-  }
-
-  paintBlockOn();
-  arrangeWrap.hidden = !bothOn(state);
+  const block0 = buildBlock(body, 0, state.blocks[0], onChange);
+  const block1 = buildBlock(body, 1, state.blocks[1], onChange);
 
   return {
     sync(next: TypeState) {
       state = clampTypeState(next);
-      active = state.activeIndex;
       toggle.classList.toggle("active", state.enabled);
       toggle.textContent = state.enabled ? "On" : "Off";
       container.classList.toggle("type-disabled", !state.enabled);
-      markSeg(slotSeg, String(state.activeIndex));
-      paintBlockFields(state);
-      arrangeWrap.hidden = !bothOn(state);
-      markSeg(arrangeSeg, state.arrangement);
-      markSeg(sequenceSeg, state.typeSequenceMode);
-      pace.input.value = String(state.typeSequencePace);
-      pace.valueEl.textContent = String(state.typeSequencePace);
+      block0.sync(state.blocks[0]);
+      block1.sync(state.blocks[1]);
     },
   };
 }

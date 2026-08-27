@@ -8,7 +8,7 @@ export interface TypeLine {
   y: number;
   width: number;
   height: number;
-  /** Extra pixels between words for justification. 0 = natural. */
+  /** Always 0. COMPAT field from the removed justify pass. */
   wordGap: number;
   /** Authored newline unit. Auto-wrapped lines share unit 0. */
   unit: number;
@@ -37,7 +37,7 @@ const PREVIEW_MARGIN_PX = 10;
 /** 10px at a ~500px preview. Scales with canvas width. */
 const FRAME = UNIT * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
 const COLS = 4;
-const FIT_PAD = 4;
+const FIT_PAD = 0;
 
 const TRAILING_WEAK = new Set(["BY", "X"]);
 const LEADING_WEAK = new Set(["OR", "AND", "TO", "THE", "A", "OF"]);
@@ -234,18 +234,18 @@ function u01(v: number): number {
 
 function trackingEm(role: TypeRole, spacing: number): number {
   const s = u01(spacing);
-  if (role === "display") return lerp(-0.04, 0.05, s);
-  if (role === "caption") return lerp(0.02, 0.1, s);
-  if (role === "folio") return lerp(-0.02, 0.06, s);
-  return lerp(-0.02, 0.04, s);
+  if (role === "display") return lerp(-0.045, 0.04, s);
+  if (role === "caption") return lerp(0.04, 0.12, s);
+  if (role === "folio") return lerp(-0.03, 0.05, s);
+  return lerp(-0.015, 0.02, s);
 }
 
 function leadingRatio(role: TypeRole, spacing: number): number {
   const s = u01(spacing);
-  if (role === "display") return lerp(0.8, 1.05, s);
-  if (role === "caption") return lerp(1.12, 1.22, s);
-  if (role === "folio") return lerp(0.84, 1.05, s);
-  return lerp(0.95, 1.18, Math.min(1, s / 0.55));
+  if (role === "display") return lerp(0.78, 0.98, s);
+  if (role === "caption") return lerp(1.12, 1.16, s);
+  if (role === "folio") return lerp(0.86, 1.02, s);
+  return lerp(0.98, 1.22, s);
 }
 
 function prepareLines(lines: string[], weight: number, fontSize: number, tracking: number): PreparedLine[] {
@@ -358,81 +358,13 @@ function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[], wordGap
 }
 
 function roleMeasure(role: TypeRole, innerW: number): number {
-  if (role === "editorial") return innerW * 0.74;
-  if (role === "caption") return innerW * 0.58;
+  if (role === "editorial") return innerW * 0.68;
+  if (role === "caption") return innerW * 0.55;
   return innerW;
 }
 
 function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
-}
-
-function justifyExtra(
-  text: string,
-  weight: number,
-  size: number,
-  tracking: number,
-  targetW: number,
-  last: boolean,
-  only: boolean,
-): number {
-  if (only || last) return 0;
-  const n = wordCount(text);
-  if (n < 2) return 0;
-  const natural = inkWidth(measureLine(text, weight, size, tracking));
-  const extra = targetW - natural;
-  if (extra <= 0.5) return 0;
-  const space = Math.max(0.5, measureLine(" ", weight, size, tracking).advance);
-  const proposed = space + extra / (n - 1);
-  if (proposed > space * 1.8) return 0;
-  if (proposed < space * 0.85) return 0;
-  return proposed - space;
-}
-
-function greedyWrap(
-  words: string[],
-  weight: number,
-  size: number,
-  tracking: number,
-  measure: number,
-): string[] {
-  if (words.length === 0) return [];
-  const lines: string[] = [];
-  let i = 0;
-  while (i < words.length) {
-    let j = i + 1;
-    let best = i + 1;
-    while (j <= words.length) {
-      const t = join(words, i, j);
-      if (inkWidth(measureLine(t, weight, size, tracking)) <= measure + 0.25) {
-        best = j;
-        j += 1;
-      } else {
-        break;
-      }
-    }
-    lines.push(join(words, i, best));
-    i = best;
-  }
-  return lines;
-}
-
-function extraGapFor(
-  role: TypeRole,
-  spacing: number,
-  n: number,
-  minH: number,
-  innerH: number,
-): number {
-  if (n <= 1) return 0;
-  const room = Math.max(0, innerH - minH);
-  const s = u01(spacing);
-  if (role === "caption" || role === "display") return 0;
-  if (role === "editorial") {
-    const t = Math.max(0, (s - 0.4) / 0.6);
-    return (t * room * 0.55) / (n - 1);
-  }
-  return (s * room) / (n - 1);
 }
 
 function composeSolution(
@@ -443,7 +375,6 @@ function composeSolution(
   weight: number,
   unitW: number,
   unitH: number,
-  textAlign: TypeTextAlign,
 ): Solution {
   const innerW = unitW - FRAME * 2 - FIT_PAD * 2;
   const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
@@ -454,24 +385,17 @@ function composeSolution(
   const u = u01(scale);
   let fontSize: number;
   if (role === "caption") {
-    fontSize = Math.min(legal, unitW * lerp(0.022, 0.05, u));
+    fontSize = Math.min(legal, unitW * lerp(0.018, 0.042, u));
   } else if (role === "editorial") {
-    fontSize = legal * lerp(0.42, 0.82, u);
+    fontSize = legal * lerp(0.40, 0.70, u);
   } else if (role === "folio") {
-    fontSize = legal * lerp(0.16, 1, u);
+    fontSize = legal * lerp(0.18, 1, u);
   } else {
-    fontSize = legal * lerp(0.32, 1, u);
+    fontSize = legal * lerp(0.36, 1, u);
   }
   fontSize = Math.min(fontSize, legal);
   let tracking = tEm * fontSize;
-  let used = lines;
-  if (textAlign === "justify") {
-    const words = lines.join(" ").split(/\s+/).filter(Boolean);
-    if (words.length >= 2) {
-      used = greedyWrap(words, weight, fontSize, tracking, measure);
-    }
-  }
-  let prepared = prepareLines(used, weight, fontSize, tracking);
+  let prepared = prepareLines(lines, weight, fontSize, tracking);
   let leading = fontSize * lead;
   let box = lockupHeight(prepared, leading, 0);
   let width = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
@@ -480,37 +404,20 @@ function composeSolution(
     const sy = Math.min(1, innerH / Math.max(1, box.h));
     fontSize *= Math.min(sx, sy);
     tracking = tEm * fontSize;
-    if (textAlign === "justify") {
-      const words = lines.join(" ").split(/\s+/).filter(Boolean);
-      if (words.length >= 2) used = greedyWrap(words, weight, fontSize, tracking, measure);
-    }
-    prepared = prepareLines(used, weight, fontSize, tracking);
+    prepared = prepareLines(lines, weight, fontSize, tracking);
     leading = fontSize * lead;
     box = lockupHeight(prepared, leading, 0);
     width = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
   }
-  const gap = extraGapFor(role, spacing, prepared.length, box.h, innerH);
-  box = lockupHeight(prepared, leading, gap);
-  const only = prepared.length <= 1;
-  const justify = textAlign === "justify" && !only;
-  const blockW = justify ? measure : width;
-  const wordGaps = prepared.map((line, i) =>
-    justify ? justifyExtra(line.text, weight, fontSize, tracking, measure, i === prepared.length - 1, only) : 0,
-  );
-  const xs = prepared.map((line, i) => {
-    const extra = wordGaps[i]! * Math.max(0, wordCount(line.text) - 1);
-    const lineW = inkWidth(line.m) + extra;
-    if (textAlign === "right") return blockW - lineW + line.m.inkLeft;
-    if (textAlign === "center") return (blockW - lineW) / 2 + line.m.inkLeft;
-    return line.m.inkLeft;
-  });
+  const xs = prepared.map((line) => line.m.inkLeft);
   const localYs: number[] = [];
   for (let i = 0; i < prepared.length; i++) {
-    localYs.push(box.ascent + i * (leading + gap));
+    localYs.push(box.ascent + i * leading);
   }
+  const wordGaps = prepared.map(() => 0);
   const bounds = inkBounds(xs, localYs, prepared, wordGaps);
   return {
-    lines: used,
+    lines,
     prepared,
     fontSize,
     tracking,
@@ -565,7 +472,6 @@ function placeSolution(
   anchor: TypeAnchor,
   unitW: number,
   unitH: number,
-  place?: { hx?: number; hy?: number },
 ): {
   xs: number[];
   ys: number[];
@@ -576,9 +482,7 @@ function placeSolution(
   const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
   const bw = sol.bboxR - sol.bboxL;
   const bh = sol.bboxB - sol.bboxT;
-  const frac = anchorFractions(anchor);
-  const hx = place?.hx ?? frac.hx;
-  const hy = place?.hy ?? frac.hy;
+  const { hx, hy } = anchorFractions(anchor);
   const left = innerL + hx * Math.max(0, innerW - bw);
   const top = innerT + hy * Math.max(0, innerH - bh);
   const dx = left - sol.bboxL;
@@ -595,15 +499,25 @@ function isTypeDocument(input: TypeState | TypeBlock): input is TypeState {
 
 function composeKey(block: TypeBlock, aspectKey: number): string {
   return [
-    "v12",
+    "v13",
     aspectKey,
     block.text,
     block.composition,
-    block.textAlign,
     block.scale,
     block.spacing,
     block.weight,
   ].join("\t");
+}
+
+/** Align lives inside the already-composed lockup. Does not reflow. */
+function alignedXs(sol: Solution, textAlign: TypeTextAlign): number[] {
+  const width = sol.prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
+  return sol.prepared.map((line) => {
+    const lineW = inkWidth(line.m);
+    if (textAlign === "right") return width - lineW + line.m.inkLeft;
+    if (textAlign === "center") return (width - lineW) / 2 + line.m.inkLeft;
+    return line.m.inkLeft;
+  });
 }
 
 function layoutBlock(
@@ -611,7 +525,6 @@ function layoutBlock(
   canvasW: number,
   canvasH: number,
   slot: 0 | 1,
-  place?: { hx?: number; hy?: number },
 ): TypeLayout | null {
   if (!block.enabled) return null;
   const text = block.text.replace(/\s+$/g, "");
@@ -648,12 +561,22 @@ function layoutBlock(
         if (pair) lines = [pair[0], pair[1]];
       }
     }
-    sol = composeSolution(lines, role, block.scale, block.spacing, block.weight, unitW, unitH, block.textAlign);
+    sol = composeSolution(lines, role, block.scale, block.spacing, block.weight, unitW, unitH);
     caches[slot] = { key, solution: sol };
   }
 
+  const xs = alignedXs(sol, block.textAlign);
+  const bounds = inkBounds(xs, sol.localYs, sol.prepared, sol.wordGaps);
+  const placedSol: Solution = {
+    ...sol,
+    localXs: xs,
+    bboxL: bounds.l,
+    bboxT: bounds.t,
+    bboxR: bounds.r,
+    bboxB: bounds.b,
+  };
   const placed = alignFromAnchor(block.anchor);
-  const pts = placeSolution(sol, block.anchor, unitW, unitH, place);
+  const pts = placeSolution(placedSol, block.anchor, unitW, unitH);
   const laid: TypeLine[] = sol.lines.map((textLine, i) => ({
     text: textLine,
     width: sol.prepared[i].m.advance,
@@ -688,13 +611,12 @@ export function layoutTypography(
   canvasW: number,
   canvasH: number,
   slot: 0 | 1 = 0,
-  place?: { hx?: number; hy?: number },
 ): TypeLayout | null {
   if (isTypeDocument(input)) {
     if (!input.enabled) return null;
-    return layoutBlock(input.blocks[0], canvasW, canvasH, slot, place);
+    return layoutBlock(input.blocks[0], canvasW, canvasH, slot);
   }
-  return layoutBlock(input, canvasW, canvasH, slot, place);
+  return layoutBlock(input, canvasW, canvasH, slot);
 }
 
 export function layoutTypeDocument(
@@ -703,17 +625,9 @@ export function layoutTypeDocument(
   canvasH: number,
 ): { index: 0 | 1; layout: TypeLayout }[] {
   const active = activeTypeBlocks(state);
-  const both = active.length === 2;
-  const arrangement = both ? state.arrangement : "independent";
   const out: { index: 0 | 1; layout: TypeLayout }[] = [];
   for (const item of active) {
-    let place: { hx?: number; hy?: number } | undefined;
-    if (arrangement === "between-v") {
-      place = { hy: item.index === 0 ? 0 : 1 };
-    } else if (arrangement === "between-h") {
-      place = { hx: item.index === 0 ? 0 : 1 };
-    }
-    const layout = layoutBlock(item.block, canvasW, canvasH, item.index, place);
+    const layout = layoutBlock(item.block, canvasW, canvasH, item.index);
     if (layout) out.push({ index: item.index, layout });
   }
   return out;
@@ -753,7 +667,7 @@ function clampProjected(
   canvasH: number,
   weight: number,
 ): TypeLayout {
-  const frame = opticalFramePx(canvasW) + 2;
+  const frame = opticalFramePx(canvasW);
   const xs = layout.lines.map((l) => l.x);
   const ys = layout.lines.map((l) => l.y);
   const pxPrepared = layout.lines.map((line) => ({
