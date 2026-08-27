@@ -101,6 +101,7 @@ export function computeResolvedFields(
   const driftFrac = (params.drift as number) / 100;
   const overlapFrac = (params.overlap as number) / 100;
   const revealFrac = (params.revealAmount as number) / 100;
+  // Field coalesce at peak — not sequence terminal coverage (resolveLimit).
   const resolveFrac = (params.resolveAmount as number) / 100;
   const speed = Math.max(0.01, params.speed as number);
 

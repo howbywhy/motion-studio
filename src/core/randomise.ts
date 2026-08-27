@@ -7,6 +7,7 @@ import type { ParamValues } from "./types";
  *   fieldCount 3–5 (weighted 3/4), fieldSize 32–48, softness 70–88,
  *   drift 4–14, overlap 40–64, reveal 50–72, resolve 38–58, speed 0.65–1.05.
  *   Overlap+reveal sum capped so the photograph cannot vanish into a blob.
+ *   resolveLimit is left unchanged (art-directed terminal coverage).
  *
  * Phase (local to the current pair):
  *   ~50% 0.18–0.40, 30% 0.40–0.55, 10% 0.12–0.18, 10% 0.55–0.68
@@ -84,6 +85,7 @@ function bloomParams(rng: () => number, current: ParamValues): ParamValues {
     revealAmount,
     resolveAmount: intInc(rng, 38, 58),
     speed: stepped(rng, 0.65, 1.05, 0.05),
+    // Terminal coverage stays art-directed — do not randomise resolveLimit.
   };
 }
 

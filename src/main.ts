@@ -614,13 +614,17 @@ function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: Par
 
   if (currentBehavior.id === "bloom") {
     const fieldKeys = new Set(["fieldCount", "fieldSize", "softness", "drift", "overlap"]);
-    const revealKeys = new Set(["revealAmount", "resolveAmount"]);
+    const revealKeys = new Set(["revealAmount"]);
+    const resolveKeys = new Set(["resolveAmount", "resolveLimit"]);
     const fieldDefs = defs.filter((d) => fieldKeys.has(d.key));
     const revealDefs = defs.filter((d) => revealKeys.has(d.key));
-    const rest = defs.filter((d) => !fieldKeys.has(d.key) && !revealKeys.has(d.key));
+    const resolveDefs = defs.filter((d) => resolveKeys.has(d.key));
+    const rest = defs.filter((d) => !fieldKeys.has(d.key) && !revealKeys.has(d.key) && !resolveKeys.has(d.key));
     buildControls(container, fieldDefs, values, onChange);
     const reveal = appendFamily(container, "Reveal");
     buildControls(reveal, revealDefs, values, onChange);
+    const resolve = appendFamily(container, "Resolve");
+    buildControls(resolve, resolveDefs, values, onChange);
     const time = appendFamily(container, "Time");
     buildControls(time, rest, values, onChange);
     return;
@@ -818,7 +822,10 @@ function selectBehavior(id: string, paramsOverride?: ParamValues): void {
     lastParamsByBehavior.set(currentBehavior.id, currentParams);
   }
   currentBehavior = behavior;
-  currentParams = paramsOverride ?? lastParamsByBehavior.get(behavior.id) ?? defaultParamValues(behavior.params);
+  currentParams = {
+    ...defaultParamValues(behavior.params),
+    ...(paramsOverride ?? lastParamsByBehavior.get(behavior.id) ?? {}),
+  };
   if (paramsOverride) lastParamsByBehavior.set(behavior.id, currentParams);
   if (behavior.id === "shift") {
     const treatment = currentParams.treatment as string;
@@ -1387,6 +1394,7 @@ const BLOOM_OPENING: ParamValues = {
   overlap: 52,
   revealAmount: 62,
   resolveAmount: 46,
+  resolveLimit: 100,
   speed: 0.85,
   treatment: "clean",
   imageAware: "off",

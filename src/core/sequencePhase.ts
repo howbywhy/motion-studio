@@ -87,3 +87,20 @@ export function sequenceEnvelope(
   if (p <= holdUntil) return { behaviorPhase: 0.5, resolve: 0 };
   return { behaviorPhase: 0.5, resolve: smoothstep((p - holdUntil) / (1 - holdUntil)) };
 }
+
+/** Bloom terminal coverage 0–100. Missing/invalid = 100 (legacy identity). */
+export function clampResolveLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 100;
+  return Math.min(100, Math.max(0, value));
+}
+
+/**
+ * Remap sequence-stage mask expansion so the settle window still runs
+ * in full, but terminates at `resolveLimit` instead of whole B.
+ *
+ * This is not Bloom `resolveAmount` (field coalesce at peak) and not a
+ * canvas opacity crossfade. 100 is pixel-identical to the unclamped envelope.
+ */
+export function limitedSequenceResolve(resolve: number, resolveLimit: unknown): number {
+  return clamp01(resolve) * (clampResolveLimit(resolveLimit) / 100);
+}

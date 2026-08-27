@@ -1,6 +1,6 @@
 import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
-import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
+import { getSeamCandidate, limitedSequenceResolve, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { paintGoldenMasterRegistration } from "./globalRegistration";
@@ -1368,7 +1368,8 @@ export class Renderer {
       this.params.treatment as string | undefined,
       mapping.localPhase,
     );
-    this.applySequenceResolve(composedCtx, env.resolve);
+    const resolveLimit = this.behavior?.id === "bloom" ? this.params.resolveLimit : 100;
+    this.applySequenceResolve(composedCtx, limitedSequenceResolve(env.resolve, resolveLimit));
     const tResolve = mark();
     this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tMask, tComposite, tResolve);
   }

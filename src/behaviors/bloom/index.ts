@@ -18,6 +18,7 @@ const params: ParamDef[] = [
   { type: "range", key: "overlap", label: "Overlap", min: 0, max: 100, step: 1, default: 65, unit: "%" },
   { type: "range", key: "revealAmount", label: "Reveal Amount", min: 0, max: 100, step: 1, default: 78, unit: "%" },
   { type: "range", key: "resolveAmount", label: "Resolve Amount", min: 0, max: 100, step: 1, default: 55, unit: "%" },
+  { type: "range", key: "resolveLimit", label: "Resolve Limit", min: 0, max: 100, step: 1, default: 100, unit: "%" },
   { type: "range", key: "speed", label: "Speed", min: 0.1, max: 3, step: 0.05, default: 1, unit: "×" },
   // Structural — not rendered in the generic sidebar panel; the UI gives
   // these their own compact controls (see visibleParams below).
