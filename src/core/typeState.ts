@@ -42,20 +42,20 @@ export function defaultTypeState(): TypeState {
     mode: "responsive",
     scale: 50,
     spread: 50,
-    rhythm: 28,
+    rhythm: 0,
     weight: TYPE_WEIGHT_DEFAULT,
     color: "#f3efe6",
     opacity: 100,
     x: 0,
     y: 0,
-    inMotion: "rise",
-    outMotion: "rise",
-    typeMotion: "both",
-    stagger: 40,
-    inPoint: 10,
-    outPoint: 90,
-    inDuration: 0.7,
-    outDuration: 0.7,
+    inMotion: "none",
+    outMotion: "none",
+    typeMotion: "position",
+    stagger: 0,
+    inPoint: 0,
+    outPoint: 100,
+    inDuration: 0.15,
+    outDuration: 0.15,
   };
 }
 
@@ -70,16 +70,6 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
   const align = raw.align === "left" || raw.align === "right" || raw.align === "center" ? raw.align : d.align;
   const valign = raw.valign === "top" || raw.valign === "bottom" || raw.valign === "center" ? raw.valign : d.valign;
   const mode = raw.mode === "fixed" || raw.mode === "responsive" ? raw.mode : d.mode;
-  const inMotion: TypeInMotion =
-    raw.inMotion === "none" || raw.inMotion === "rise" || raw.inMotion === "slide" || raw.inMotion === "reveal" || raw.inMotion === "assemble"
-      ? raw.inMotion
-      : d.inMotion;
-  const outMotion: TypeOutMotion =
-    raw.outMotion === "none" || raw.outMotion === "rise" || raw.outMotion === "slide" || raw.outMotion === "reveal" || raw.outMotion === "disperse"
-      ? raw.outMotion
-      : d.outMotion;
-  const typeMotion: TypeMotionKind =
-    raw.typeMotion === "position" || raw.typeMotion === "variable" || raw.typeMotion === "both" ? raw.typeMotion : d.typeMotion;
   const color = typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : d.color;
   return {
     enabled: raw.enabled === true,
@@ -95,13 +85,13 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
     opacity: num(raw.opacity, 0, 100, d.opacity),
     x: num(raw.x, -50, 50, d.x),
     y: num(raw.y, -50, 50, d.y),
-    inMotion,
-    outMotion,
-    typeMotion,
-    stagger: num(raw.stagger, 0, 100, d.stagger),
-    inPoint: num(raw.inPoint, 0, 100, d.inPoint),
-    outPoint: num(raw.outPoint, 0, 100, d.outPoint),
-    inDuration: num(raw.inDuration, 0.15, 2, d.inDuration),
-    outDuration: num(raw.outDuration, 0.15, 2, d.outDuration),
+    inMotion: "none",
+    outMotion: "none",
+    typeMotion: "position",
+    stagger: 0,
+    inPoint: 0,
+    outPoint: 100,
+    inDuration: 0.15,
+    outDuration: 0.15,
   };
 }

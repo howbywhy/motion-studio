@@ -1428,6 +1428,7 @@ Object.assign(window, {
       renderer.setRegistrationEnabled(on);
       registrationBtn.classList.toggle("active", on);
     },
+    setTypeBeforeRegistration: (on: boolean) => renderer.setTypeBeforeRegistration(on),
     setRegistrationStrategy: (mode: "tonal" | "offset" | "edge") => renderer.setRegistrationStrategy(mode),
     getRegistrationStrategy: () => renderer.getRegistrationStrategy(),
     setBW: (on: boolean) => {

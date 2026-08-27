@@ -243,13 +243,12 @@ export function buildTypePanel(
     { value: "bottom", label: "Bottom" },
   ], initial.valign, (v) => onChange({ valign: v as TypeState["valign"] }));
   const scale = slider(layout, "Scale", 0, 100, 1, initial.scale, "", (v) => onChange({ scale: v }));
-  const spread = slider(layout, "Vertical Spread", 0, 100, 1, initial.spread, "", (v) => onChange({ spread: v }));
-  const rhythm = slider(layout, "Horizontal Rhythm", 0, 100, 1, initial.rhythm, "", (v) => onChange({ rhythm: v }));
+  const spread = slider(layout, "Spread", 0, 100, 1, initial.spread, "", (v) => onChange({ spread: v }));
+  const rhythm = slider(layout, "Rhythm", 0, 100, 1, initial.rhythm, "", (v) => onChange({ rhythm: v }));
   const xy = cartesianPad(layout, initial.x, initial.y, (x, y) => onChange({ x, y }));
 
   const type = group(container, "Type", true);
   const weight = slider(type, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, "", (v) => onChange({ weight: v }));
-  const opacity = slider(type, "Opacity", 0, 100, 1, initial.opacity, "", (v) => onChange({ opacity: v }));
   const colorRow = document.createElement("div");
   colorRow.className = "control-row bg-colour-row";
   const colorLab = document.createElement("label");
@@ -262,32 +261,6 @@ export function buildTypePanel(
   color.addEventListener("input", () => onChange({ color: color.value }));
   colorRow.appendChild(color);
   type.appendChild(colorRow);
-
-  const motion = group(container, "Motion", false);
-  const inSeg = seg(motion, "In", [
-    { value: "none", label: "None" },
-    { value: "rise", label: "Rise" },
-    { value: "slide", label: "Slide" },
-    { value: "reveal", label: "Reveal" },
-    { value: "assemble", label: "Assemble" },
-  ], initial.inMotion, (v) => onChange({ inMotion: v as TypeState["inMotion"] }));
-  const outSeg = seg(motion, "Out", [
-    { value: "none", label: "None" },
-    { value: "rise", label: "Rise" },
-    { value: "slide", label: "Slide" },
-    { value: "reveal", label: "Reveal" },
-    { value: "disperse", label: "Disperse" },
-  ], initial.outMotion, (v) => onChange({ outMotion: v as TypeState["outMotion"] }));
-  const kindSeg = seg(motion, "Type Motion", [
-    { value: "position", label: "Position" },
-    { value: "variable", label: "Variable" },
-    { value: "both", label: "Both" },
-  ], initial.typeMotion, (v) => onChange({ typeMotion: v as TypeState["typeMotion"] }));
-  const stagger = slider(motion, "Stagger", 0, 100, 1, initial.stagger, "", (v) => onChange({ stagger: v }));
-  const inPoint = slider(motion, "In Point", 0, 100, 1, initial.inPoint, "%", (v) => onChange({ inPoint: v }));
-  const outPoint = slider(motion, "Out Point", 0, 100, 1, initial.outPoint, "%", (v) => onChange({ outPoint: v }));
-  const inDur = slider(motion, "In Duration", 0.15, 2, 0.05, initial.inDuration, "s", (v) => onChange({ inDuration: v }));
-  const outDur = slider(motion, "Out Duration", 0.15, 2, 0.05, initial.outDuration, "s", (v) => onChange({ outDuration: v }));
 
   function markSeg(el: HTMLDivElement, value: string): void {
     for (const b of el.querySelectorAll("button")) {
@@ -314,22 +287,7 @@ export function buildTypePanel(
       xy.set(s.x, s.y);
       weight.input.value = String(s.weight);
       weight.valueEl.textContent = String(s.weight);
-      opacity.input.value = String(s.opacity);
-      opacity.valueEl.textContent = String(s.opacity);
       color.value = s.color;
-      markSeg(inSeg, s.inMotion);
-      markSeg(outSeg, s.outMotion);
-      markSeg(kindSeg, s.typeMotion);
-      stagger.input.value = String(s.stagger);
-      stagger.valueEl.textContent = String(s.stagger);
-      inPoint.input.value = String(s.inPoint);
-      inPoint.valueEl.textContent = `${s.inPoint}%`;
-      outPoint.input.value = String(s.outPoint);
-      outPoint.valueEl.textContent = `${s.outPoint}%`;
-      inDur.input.value = String(s.inDuration);
-      inDur.valueEl.textContent = `${Number(s.inDuration.toFixed(2))}s`;
-      outDur.input.value = String(s.outDuration);
-      outDur.valueEl.textContent = `${Number(s.outDuration.toFixed(2))}s`;
     },
   };
 }

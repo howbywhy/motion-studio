@@ -1,3 +1,4 @@
+/** COMPAT — typography motion. Product UI is static; Renderer does not call this. */
 import type { TypeInMotion, TypeOutMotion, TypeMotionKind, TypeState } from "./typeState";
 
 export interface TypeLineMotion {

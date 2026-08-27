@@ -23,12 +23,18 @@ export interface TypeLayout {
   offsetY: number;
 }
 
+interface BreakCache {
+  key: string;
+  lines: string[];
+}
+
 interface CacheEntry {
   key: string;
   layout: TypeLayout;
 }
 
 const UNIT = 1000;
+let breakCache: BreakCache | null = null;
 let cache: CacheEntry | null = null;
 let measureCtx: CanvasRenderingContext2D | null = null;
 
@@ -89,12 +95,14 @@ function partitions(words: string[], maxLines: number): string[][] {
 
 function widthFill(scale: number): number {
   const t = Math.min(1, Math.max(0, scale / 100));
-  return 0.64 + t * 0.52;
+  return 0.70 + t * 0.56;
 }
 
 function overscanV(scale: number): number {
   return (Math.min(1, Math.max(0, scale / 100))) * 0.05;
 }
+
+const BREAK_FILL = 1;
 
 function sizeForLines(lines: string[], weight: number, maxW: number): number {
   const probe = 100;
@@ -126,12 +134,12 @@ function scoreCandidate(lines: string[], fontSize: number, unitW: number, weight
   const stackedSingles = n >= 3 && singles === n ? 1 : 0;
   const tiny = fontSize < unitW * 0.1 ? 1 : 0;
   return (
-    (fontSize / unitW) * 240 +
-    fill * 12 +
-    balance * 14 +
-    (4 - Math.min(4, n)) * 4 -
+    (fontSize / unitW) * 260 +
+    fill * 10 +
+    balance * 3 +
+    (4 - Math.min(4, n)) * 5 -
     weak * 32 -
-    tiny * 36 -
+    tiny * 40 -
     stackedSingles * 28 -
     Math.max(0, n - 3) * 12
   );
@@ -161,7 +169,13 @@ function cartesianLines(groups: string[][][]): string[][] {
 }
 
 function breakCopy(blocks: string[][], weight: number, maxW: number, unitW: number): string[] {
-  const groups = blocks.map(blockCandidates).filter((g) => g.length > 0);
+  const groups = blocks
+    .map((words) => {
+      const chars = words.join(" ").length;
+      if (blocks.length > 1 && chars <= 24) return [[words.join(" ")]];
+      return blockCandidates(words);
+    })
+    .filter((g) => g.length > 0);
   const candidates = cartesianLines(groups);
   let best = candidates[0] ?? blocks.map((b) => b.join(" "));
   let bestScore = -Infinity;
@@ -176,9 +190,13 @@ function breakCopy(blocks: string[][], weight: number, maxW: number, unitW: numb
   return best;
 }
 
-function layoutKey(state: TypeState, aspectKey: number): string {
+function breakKey(state: TypeState): string {
+  return ["v6b", state.text, state.mode, state.weight].join("\t");
+}
+
+function placeKey(state: TypeState, aspectKey: number): string {
   return [
-    "v5",
+    "v6p",
     aspectKey,
     state.text,
     state.align,
@@ -255,7 +273,7 @@ export function layoutTypography(state: TypeState, canvasW: number, canvasH: num
   const aspectKey = Math.round((h / w) * 10000);
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
-  const key = layoutKey(state, aspectKey);
+  const key = placeKey(state, aspectKey);
   const ox = (state.x / 50) * unitW * 0.18;
   const oy = (state.y / 50) * unitH * 0.18;
   if (cache && cache.key === key) {
@@ -265,13 +283,20 @@ export function layoutTypography(state: TypeState, canvasW: number, canvasH: num
   const blocks = tokenize(text).filter((b) => b.length > 0);
   if (blocks.length === 0) return null;
 
+  const bk = breakKey(state);
+  let lines: string[];
+  if (state.mode === "fixed") {
+    lines = blocks.map((words) => words.join(" "));
+  } else if (breakCache && breakCache.key === bk) {
+    lines = breakCache.lines;
+  } else {
+    lines = breakCopy(blocks, state.weight, unitW * BREAK_FILL, unitW);
+    breakCache = { key: bk, lines };
+  }
+  if (lines.length === 0) return null;
+
   const fill = state.mode === "fixed" ? 0.7 : widthFill(state.scale);
   const maxW = unitW * fill;
-  const lines =
-    state.mode === "fixed"
-      ? blocks.map((words) => words.join(" "))
-      : breakCopy(blocks, state.weight, maxW, unitW);
-  if (lines.length === 0) return null;
 
   const vBleed = state.mode === "responsive" ? overscanV(state.scale) : 0;
   let fontSize =
@@ -341,6 +366,7 @@ function projectLayout(
 
 export function invalidateTypeLayout(): void {
   cache = null;
+  breakCache = null;
 }
 
 export function typeHasCopy(state: TypeState): boolean {

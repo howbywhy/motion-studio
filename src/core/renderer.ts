@@ -2,10 +2,10 @@ import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
-import { BASE_REGISTRATION_AMOUNT, REACTIVE_REGISTRATION_AMOUNT, getRegistrationStrategy, paintPersistentRegistration, paintReactiveRegistration, prepareGlobalPrintInk, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
+import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
+import { paintLockedGlobalRegistration, prepareLockedGlobalRegistration } from "./globalRegistration";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypography } from "./typeLayout";
-import { evaluateTypeMotion } from "./typeMotion";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
 import {
   applyFieldInk,
@@ -116,7 +116,7 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * and any area the mask doesn't touch simply shows A (never black, since A
  * always fully covers the frame).
  *
- * Sequence → active pair A/B → Bloom → Registration → Output.
+ * Sequence → active pair A/B → Bloom → LOCKED Global Registration → static Typography → Output.
  * Selective B&W is applied to A/B layers before Bloom.
  * Behaviours never see the sequence array. They still receive two layers.
  *
@@ -124,12 +124,16 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * `composedLayer` (an intermediate canvas) rather than the visible canvas
  * directly — `finalizeOutput` then applies the global, behavior-agnostic
  * output-layer states on top of that, before copying the result onto the
- * visible canvas: behavior render -> persistent registration -> reactive
- * registration -> B&W (if enabled) -> visible canvas. This is what lets
- * Registration/B&W sit "after" any behavior's own composite as a common
- * surface language, without any behavior needing to know they exist. The
- * Show Mask diagnostic bypasses this entirely (it shows the raw field, not
- * a composed photograph, so neither output-layer state applies to it).
+ * visible canvas:
+ *   Bloom compose
+ *   → prepareLockedGlobalRegistration (plates from Bloom-only composed)
+ *   → paintLockedGlobalRegistration (persistent 0.1 + reactive 0.4)
+ *   → static typography
+ *   → visible canvas
+ *
+ * LOCKED VISUAL SYSTEM: do not alter Global Registration algorithm,
+ * constants, plate generation, or this compositing order as part of
+ * unrelated Typography / Bloom / Export work.
  */
 export class Renderer {
   private readonly visible: HTMLCanvasElement;
@@ -169,6 +173,8 @@ export class Renderer {
   private registrationOn = false;
   private printInkDirty = true;
   private typeState: TypeState = defaultTypeState();
+  /** A/B test only. Product is false: Registration then type (historical). */
+  private typeBeforeRegistration = false;
   private bwMode: BwMode = "off";
   private previewDprCap = DEFAULT_PREVIEW_DPR_CAP;
   private readonly bwScratch = makeCanvas();
@@ -508,6 +514,12 @@ export class Renderer {
 
   isRegistrationEnabled(): boolean {
     return this.registrationOn;
+  }
+
+  /** Debug-only compositing swap. Product remains Registration then type. */
+  setTypeBeforeRegistration(on: boolean): void {
+    this.typeBeforeRegistration = on;
+    this.renderFrame();
   }
 
   setTypeState(next: TypeState | Partial<TypeState>): void {
@@ -1383,7 +1395,7 @@ export class Renderer {
     const tPrep0 = mark();
     if (this.registrationOn) {
       if (this.hasLiveSource() || this.printInkDirty) {
-        prepareGlobalPrintInk(
+        prepareLockedGlobalRegistration(
           this.bLayer,
           width,
           height,
@@ -1397,33 +1409,23 @@ export class Renderer {
     }
     const tPrep = mark();
 
-    const type = this.typeState;
-    const layout = layoutTypography(type, width, height);
-    if (layout) {
-      const motion = evaluateTypeMotion(
-        type,
-        this.getLoopPhase(),
-        this.loopSeconds,
-        layout.lines.length,
-        layout.fontSize,
-        width,
-      );
-      paintTypeLayer(composedCtx, layout, motion, type.color, layout.opacity);
-    }
-    const tType = mark();
+    const paintType = (): void => {
+      const type = this.typeState;
+      const layout = layoutTypography(type, width, height);
+      if (!layout) return;
+      paintTypeLayer(composedCtx, layout, type.color, layout.opacity);
+    };
+
+    if (this.typeBeforeRegistration) paintType();
+    const tTypeEarly = mark();
 
     if (this.registrationOn) {
-      paintPersistentRegistration(composedCtx, this.composedLayer, width, height, BASE_REGISTRATION_AMOUNT);
-      paintReactiveRegistration(
-        composedCtx,
-        this.composedLayer,
-        this.maskLayer,
-        width,
-        height,
-        REACTIVE_REGISTRATION_AMOUNT,
-      );
+      paintLockedGlobalRegistration(composedCtx, this.maskLayer, width, height);
     }
     const tReg = mark();
+
+    if (!this.typeBeforeRegistration) paintType();
+    const tType = mark();
 
     this.ctx.clearRect(0, 0, width, height);
     this.ctx.drawImage(this.composedLayer, 0, 0);
@@ -1438,10 +1440,10 @@ export class Renderer {
         compositeMs: tComposite - tMask,
         resolveMs: tResolve - tComposite,
         printPrepMs: tPrep - tPrep0,
-        typeMs: tType - tPrep,
-        registrationMs: tReg - tType,
+        typeMs: this.typeBeforeRegistration ? tTypeEarly - tPrep : tType - tReg,
+        registrationMs: this.typeBeforeRegistration ? tReg - tTypeEarly : tReg - tPrep,
         bwMs: tBw - tMedia,
-        outputMs: tOut - tReg,
+        outputMs: tOut - tType,
         totalMs: tOut - t0,
       };
     }

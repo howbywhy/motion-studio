@@ -1,12 +1,15 @@
-/** FIELD-informed global Print.
+/** INTERNAL — Global Registration plate engine.
  *
- * Structure (unchanged): two related binary mark plates, neighbouring
- * seeds/frequencies, occupancy from coarse luminance of the composed
- * frame. The photograph stays put; only the impressions misalign.
+ * LOCKED. Imported only by `globalRegistration.ts`.
+ * Do not call from Typography, Bloom, Export, or Renderer directly.
+ * Do not change frequencies, seeds, occupancy, tone maps, or blit mixes.
  *
- * Colour: plates are alpha. Paint composites an image-derived tonal
- * impression — local colour, slightly displaced — rather than black
- * marks over the photograph.
+ * Historical source: e9e49f92ff0590ab3ba780bd64ba019a6be0b005
+ *
+ * Structure: two related binary mark plates, neighbouring seeds/frequencies,
+ * occupancy from coarse luminance of the composed frame. Paint composites
+ * an image-derived tonal impression — local colour, slightly displaced —
+ * rather than black marks over the photograph.
  */
 import { hash2, markCellPx } from "../sources/field";
 
