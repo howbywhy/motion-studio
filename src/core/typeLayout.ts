@@ -2,6 +2,7 @@ import { switzerFont, SWITZER_FAMILY } from "./typeFont";
 import type {
   TypeAlign,
   TypeAnchor,
+  TypeBlendMode,
   TypeBlock,
   TypeColumn,
   TypeState,
@@ -36,6 +37,7 @@ export interface TypeLayout {
   offsetX: number;
   offsetY: number;
   composition: TypeStyle;
+  blendMode: TypeBlendMode;
 }
 
 const UNIT = 1000;
@@ -670,6 +672,7 @@ function layoutBlock(
     offsetX: 0,
     offsetY: 0,
     composition: block.composition,
+    blendMode: block.blendMode,
   };
   return clampProjected(projectLayout(layout, w, h), w, h, block.weight);
 }
@@ -726,6 +729,7 @@ function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): Type
     offsetX: 0,
     offsetY: 0,
     composition: unit.composition,
+    blendMode: unit.blendMode,
   };
 }
 
@@ -797,4 +801,15 @@ export function typeInkBox(layout: TypeLayout): { l: number; t: number; r: numbe
     layout.lines.map((l) => l.y),
     prepared,
   );
+}
+
+/** Layout fingerprint. Excludes colour, opacity, and blend. */
+export function typeGeometryKey(state: TypeState, canvasW: number, canvasH: number): string {
+  return layoutTypeDocument(state, canvasW, canvasH)
+    .map((item) => {
+      const l = item.layout;
+      const lines = l.lines.map((line) => `${line.text}:${line.x.toFixed(3)}:${line.y.toFixed(3)}:${line.unit}`).join("|");
+      return `${item.index}\t${l.fontSize.toFixed(4)}\t${l.tracking.toFixed(4)}\t${l.weight}\t${lines}`;
+    })
+    .join("\n");
 }

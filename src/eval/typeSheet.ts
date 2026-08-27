@@ -7,7 +7,7 @@ import {
   type TypeDistribution,
   type TypeState,
 } from "../core/typeState";
-import { editorialColumnsPx, layoutTypography, layoutTypeDocument, opticalFramePx, typeInkBox } from "../core/typeLayout";
+import { editorialColumnsPx, layoutTypography, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 
@@ -156,6 +156,7 @@ export interface SheetReport {
   overflow: { ink: number; pixels: number };
   exportParity: { copy: string; match: boolean }[];
   needType03: { evidence: string[]; verdict: "two-enough" | "three-would-help" };
+  geometryUnchangedByBlend: boolean;
   elapsedMs: number;
 }
 
@@ -406,6 +407,14 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
     overflow: { ink, pixels },
     exportParity,
     needType03,
+    geometryUnchangedByBlend: typeGeometryKey(dateState, 500, 625) ===
+      typeGeometryKey(clampTypeState({
+        enabled: true,
+        blocks: [
+          { ...dateState.blocks[0], blendMode: "difference" },
+          dateState.blocks[1],
+        ],
+      }), 500, 625),
     elapsedMs: Math.round(performance.now() - t0),
   };
 }

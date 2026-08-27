@@ -7,6 +7,7 @@ export type TypeRole = TypeStyle;
 export type TypeComposition = TypeStyle;
 export type TypeDistribution = "packed" | "between";
 export type TypeColumn = "narrow" | "medium" | "wide";
+export type TypeBlendMode = "normal" | "multiply" | "screen" | "overlay" | "difference" | "exclusion";
 export type TypeMode = "responsive" | "fixed";
 
 export interface TypeBlock {
@@ -25,6 +26,8 @@ export interface TypeBlock {
   padding: number;
   weight: number;
   color: string;
+  /** Paint only. Never feeds layout. */
+  blendMode: TypeBlendMode;
   opacity: number;
   /** COMPAT — derived from `anchor`. */
   align: TypeAlign;
@@ -55,6 +58,28 @@ export const TYPE_ANCHORS: TypeAnchor[] = ["tl", "tc", "tr", "ml", "mc", "mr", "
 export const TYPE_TEXT_ALIGNS: TypeTextAlign[] = ["left", "center", "right"];
 export const TYPE_DISTRIBUTIONS: TypeDistribution[] = ["packed", "between"];
 export const TYPE_COLUMNS: TypeColumn[] = ["narrow", "medium", "wide"];
+export const TYPE_BLEND_MODES: TypeBlendMode[] = [
+  "normal",
+  "multiply",
+  "screen",
+  "overlay",
+  "difference",
+  "exclusion",
+];
+
+export function canvasBlendOp(mode: TypeBlendMode): GlobalCompositeOperation {
+  if (mode === "multiply") return "multiply";
+  if (mode === "screen") return "screen";
+  if (mode === "overlay") return "overlay";
+  if (mode === "difference") return "difference";
+  if (mode === "exclusion") return "exclusion";
+  return "source-over";
+}
+
+function parseBlendMode(raw: unknown): TypeBlendMode {
+  if (typeof raw === "string" && (TYPE_BLEND_MODES as string[]).includes(raw)) return raw as TypeBlendMode;
+  return "normal";
+}
 
 function num(v: unknown, lo: number, hi: number, fb: number): number {
   const n = typeof v === "number" ? v : Number(v);
@@ -229,6 +254,7 @@ export function defaultTypeBlock(enabled: boolean, style: TypeStyle = "headline"
     padding: defs.padding,
     weight: defs.weight,
     color: "#f3efe6",
+    blendMode: "normal",
     opacity: 100,
     align: placed.align,
     valign: placed.valign,
@@ -267,6 +293,7 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
     padding: num((raw as { padding?: unknown }).padding, 0, 100, d.padding),
     weight: num(raw.weight, TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, d.weight),
     color,
+    blendMode: parseBlendMode((raw as { blendMode?: unknown }).blendMode),
     opacity: num(raw.opacity, 0, 100, d.opacity),
     align: placed.align,
     valign: placed.valign,
@@ -299,6 +326,7 @@ const BLOCK_PATCH_KEYS = [
   "padding",
   "weight",
   "color",
+  "blendMode",
   "opacity",
   "align",
   "valign",

@@ -4,9 +4,11 @@ import {
   clampTypeState,
   defaultTypeState,
   TYPE_ANCHORS,
+  TYPE_BLEND_MODES,
   TYPE_WEIGHT_MAX,
   TYPE_WEIGHT_MIN,
   type TypeAnchor,
+  type TypeBlendMode,
   type TypeBlock,
   type TypeColumn,
   type TypeDistribution,
@@ -14,6 +16,15 @@ import {
   type TypeStyle,
   type TypeTextAlign,
 } from "../core/typeState";
+
+const BLEND_LABEL: Record<TypeBlendMode, string> = {
+  normal: "Normal",
+  multiply: "Multiply",
+  screen: "Screen",
+  overlay: "Overlay",
+  difference: "Difference",
+  exclusion: "Exclusion",
+};
 
 function seg(
   parent: HTMLElement,
@@ -101,8 +112,9 @@ function frameAlignPad(
   lab.textContent = "Frame Align";
   row.appendChild(lab);
 
-  const SIZE = 88;
-  const PAD = 14;
+  const SIZE = 84;
+  const PAD = 12;
+  const CELL = (SIZE - PAD * 2) / 2;
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${SIZE} ${SIZE}`);
@@ -117,19 +129,33 @@ function frameAlignPad(
   bg.setAttribute("y", "1");
   bg.setAttribute("width", String(SIZE - 2));
   bg.setAttribute("height", String(SIZE - 2));
+  bg.setAttribute("rx", "5");
   bg.setAttribute("class", "type-xy-frame");
   svg.appendChild(bg);
 
+  const cells = new Map<TypeAnchor, SVGRectElement>();
   const dots = new Map<TypeAnchor, SVGCircleElement>();
   for (const anchor of TYPE_ANCHORS) {
     const col = anchor[1] === "l" ? 0 : anchor[1] === "r" ? 2 : 1;
     const rowI = anchor[0] === "t" ? 0 : anchor[0] === "b" ? 2 : 1;
     const cx = PAD + (col * (SIZE - PAD * 2)) / 2;
     const cy = PAD + (rowI * (SIZE - PAD * 2)) / 2;
+    const cell = document.createElementNS(svgNS, "rect");
+    const half = CELL * 0.42;
+    cell.setAttribute("x", String(cx - half));
+    cell.setAttribute("y", String(cy - half));
+    cell.setAttribute("width", String(half * 2));
+    cell.setAttribute("height", String(half * 2));
+    cell.setAttribute("rx", "3");
+    cell.setAttribute("class", "type-anchor-cell");
+    cell.setAttribute("data-anchor", anchor);
+    svg.appendChild(cell);
+    cells.set(anchor, cell);
+
     const dot = document.createElementNS(svgNS, "circle");
     dot.setAttribute("cx", String(cx));
     dot.setAttribute("cy", String(cy));
-    dot.setAttribute("r", "4");
+    dot.setAttribute("r", "3.5");
     dot.setAttribute("data-anchor", anchor);
     dot.setAttribute("class", "type-anchor-dot");
     svg.appendChild(dot);
@@ -137,37 +163,47 @@ function frameAlignPad(
   }
 
   function mark(anchor: TypeAnchor): void {
-    for (const [id, dot] of dots) {
-      dot.classList.toggle("active", id === anchor);
-    }
+    for (const [id, cell] of cells) cell.classList.toggle("active", id === anchor);
+    for (const [id, dot] of dots) dot.classList.toggle("active", id === anchor);
   }
   mark(current);
 
-  function fromPointer(clientX: number, clientY: number): void {
+  function hover(anchor: TypeAnchor | null): void {
+    for (const [id, cell] of cells) cell.classList.toggle("hover", id === anchor);
+    for (const [id, dot] of dots) dot.classList.toggle("hover", id === anchor);
+  }
+
+  function fromPointer(clientX: number, clientY: number, commit: boolean): void {
     const rect = svg.getBoundingClientRect();
     const px = ((clientX - rect.left) / rect.width) * SIZE - SIZE / 2;
     const py = ((clientY - rect.top) / rect.height) * SIZE - SIZE / 2;
     const nx = (px / (SIZE / 2 - PAD)) * 50;
     const ny = (py / (SIZE / 2 - PAD)) * 50;
     const next = nearestAnchor(nx, ny);
-    mark(next);
-    onChange(next);
+    hover(next);
+    if (commit) {
+      mark(next);
+      onChange(next);
+    }
   }
 
   let dragging = false;
   svg.addEventListener("pointerdown", (e) => {
     dragging = true;
     svg.setPointerCapture(e.pointerId);
-    fromPointer(e.clientX, e.clientY);
+    fromPointer(e.clientX, e.clientY, true);
   });
   svg.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    fromPointer(e.clientX, e.clientY);
+    fromPointer(e.clientX, e.clientY, dragging);
+  });
+  svg.addEventListener("pointerleave", () => {
+    if (!dragging) hover(null);
   });
   const stop = (e: PointerEvent): void => {
     if (!dragging) return;
     dragging = false;
     svg.releasePointerCapture(e.pointerId);
+    hover(null);
   };
   svg.addEventListener("pointerup", stop);
   svg.addEventListener("pointercancel", stop);
@@ -183,25 +219,65 @@ function markSeg(el: HTMLDivElement, value: string): void {
   }
 }
 
+function fitTextarea(el: HTMLTextAreaElement): void {
+  el.style.height = "auto";
+  el.style.height = `${Math.min(96, Math.max(48, el.scrollHeight))}px`;
+}
+
+function styleLabel(style: TypeStyle): string {
+  if (style === "paragraph") return "Paragraph";
+  if (style === "footnote") return "Footnote";
+  return "Headline";
+}
+
+function blockSummary(block: TypeBlock): string {
+  const parts = [styleLabel(block.composition)];
+  if (block.composition === "headline" && authoredLineCount(block.text) >= 2 && block.distribution === "between") {
+    parts.push("Between");
+  }
+  if (block.composition === "paragraph") {
+    parts.push(block.column === "narrow" ? "Narrow" : block.column === "wide" ? "Wide" : "Medium");
+  }
+  parts.push(block.anchor.toUpperCase());
+  return parts.join(" · ");
+}
+
 function buildBlock(
   parent: HTMLElement,
   index: 0 | 1,
   initial: TypeBlock,
+  expanded: boolean,
   onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean }) => void,
+  onExpand: (next: 0 | 1 | null) => void,
+  onEnabled: (on: boolean) => void,
 ): {
   root: HTMLElement;
+  setExpanded: (open: boolean) => void;
   sync: (block: TypeBlock) => void;
 } {
   const root = document.createElement("div");
   root.className = "type-block";
   root.classList.toggle("is-off", !initial.enabled);
+  root.classList.toggle("is-collapsed", !expanded);
 
   const head = document.createElement("div");
   head.className = "type-block-head";
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  head.setAttribute("aria-expanded", expanded && initial.enabled ? "true" : "false");
+
+  const titles = document.createElement("div");
+  titles.className = "type-block-titles";
   const title = document.createElement("span");
   title.className = "type-block-title";
   title.textContent = index === 0 ? "Type 01" : "Type 02";
-  head.appendChild(title);
+  titles.appendChild(title);
+  const summary = document.createElement("span");
+  summary.className = "type-block-summary";
+  summary.textContent = blockSummary(initial);
+  titles.appendChild(summary);
+  head.appendChild(titles);
+
   const onBtn = document.createElement("button");
   onBtn.type = "button";
   onBtn.className = "diagnostic-toggle type-block-on";
@@ -211,12 +287,31 @@ function buildBlock(
     root.classList.toggle("is-off", !on);
   }
   paintOn(initial.enabled);
-  onBtn.addEventListener("click", () => {
+  onBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
     const next = !onBtn.classList.contains("active");
     paintOn(next);
+    onEnabled(next);
     onChange({ activeIndex: index, blockEnabled: next });
   });
   head.appendChild(onBtn);
+
+  const chevron = document.createElement("span");
+  chevron.className = "type-block-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  head.appendChild(chevron);
+
+  function toggleExpand(): void {
+    if (root.classList.contains("is-off")) return;
+    const open = !root.classList.contains("is-collapsed");
+    onExpand(open ? null : index);
+  }
+  head.addEventListener("click", toggleExpand);
+  head.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    toggleExpand();
+  });
   root.appendChild(head);
 
   const body = document.createElement("div");
@@ -230,12 +325,15 @@ function buildBlock(
   textRow.appendChild(textLab);
   const textarea = document.createElement("textarea");
   textarea.className = "type-text";
-  textarea.rows = 4;
+  textarea.rows = 2;
   textarea.value = initial.text;
   textarea.addEventListener("input", () => {
+    fitTextarea(textarea);
     paintContext();
+    refreshSummary();
     onChange({ activeIndex: index, text: textarea.value });
   });
+  textarea.addEventListener("keydown", (e) => e.stopPropagation());
   textRow.appendChild(textarea);
   body.appendChild(textRow);
 
@@ -254,8 +352,28 @@ function buildBlock(
     currentDist = (patch.distribution ?? currentDist) as TypeDistribution;
     applyPatchToControls(patch);
     paintContext();
+    refreshSummary();
     onChange({ activeIndex: index, ...patch });
   });
+
+  const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
+  const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
+
+  const trackingH = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+  const leading = slider(body, "Leading", 0, 100, 1, initial.leading, (v) => onChange({ activeIndex: index, leading: v }));
+  const trackingP = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+  const trackingF = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+
+  const distSeg = seg(body, "Distribution", [
+    { value: "packed", label: "Packed" },
+    { value: "between", label: "Between" },
+  ], initial.distribution, (v) => {
+    currentDist = v as TypeDistribution;
+    paintContext();
+    refreshSummary();
+    onChange({ activeIndex: index, distribution: currentDist });
+  });
+  const gap = slider(body, "Gap", 0, 100, 1, initial.gap, (v) => onChange({ activeIndex: index, gap: v }));
 
   const alignSeg = seg(body, "Text Align", [
     { value: "left", label: "Left" },
@@ -263,47 +381,29 @@ function buildBlock(
     { value: "right", label: "Right" },
   ], initial.textAlign, (v) => onChange({ activeIndex: index, textAlign: v as TypeTextAlign }));
 
-  const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
-  const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
-
-  const headlineCtx = document.createElement("div");
-  headlineCtx.className = "type-ctx";
-  body.appendChild(headlineCtx);
-  const trackingH = slider(headlineCtx, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
-  const gap = slider(headlineCtx, "Gap", 0, 100, 1, initial.gap, (v) => onChange({ activeIndex: index, gap: v }));
-  const distSeg = seg(headlineCtx, "Distribution", [
-    { value: "packed", label: "Packed" },
-    { value: "between", label: "Between" },
-  ], initial.distribution, (v) => {
-    currentDist = v as TypeDistribution;
-    paintContext();
-    onChange({ activeIndex: index, distribution: currentDist });
+  const pos = frameAlignPad(body, initial.anchor, (anchor) => {
+    currentAnchor = anchor;
+    refreshSummary();
+    onChange({ activeIndex: index, anchor });
   });
 
-  const paraCtx = document.createElement("div");
-  paraCtx.className = "type-ctx";
-  body.appendChild(paraCtx);
-  const widthSeg = seg(paraCtx, "Width", [
+  const widthSeg = seg(body, "Width", [
     { value: "narrow", label: "Narrow" },
     { value: "medium", label: "Medium" },
     { value: "wide", label: "Wide" },
-  ], initial.column, (v) => onChange({ activeIndex: index, column: v as TypeColumn }));
-  const leading = slider(paraCtx, "Leading", 0, 100, 1, initial.leading, (v) => onChange({ activeIndex: index, leading: v }));
-  const trackingP = slider(paraCtx, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
-
-  const footCtx = document.createElement("div");
-  footCtx.className = "type-ctx";
-  body.appendChild(footCtx);
-  const trackingF = slider(footCtx, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
-
-  const pos = frameAlignPad(body, initial.anchor, (anchor) => {
-    currentAnchor = anchor;
-    onChange({ activeIndex: index, anchor });
+  ], initial.column, (v) => {
+    refreshSummary();
+    onChange({ activeIndex: index, column: v as TypeColumn });
   });
+
   const padding = slider(body, "Padding", 0, 100, 1, initial.padding, (v) => onChange({ activeIndex: index, padding: v }));
 
+  const appear = document.createElement("div");
+  appear.className = "type-appear";
+  body.appendChild(appear);
+
   const colorRow = document.createElement("div");
-  colorRow.className = "control-row bg-colour-row";
+  colorRow.className = "control-row type-appear-row";
   const colorLab = document.createElement("label");
   colorLab.textContent = "Colour";
   colorRow.appendChild(colorLab);
@@ -313,7 +413,30 @@ function buildBlock(
   color.title = "Type colour";
   color.addEventListener("input", () => onChange({ activeIndex: index, color: color.value }));
   colorRow.appendChild(color);
-  body.appendChild(colorRow);
+  appear.appendChild(colorRow);
+
+  const blendRow = document.createElement("div");
+  blendRow.className = "control-row type-appear-row";
+  const blendLab = document.createElement("label");
+  blendLab.textContent = "Blend";
+  blendLab.htmlFor = `type-blend-${index}`;
+  blendRow.appendChild(blendLab);
+  const blend = document.createElement("select");
+  blend.id = `type-blend-${index}`;
+  blend.className = "type-blend";
+  for (const mode of TYPE_BLEND_MODES) {
+    const opt = document.createElement("option");
+    opt.value = mode;
+    opt.textContent = BLEND_LABEL[mode];
+    blend.appendChild(opt);
+  }
+  blend.value = initial.blendMode;
+  blend.addEventListener("change", () => onChange({ activeIndex: index, blendMode: blend.value as TypeBlendMode }));
+  blend.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") blend.blur();
+  });
+  blendRow.appendChild(blend);
+  appear.appendChild(blendRow);
 
   function setTracking(v: number): void {
     trackingH.input.value = String(v);
@@ -352,27 +475,49 @@ function buildBlock(
       currentAnchor = patch.anchor;
       pos.set(patch.anchor);
     }
+    if (patch.blendMode) blend.value = patch.blendMode;
   }
 
   function paintContext(): void {
     const style = currentStyle;
     const rows = authoredLineCount(textarea.value);
-    headlineCtx.hidden = style !== "headline";
-    paraCtx.hidden = style !== "paragraph";
-    footCtx.hidden = style !== "footnote";
     const showDist = style === "headline" && rows >= 2;
+    trackingH.row.hidden = style !== "headline";
+    leading.row.hidden = style !== "paragraph";
+    trackingP.row.hidden = style !== "paragraph";
+    trackingF.row.hidden = style !== "footnote";
     distSeg.parentElement!.hidden = !showDist;
     gap.row.hidden = !showDist || currentDist === "between";
+    widthSeg.parentElement!.hidden = style !== "paragraph";
+  }
+
+  function refreshSummary(): void {
+    summary.textContent = blockSummary({
+      ...initial,
+      text: textarea.value,
+      composition: currentStyle,
+      distribution: currentDist,
+      column: (widthSeg.querySelector("button.active")?.getAttribute("data-value") ?? "medium") as TypeColumn,
+      anchor: currentAnchor,
+    });
+  }
+
+  function setExpanded(open: boolean): void {
+    root.classList.toggle("is-collapsed", !open);
+    head.setAttribute("aria-expanded", open && !root.classList.contains("is-off") ? "true" : "false");
   }
 
   paintContext();
+  fitTextarea(textarea);
   parent.appendChild(root);
 
   return {
     root,
+    setExpanded,
     sync(block: TypeBlock) {
       paintOn(block.enabled);
       textarea.value = block.text;
+      fitTextarea(textarea);
       currentStyle = block.composition;
       currentDist = block.distribution;
       markSeg(styleSeg, block.composition);
@@ -393,7 +538,9 @@ function buildBlock(
       currentAnchor = block.anchor;
       pos.set(block.anchor);
       color.value = block.color;
+      blend.value = block.blendMode;
       paintContext();
+      summary.textContent = blockSummary(block);
     },
   };
 }
@@ -407,9 +554,10 @@ export function buildTypePanel(
   container.className = "type-panel";
 
   let state = clampTypeState(initial);
+  let expanded: 0 | 1 | null = 0;
 
   const head = document.createElement("div");
-  head.className = "panel-label-row";
+  head.className = "panel-label-row type-master";
   const title = document.createElement("label");
   title.className = "panel-label";
   title.textContent = "Typography";
@@ -434,8 +582,24 @@ export function buildTypePanel(
   body.className = "type-panel-body";
   container.appendChild(body);
 
-  const block0 = buildBlock(body, 0, state.blocks[0], onChange);
-  const block1 = buildBlock(body, 1, state.blocks[1], onChange);
+  const applyExpanded = (): void => {
+    block0.setExpanded(expanded === 0);
+    block1.setExpanded(expanded === 1);
+  };
+
+  const block0 = buildBlock(body, 0, state.blocks[0], true, onChange, (next) => {
+    expanded = next;
+    applyExpanded();
+  }, () => {});
+  const block1 = buildBlock(body, 1, state.blocks[1], false, onChange, (next) => {
+    expanded = next;
+    applyExpanded();
+  }, (on) => {
+    if (on) {
+      expanded = 1;
+      applyExpanded();
+    }
+  });
 
   return {
     sync(next: TypeState) {

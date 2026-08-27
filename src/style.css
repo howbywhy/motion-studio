@@ -575,14 +575,29 @@ body {
 .type-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   margin-bottom: 0;
   padding-bottom: 0;
   border-bottom: none;
 }
 
+.type-master {
+  opacity: 0.72;
+  margin-bottom: 2px;
+}
+
+.type-master .panel-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
 .type-panel .control-row {
-  margin-bottom: 10px;
+  margin-bottom: 7px;
+}
+
+.type-panel .control-row label {
+  margin-bottom: 4px;
+  font-size: 10px;
 }
 
 .type-panel .type-seg {
@@ -597,45 +612,27 @@ body {
 
 .type-text {
   width: 100%;
-  min-height: 72px;
-  resize: vertical;
+  min-height: 48px;
+  max-height: 96px;
+  resize: none;
+  overflow-y: auto;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--panel-border);
   border-radius: 4px;
-  padding: 8px;
+  padding: 6px 8px;
   font: inherit;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
-.type-group {
-  border-top: 1px solid var(--panel-border);
-  padding-top: 6px;
-}
-
-.type-group > summary {
-  cursor: pointer;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  list-style: none;
-  margin-bottom: 8px;
-}
-
-.type-group > summary::-webkit-details-marker {
-  display: none;
-}
-
-.type-disabled .type-group,
 .type-disabled .type-panel-body {
   display: none;
 }
 
 .type-block {
   border-top: 1px solid var(--panel-border);
-  padding-top: 10px;
+  padding-top: 8px;
   margin-top: 2px;
 }
 
@@ -643,7 +640,17 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+.type-block-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
 }
 
 .type-block-title {
@@ -653,12 +660,43 @@ body {
   color: var(--text-dim);
 }
 
+.type-block-summary {
+  font-size: 10px;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.type-block.is-off .type-block-summary,
+.type-block.is-off .type-block-chevron {
+  display: none;
+}
+
 .type-block-on {
   margin-left: auto;
   font-size: 9px;
+  cursor: pointer;
 }
 
-.type-block.is-off .type-block-body {
+.type-block-chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-dim);
+  border-bottom: 1.5px solid var(--text-dim);
+  transform: rotate(45deg);
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.type-block.is-collapsed .type-block-chevron {
+  transform: rotate(-45deg);
+  margin-top: 2px;
+}
+
+.type-block.is-off .type-block-body,
+.type-block.is-collapsed .type-block-body {
   display: none;
 }
 
@@ -666,14 +704,53 @@ body {
   opacity: 0.55;
 }
 
+.type-block:not(.is-collapsed):not(.is-off) .type-block-body {
+  margin-top: 8px;
+}
+
 .type-ctx[hidden],
 .type-panel .control-row[hidden] {
   display: none;
 }
 
+.type-appear {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.type-appear-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.type-appear-row label {
+  margin-bottom: 0;
+  min-width: 52px;
+}
+
+.type-appear-row input[type="color"] {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.type-blend {
+  flex: 1;
+  width: auto;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
 .type-xy-svg {
   display: block;
-  border-radius: 4px;
+  border-radius: 5px;
+  cursor: pointer;
 }
 
 .type-xy-frame {
@@ -681,18 +758,25 @@ body {
   stroke: var(--panel-border);
 }
 
-.type-xy-cross {
-  stroke: var(--panel-border);
-  stroke-width: 1;
+.type-anchor-cell {
+  fill: transparent;
 }
 
-.type-xy-puck {
-  fill: var(--text);
+.type-anchor-cell.hover {
+  fill: rgba(232, 232, 234, 0.06);
+}
+
+.type-anchor-cell.active {
+  fill: rgba(232, 232, 234, 0.14);
 }
 
 .type-anchor-dot {
-  fill: var(--panel-border);
+  fill: #3c3c44;
   stroke: none;
+}
+
+.type-anchor-dot.hover {
+  fill: #8b8b93;
 }
 
 .type-anchor-dot.active {

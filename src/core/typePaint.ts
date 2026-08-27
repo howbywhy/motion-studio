@@ -1,5 +1,6 @@
 import { switzerFont, switzerReady } from "./typeFont";
 import { opticalFramePx, type TypeLayout } from "./typeLayout";
+import { canvasBlendOp } from "./typeState";
 
 const overlays: [HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null];
 const overlayCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null];
@@ -121,7 +122,11 @@ export function paintTypeLayer(
 ): void {
   if (layout.lines.length === 0) return;
   if (!switzerReady()) return;
-  dest.drawImage(ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height), 0, 0);
+  const overlay = ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height);
+  const prev = dest.globalCompositeOperation;
+  dest.globalCompositeOperation = canvasBlendOp(layout.blendMode);
+  dest.drawImage(overlay, 0, 0);
+  dest.globalCompositeOperation = prev;
 }
 
 export function disposeTypeScratch(): void {
