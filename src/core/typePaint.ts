@@ -1,10 +1,15 @@
 import { switzerFont, switzerReady } from "./typeFont";
-import { opticalFramePx, type TypeLayout } from "./typeLayout";
+import { opticalFramePx, typeInkBox, type TypeLayout } from "./typeLayout";
 import { canvasBlendOp } from "./typeState";
 
 const overlays: [HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null];
 const overlayCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null];
 const overlayKeys: [string, string] = ["", ""];
+
+const stamps: [HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null];
+const stampCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null];
+const stampKeys: [string, string] = ["", ""];
+const stampOrigin: [{ x: number; y: number } | null, { x: number; y: number } | null] = [null, null];
 
 function layer(existing: HTMLCanvasElement | null, w: number, h: number): HTMLCanvasElement {
   const c = existing ?? document.createElement("canvas");
@@ -109,6 +114,68 @@ function ensureOverlay(
   return overlays[slot]!;
 }
 
+/** Unclipped raster of one composed type block. Duplicates reuse this stamp;
+ * they are graphic instances, not re-laid type. */
+function ensureStamp(
+  layout: TypeLayout,
+  color: string,
+  opacity: number,
+  slot: 0 | 1,
+): { canvas: HTMLCanvasElement; x: number; y: number } {
+  const key = staticKey(layout, color, opacity);
+  const box = typeInkBox(layout);
+  const pad = 2;
+  const x = Math.floor(box.l + layout.offsetX - pad);
+  const y = Math.floor(box.t + layout.offsetY - pad);
+  const w = Math.max(1, Math.ceil(box.r + layout.offsetX + pad) - x);
+  const h = Math.max(1, Math.ceil(box.b + layout.offsetY + pad) - y);
+  if (
+    stamps[slot] &&
+    stampKeys[slot] === key &&
+    stampOrigin[slot] &&
+    stampOrigin[slot]!.x === x &&
+    stampOrigin[slot]!.y === y &&
+    stamps[slot]!.width === w &&
+    stamps[slot]!.height === h
+  ) {
+    return { canvas: stamps[slot]!, x, y };
+  }
+  stamps[slot] = layer(stamps[slot], w, h);
+  stampCtxs[slot] = ctx2d(stamps[slot]!, stampCtxs[slot]);
+  const ctx = stampCtxs[slot]!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(layout.offsetX - x, layout.offsetY - y);
+  drawLines(ctx, layout, color, opacity);
+  ctx.restore();
+  stampKeys[slot] = key;
+  stampOrigin[slot] = { x, y };
+  return { canvas: stamps[slot]!, x, y };
+}
+
+/** Draw a cached type stamp at a translation. No optical-frame clip — copies
+ * may crop at the canvas edge. Does not recompose typography. */
+export function paintTypeStamp(
+  dest: CanvasRenderingContext2D,
+  layout: TypeLayout,
+  color: string,
+  opacity: number,
+  slot: 0 | 1,
+  dx: number,
+  dy: number,
+): void {
+  if (layout.lines.length === 0) return;
+  if (!switzerReady()) return;
+  const stamp = ensureStamp(layout, color, opacity, slot);
+  const prev = dest.globalCompositeOperation;
+  dest.globalCompositeOperation = canvasBlendOp(layout.blendMode);
+  dest.drawImage(stamp.canvas, Math.round(stamp.x + dx), Math.round(stamp.y + dy));
+  dest.globalCompositeOperation = prev;
+}
+
 /** PRODUCT: one clean Switzer silhouette per block. Typography is static.
  * Paints after Registration and must not alter the photographic
  * Registration algorithm (golden master 728ff08). */
@@ -132,10 +199,18 @@ export function paintTypeLayer(
 export function disposeTypeScratch(): void {
   overlayKeys[0] = "";
   overlayKeys[1] = "";
+  stampKeys[0] = "";
+  stampKeys[1] = "";
+  stampOrigin[0] = null;
+  stampOrigin[1] = null;
   for (const slot of [0, 1] as const) {
     if (overlays[slot]) {
       overlays[slot]!.width = 1;
       overlays[slot]!.height = 1;
+    }
+    if (stamps[slot]) {
+      stamps[slot]!.width = 1;
+      stamps[slot]!.height = 1;
     }
   }
 }

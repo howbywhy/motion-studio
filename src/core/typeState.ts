@@ -45,6 +45,10 @@ export interface TypeState {
   enabled: boolean;
   blocks: [TypeBlock, TypeBlock];
   activeIndex: 0 | 1;
+  /** Review experiment. Off is a true paint bypass. */
+  duplicateRhythm: boolean;
+  /** Which block is flattened into the duplicated graphic layer. */
+  duplicateRhythmSource: 0 | 1;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -309,6 +313,8 @@ export function defaultTypeState(): TypeState {
     enabled: false,
     blocks: [defaultTypeBlock(true, "headline"), defaultTypeBlock(false, "headline")],
     activeIndex: 0,
+    duplicateRhythm: false,
+    duplicateRhythmSource: 0,
   };
 }
 
@@ -398,6 +404,8 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     enabled: rec.enabled === true,
     blocks,
     activeIndex,
+    duplicateRhythm: rec.duplicateRhythm === true,
+    duplicateRhythmSource: rec.duplicateRhythmSource === 1 ? 1 : 0,
   };
 }
 
@@ -419,6 +427,8 @@ export function cloneTypeState(state: TypeState): TypeState {
   return {
     enabled: state.enabled,
     activeIndex: state.activeIndex,
+    duplicateRhythm: state.duplicateRhythm,
+    duplicateRhythmSource: state.duplicateRhythmSource,
     blocks: [{ ...state.blocks[0] }, { ...state.blocks[1] }],
   };
 }

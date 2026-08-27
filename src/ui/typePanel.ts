@@ -587,10 +587,14 @@ export function buildTypePanel(
     block1.setExpanded(expanded === 1);
   };
 
+  let refreshMotion = (): void => {};
+
   const block0 = buildBlock(body, 0, state.blocks[0], true, onChange, (next) => {
     expanded = next;
     applyExpanded();
-  }, () => {});
+  }, () => {
+    refreshMotion();
+  });
   const block1 = buildBlock(body, 1, state.blocks[1], false, onChange, (next) => {
     expanded = next;
     applyExpanded();
@@ -599,7 +603,55 @@ export function buildTypePanel(
       expanded = 1;
       applyExpanded();
     }
+    refreshMotion();
   });
+
+  const motion = document.createElement("div");
+  motion.className = "type-motion";
+  body.appendChild(motion);
+  const motionLabel = document.createElement("div");
+  motionLabel.className = "type-motion-label";
+  motionLabel.textContent = "Motion";
+  motion.appendChild(motionLabel);
+
+  let currentDup = state.duplicateRhythm === true;
+  let currentSource: 0 | 1 = state.duplicateRhythmSource === 1 ? 1 : 0;
+
+  const dupSeg = seg(motion, "Duplicate Rhythm", [
+    { value: "off", label: "Off" },
+    { value: "on", label: "On" },
+  ], currentDup ? "on" : "off", (v) => {
+    currentDup = v === "on";
+    sourceSeg.parentElement!.hidden = !currentDup;
+    onChange({ duplicateRhythm: currentDup, duplicateRhythmSource: currentSource });
+  });
+
+  const sourceSeg = seg(motion, "Source", [
+    { value: "0", label: "Type 01" },
+    { value: "1", label: "Type 02" },
+  ], String(currentSource), (v) => {
+    currentSource = v === "1" ? 1 : 0;
+    onChange({ duplicateRhythm: currentDup, duplicateRhythmSource: currentSource });
+  });
+
+  function refreshMotionNow(): void {
+    const type1 = !block0.root.classList.contains("is-off");
+    const type2 = !block1.root.classList.contains("is-off");
+    const src1 = sourceSeg.querySelector<HTMLButtonElement>('button[data-value="0"]');
+    const src2 = sourceSeg.querySelector<HTMLButtonElement>('button[data-value="1"]');
+    if (src1) {
+      src1.disabled = !type1;
+      src1.classList.toggle("is-disabled", !type1);
+    }
+    if (src2) {
+      src2.disabled = !type2;
+      src2.classList.toggle("is-disabled", !type2);
+    }
+  }
+  refreshMotion = refreshMotionNow;
+  refreshMotionNow();
+  sourceSeg.parentElement!.hidden = !currentDup;
+  void dupSeg;
 
   return {
     sync(next: TypeState) {
@@ -609,6 +661,12 @@ export function buildTypePanel(
       container.classList.toggle("type-disabled", !state.enabled);
       block0.sync(state.blocks[0]);
       block1.sync(state.blocks[1]);
+      currentDup = state.duplicateRhythm === true;
+      currentSource = state.duplicateRhythmSource === 1 ? 1 : 0;
+      markSeg(dupSeg, currentDup ? "on" : "off");
+      markSeg(sourceSeg, String(currentSource));
+      sourceSeg.parentElement!.hidden = !currentDup;
+      refreshMotion();
     },
   };
 }

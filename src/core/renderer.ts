@@ -6,8 +6,8 @@ import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrati
 import { paintGoldenMasterRegistration, clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./globalRegistration";
 import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
-import { layoutTypeDocument } from "./typeLayout";
-import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
+import { disposeTypeScratch } from "./typePaint";
+import { paintTypeDocument } from "./duplicateRhythm";
 import {
   applyEndBehaviour,
   clampEndBehaviourSettings,
@@ -1465,12 +1465,7 @@ export class Renderer {
     const tPrep = mark();
 
     const paintType = (): void => {
-      const type = this.typeState;
-      const laid = layoutTypeDocument(type, width, height);
-      if (laid.length === 0) return;
-      for (const item of laid) {
-        paintTypeLayer(composedCtx, item.layout, item.layout.color, item.layout.opacity, undefined, item.index);
-      }
+      paintTypeDocument(composedCtx, this.typeState, width, height, this.getLoopPhase());
     };
 
     if (this.typeBeforeRegistration) paintType();

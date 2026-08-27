@@ -658,10 +658,24 @@ body {
   width: 100%;
 }
 
-.type-panel .type-seg button {
-  flex: 1;
+.type-panel .type-seg button.is-disabled,
+.type-panel .type-seg button:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.type-motion {
+  border-top: 1px solid var(--panel-border);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.type-motion-label {
   font-size: 9px;
-  padding: 5px 2px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
 }
 
 .type-text {
