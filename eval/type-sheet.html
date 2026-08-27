@@ -4,12 +4,16 @@
     <meta charset="UTF-8" />
     <title>MBM type sheet</title>
     <style>
-      body { margin: 24px; background: #111; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
-      h1, h2 { font-weight: 500; letter-spacing: 0.04em; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0 48px; }
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 52em; }
+      .page-row { display: flex; gap: 20px; margin: 0 0 28px; align-items: flex-start; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin: 16px 0 48px; }
       figure { margin: 0; }
-      canvas { width: 100%; height: auto; background: #000; display: block; }
-      figcaption { margin-top: 6px; color: #aaa; font-size: 10px; }
+      canvas { height: auto; background: #000; display: block; }
+      .page-row figure canvas { width: auto; max-height: 420px; }
+      .grid canvas { width: 100%; }
+      figcaption { margin-top: 6px; color: #888; font-size: 10px; }
     </style>
   </head>
   <body>

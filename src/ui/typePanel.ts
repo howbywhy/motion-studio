@@ -215,10 +215,11 @@ export function buildTypePanel(
   textRow.appendChild(textarea);
   body.appendChild(textRow);
 
-  const compositionSeg = seg(body, "Composition", [
-    { value: "headline", label: "Headline" },
-    { value: "spread", label: "Spread" },
+  const compositionSeg = seg(body, "Role", [
+    { value: "display", label: "Display" },
+    { value: "editorial", label: "Editorial" },
     { value: "caption", label: "Caption" },
+    { value: "folio", label: "Folio" },
   ], initial.composition, (v) => onChange({ composition: v as TypeComposition }));
 
   const alignSeg = seg(body, "Align", [

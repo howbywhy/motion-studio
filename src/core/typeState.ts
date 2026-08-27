@@ -1,7 +1,10 @@
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
-export type TypeComposition = "headline" | "spread" | "caption";
-/** COMPAT — mapped from composition for older Saved States. */
+/** Editorial roles. Spatial behaviour is grid + Spacing, not a role. */
+export type TypeRole = "display" | "editorial" | "caption" | "folio";
+/** COMPAT alias — Saved States still serialise `composition`. */
+export type TypeComposition = TypeRole;
+/** COMPAT — mapped from role for older Saved States. */
 export type TypeMode = "responsive" | "fixed";
 export type TypeInMotion = "none" | "rise" | "slide" | "reveal" | "assemble";
 export type TypeOutMotion = "none" | "rise" | "slide" | "reveal" | "disperse";
@@ -12,7 +15,7 @@ export interface TypeState {
   text: string;
   align: TypeAlign;
   valign: TypeValign;
-  composition: TypeComposition;
+  composition: TypeRole;
   scale: number;
   spacing: number;
   weight: number;
@@ -38,7 +41,8 @@ export const TYPE_WEIGHT_MIN = 100;
 export const TYPE_WEIGHT_MAX = 900;
 export const TYPE_WEIGHT_DEFAULT = 500;
 
-export const TYPE_COMPOSITIONS: TypeComposition[] = ["headline", "spread", "caption"];
+export const TYPE_ROLES: TypeRole[] = ["display", "editorial", "caption", "folio"];
+export const TYPE_COMPOSITIONS = TYPE_ROLES;
 
 export function defaultTypeState(): TypeState {
   return {
@@ -46,7 +50,7 @@ export function defaultTypeState(): TypeState {
     text: "",
     align: "center",
     valign: "center",
-    composition: "headline",
+    composition: "display",
     scale: 50,
     spacing: 50,
     weight: TYPE_WEIGHT_DEFAULT,
@@ -68,13 +72,14 @@ export function defaultTypeState(): TypeState {
   };
 }
 
-function parseComposition(raw: Partial<TypeState> | null | undefined): TypeComposition {
+function parseRole(raw: Partial<TypeState> | null | undefined): TypeRole {
   const c = raw && (raw as { composition?: unknown }).composition;
-  if (c === "headline" || c === "spread" || c === "caption") return c;
-  if (c === "display" || c === "stack") return "headline";
+  if (c === "display" || c === "editorial" || c === "caption" || c === "folio") return c;
+  if (c === "headline" || c === "stack") return "display";
+  if (c === "spread") return "editorial";
   if (c === "quiet") return "caption";
   if (raw?.mode === "fixed") return "caption";
-  return "headline";
+  return "display";
 }
 
 export function clampTypeState(raw: Partial<TypeState> | null | undefined): TypeState {
@@ -87,9 +92,10 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
   };
   const align = raw.align === "left" || raw.align === "right" || raw.align === "center" ? raw.align : d.align;
   const valign = raw.valign === "top" || raw.valign === "bottom" || raw.valign === "center" ? raw.valign : d.valign;
-  const composition = parseComposition(raw);
+  const composition = parseRole(raw);
   const color = typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : d.color;
-  const spacing = num(raw.spacing ?? raw.spread, 0, 100, d.spacing);
+  let spacing = num(raw.spacing ?? raw.spread, 0, 100, d.spacing);
+  if ((raw as { composition?: unknown }).composition === "spread" && spacing < 70) spacing = 80;
   return {
     enabled: raw.enabled === true,
     text: typeof raw.text === "string" ? raw.text : d.text,
@@ -103,7 +109,7 @@ export function clampTypeState(raw: Partial<TypeState> | null | undefined): Type
     opacity: num(raw.opacity, 0, 100, d.opacity),
     x: num(raw.x, -50, 50, d.x),
     y: num(raw.y, -50, 50, d.y),
-    mode: composition === "caption" ? "fixed" : "responsive",
+    mode: composition === "caption" || composition === "folio" ? "fixed" : "responsive",
     spread: spacing,
     rhythm: 0,
     inMotion: "none",

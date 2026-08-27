@@ -1,6 +1,6 @@
 import { mbmById } from "./mbmCopy";
-import { clampTypeState, type TypeAlign, type TypeComposition, type TypeState, type TypeValign } from "../core/typeState";
-import { layoutTypography, opticalFramePx } from "../core/typeLayout";
+import { clampTypeState, type TypeAlign, type TypeRole, type TypeState, type TypeValign } from "../core/typeState";
+import { editorialColumnsPx, layoutTypography, opticalFramePx } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 
@@ -11,7 +11,7 @@ const ASPECTS: { id: string; w: number; h: number }[] = [
 
 interface SheetCase {
   copyId: string;
-  composition: TypeComposition;
+  role: TypeRole;
   align?: TypeAlign;
   valign?: TypeValign;
   scale?: number;
@@ -20,46 +20,59 @@ interface SheetCase {
   note?: string;
 }
 
-/** Each mode's useful territory — not a cartesian product of every phrase. */
-const HEADLINE_CASES: SheetCase[] = [
-  { copyId: "new", composition: "headline", scale: 50 },
-  { copyId: "coming-soon", composition: "headline", scale: 50 },
-  { copyId: "coming-soon", composition: "headline", scale: 75, note: "overscan" },
-  { copyId: "coming-soon", composition: "headline", align: "left", valign: "top", scale: 50 },
-  { copyId: "coming-soon-break", composition: "headline", scale: 50 },
-  { copyId: "name", composition: "headline", scale: 50 },
-  { copyId: "name-break", composition: "headline", scale: 50 },
-  { copyId: "redy-break", composition: "headline", scale: 50 },
-  { copyId: "flawed-break", composition: "headline", scale: 50 },
-  { copyId: "study", composition: "headline", scale: 50 },
-  { copyId: "ss26", composition: "headline", scale: 50 },
-  { copyId: "cold", composition: "headline", scale: 50 },
+const DISPLAY: SheetCase[] = [
+  { copyId: "new", role: "display", scale: 50 },
+  { copyId: "coming-soon", role: "display", scale: 50 },
+  { copyId: "coming-soon", role: "display", scale: 80, note: "overscan" },
+  { copyId: "coming-soon", role: "display", align: "left", valign: "top", scale: 50 },
+  { copyId: "name", role: "display", scale: 50 },
+  { copyId: "cold", role: "display", scale: 50 },
+  { copyId: "redy-break", role: "display", scale: 50 },
+  { copyId: "slate", role: "display", scale: 50 },
+  { copyId: "mixed", role: "display", scale: 50 },
 ];
 
-const SPREAD_CASES: SheetCase[] = [
-  { copyId: "coming-soon-break", composition: "spread", align: "right", valign: "center", spacing: 100 },
-  { copyId: "name-break", composition: "spread", align: "left", spacing: 80 },
-  { copyId: "date-split", composition: "spread", align: "left", spacing: 100 },
-  { copyId: "date", composition: "spread", align: "left", valign: "top", note: "single unit" },
-  { copyId: "redy-break", composition: "spread", align: "right", spacing: 90 },
-  { copyId: "flawed-break", composition: "spread", align: "left", spacing: 85 },
-  { copyId: "free", composition: "spread", align: "left", spacing: 80 },
-  { copyId: "launching-date", composition: "spread", align: "left", spacing: 70 },
+const EDITORIAL: SheetCase[] = [
+  { copyId: "flawed-break", role: "editorial", align: "left", valign: "center", scale: 50, spacing: 40 },
+  { copyId: "flawed-break", role: "editorial", align: "left", valign: "center", scale: 50, spacing: 90, note: "distributed" },
+  { copyId: "perfect", role: "editorial", align: "left", valign: "top", scale: 50, spacing: 45 },
+  { copyId: "way", role: "editorial", align: "right", valign: "bottom", scale: 50, spacing: 40 },
+  { copyId: "free", role: "editorial", align: "left", valign: "center", scale: 50, spacing: 40, note: "lockup" },
+  { copyId: "free", role: "editorial", align: "left", valign: "center", scale: 50, spacing: 90, note: "distributed" },
+  { copyId: "this-is", role: "editorial", align: "left", valign: "center", scale: 50, spacing: 50 },
+  { copyId: "name-break", role: "editorial", align: "left", valign: "top", scale: 50, spacing: 35 },
 ];
 
-const CAPTION_CASES: SheetCase[] = [
-  { copyId: "now", composition: "caption", align: "left", valign: "bottom", scale: 50 },
-  { copyId: "date", composition: "caption", align: "right", valign: "bottom", scale: 50 },
-  { copyId: "info", composition: "caption", align: "left", valign: "top", scale: 25 },
-  { copyId: "name", composition: "caption", align: "center", valign: "bottom", scale: 50 },
-  { copyId: "worn", composition: "caption", align: "left", valign: "bottom", scale: 50 },
-  { copyId: "coming-soon", composition: "caption", align: "right", valign: "top", scale: 75 },
+const CAPTION: SheetCase[] = [
+  { copyId: "now", role: "caption", align: "left", valign: "bottom", scale: 50 },
+  { copyId: "worn", role: "caption", align: "left", valign: "bottom", scale: 50 },
+  { copyId: "launching", role: "caption", align: "right", valign: "top", scale: 50 },
+  { copyId: "product-colour", role: "caption", align: "right", valign: "bottom", scale: 40 },
+  { copyId: "name", role: "caption", align: "center", valign: "bottom", scale: 50 },
 ];
 
-const THREE_GESTURES: SheetCase[] = [
-  { copyId: "coming-soon", composition: "headline", scale: 50 },
-  { copyId: "coming-soon-break", composition: "spread", align: "right", spacing: 100 },
-  { copyId: "coming-soon", composition: "caption", align: "left", valign: "bottom", scale: 50 },
+const FOLIO: SheetCase[] = [
+  { copyId: "date-split", role: "folio", align: "left", valign: "center", scale: 85, spacing: 100, note: "oversized" },
+  { copyId: "date-split", role: "folio", align: "center", valign: "center", scale: 90, spacing: 100, note: "oversized" },
+  { copyId: "date-md", role: "folio", align: "left", valign: "top", scale: 90, note: "oversized" },
+  { copyId: "year", role: "folio", align: "right", valign: "bottom", scale: 90, note: "oversized" },
+  { copyId: "date", role: "folio", align: "left", valign: "top", scale: 80 },
+  { copyId: "date", role: "folio", align: "right", valign: "bottom", scale: 20, note: "furniture" },
+  { copyId: "ss26-short", role: "folio", align: "left", valign: "bottom", scale: 18, note: "furniture" },
+  { copyId: "num01", role: "folio", align: "left", valign: "top", scale: 22, note: "furniture" },
+  { copyId: "num02", role: "folio", align: "right", valign: "top", scale: 22, note: "furniture" },
+  { copyId: "sydney", role: "folio", align: "right", valign: "bottom", scale: 20, note: "furniture" },
+];
+
+const HIERARCHY: SheetCase[] = [
+  { copyId: "coming-soon", role: "display", scale: 50 },
+  { copyId: "coming-soon", role: "editorial", align: "left", scale: 50, spacing: 40 },
+  { copyId: "coming-soon", role: "caption", align: "left", valign: "bottom", scale: 50 },
+  { copyId: "coming-soon", role: "folio", align: "left", valign: "top", scale: 70 },
+  { copyId: "date-split", role: "display", scale: 50 },
+  { copyId: "date-split", role: "editorial", align: "left", spacing: 90 },
+  { copyId: "date-split", role: "caption", align: "right", valign: "bottom" },
+  { copyId: "date-split", role: "folio", align: "left", scale: 90, spacing: 100 },
 ];
 
 function photoGround(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -80,14 +93,29 @@ function photoGround(ctx: CanvasRenderingContext2D, w: number, h: number): void 
   ctx.putImageData(img, 0, 0);
 }
 
+function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const m = opticalFramePx(w);
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(m + 0.5, m + 0.5, w - m * 2 - 1, h - m * 2 - 1);
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  for (const x of editorialColumnsPx(w)) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, m);
+    ctx.lineTo(x + 0.5, h - m);
+    ctx.stroke();
+  }
+}
+
 function stateFor(c: SheetCase): TypeState {
   const copy = mbmById(c.copyId);
+  const role = c.role;
   return clampTypeState({
     enabled: true,
     text: copy.text,
-    composition: c.composition,
-    align: c.align ?? (c.composition === "spread" ? "left" : c.composition === "caption" ? "left" : "center"),
-    valign: c.valign ?? (c.composition === "caption" ? "bottom" : "center"),
+    composition: role,
+    align: c.align ?? (role === "caption" || role === "editorial" || role === "folio" ? "left" : "center"),
+    valign: c.valign ?? (role === "caption" ? "bottom" : "center"),
     scale: c.scale ?? 50,
     spacing: c.spacing ?? 50,
     weight: c.weight ?? 500,
@@ -112,14 +140,9 @@ function cell(
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
   photoGround(ctx, w, h);
+  if (guide) drawGrid(ctx, w, h);
   const layout = layoutTypography(state, w, h);
   if (layout) paintTypeLayer(ctx, layout, state.color, layout.opacity);
-  if (guide) {
-    const m = opticalFramePx(w);
-    ctx.strokeStyle = "rgba(255,255,255,0.22)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(m + 0.5, m + 0.5, w - m * 2 - 1, h - m * 2 - 1);
-  }
   const cap = document.createElement("figcaption");
   cap.textContent = label;
   wrap.appendChild(canvas);
@@ -131,23 +154,32 @@ function cell(
   };
 }
 
-function section(root: HTMLElement, title: string, cases: SheetCase[], aspect: { id: string; w: number; h: number }, guide: boolean) {
+function pages(
+  root: HTMLElement,
+  title: string,
+  cases: SheetCase[],
+  guide: boolean,
+): { copy: string; composition: TypeRole; aspect: string; lines: string[]; fontSize: number }[] {
   const h = document.createElement("h2");
-  h.textContent = `${title} · ${aspect.id}`;
+  h.textContent = title;
   root.appendChild(h);
-  const grid = document.createElement("div");
-  grid.className = "grid";
-  root.appendChild(grid);
-  return cases.map((c) => {
+  const out: { copy: string; composition: TypeRole; aspect: string; lines: string[]; fontSize: number }[] = [];
+  for (const c of cases) {
+    const row = document.createElement("div");
+    row.className = "page-row";
+    root.appendChild(row);
     const state = stateFor(c);
-    const extra = [c.note, `s${state.scale}`, state.align, state.valign].filter(Boolean).join(" · ");
-    const r = cell(grid, `${c.copyId} · ${c.composition} · ${extra}`, aspect.w, aspect.h, state, guide);
-    return { copy: c.copyId, composition: c.composition, aspect: aspect.id, lines: r.lines, fontSize: r.fontSize };
-  });
+    const extra = [c.note, `s${state.scale}`, `sp${state.spacing}`, state.align, state.valign].filter(Boolean).join(" · ");
+    for (const aspect of ASPECTS) {
+      const r = cell(row, `${c.copyId} · ${c.role} · ${aspect.id} · ${extra}`, aspect.w, aspect.h, state, guide);
+      out.push({ copy: c.copyId, composition: c.role, aspect: aspect.id, lines: r.lines, fontSize: r.fontSize });
+    }
+  }
+  return out;
 }
 
 export interface SheetReport {
-  plans: { copy: string; composition: TypeComposition; aspect: string; lines: string[]; fontSize: number }[];
+  plans: { copy: string; composition: TypeRole; aspect: string; lines: string[]; fontSize: number }[];
   exportParity: { copy: string; preview: string[]; full: string[]; match: boolean }[];
   framePx: { "4:5": number; "9:16": number };
 }
@@ -160,61 +192,49 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
   root.innerHTML = "";
 
   const title = document.createElement("h1");
-  title.textContent = "MBM typographic system — Headline / Spread / Caption";
+  title.textContent = "MBM editorial hierarchy";
   root.appendChild(title);
   const lead = document.createElement("p");
-  lead.textContent = "Eval-only. Hairline is the 10px optical frame (scales with canvas). Not in the product UI.";
+  lead.textContent = "Eval-only. Hairline = 10px optical frame + 4 columns. Not in the product UI.";
   root.appendChild(lead);
 
-  for (const aspect of ASPECTS) {
-    plans.push(...section(root, "HEADLINE", HEADLINE_CASES, aspect, true));
-    plans.push(...section(root, "SPREAD", SPREAD_CASES, aspect, true));
-    plans.push(...section(root, "CAPTION", CAPTION_CASES, aspect, true));
-    plans.push(...section(root, "COMING SOON — three gestures", THREE_GESTURES, aspect, true));
-  }
+  plans.push(...pages(root, "DISPLAY", DISPLAY, true));
+  plans.push(...pages(root, "EDITORIAL", EDITORIAL, true));
+  plans.push(...pages(root, "CAPTION", CAPTION, true));
+  plans.push(...pages(root, "FOLIO", FOLIO, true));
+  plans.push(...pages(root, "SAME COPY · four roles", HIERARCHY, true));
 
   const variants = document.createElement("h2");
-  variants.textContent = "Weight 300 / 500 / 700 · Headline · 4:5";
+  variants.textContent = "Weight 300 / 500 / 700";
   root.appendChild(variants);
   const wgrid = document.createElement("div");
   wgrid.className = "grid";
   root.appendChild(wgrid);
-  for (const copyId of ["coming-soon", "name", "new"]) {
+  for (const copyId of ["coming-soon", "date-split", "new"]) {
+    const role: TypeRole = copyId === "date-split" ? "folio" : "display";
     for (const weight of [300, 500, 700]) {
-      const state = stateFor({ copyId, composition: "headline", weight, scale: 50 });
-      cell(wgrid, `${copyId} · headline · w${weight}`, 400, 500, state, false);
+      const state = stateFor({ copyId, role, weight, scale: copyId === "date-split" ? 85 : 50, spacing: copyId === "date-split" ? 100 : 50 });
+      cell(wgrid, `${copyId} · ${role} · w${weight}`, 400, 500, state, false);
     }
-  }
-
-  const scales = document.createElement("h2");
-  scales.textContent = "Scale 0 / 50 / 100 · 4:5";
-  root.appendChild(scales);
-  const sgrid = document.createElement("div");
-  sgrid.className = "grid";
-  root.appendChild(sgrid);
-  for (const copyId of ["coming-soon", "new"]) {
-    for (const scale of [0, 50, 100]) {
-      const state = stateFor({ copyId, composition: "headline", scale });
-      cell(sgrid, `${copyId} · headline · s${scale}`, 400, 500, state, true);
-    }
-  }
-  for (const scale of [0, 50, 100]) {
-    const state = stateFor({ copyId: "now", composition: "caption", align: "left", valign: "bottom", scale });
-    cell(sgrid, `now · caption · s${scale}`, 400, 500, state, true);
   }
 
   const exportParity: SheetReport["exportParity"] = [];
-  const parity: { id: string; composition: TypeComposition }[] = [
-    { id: "new", composition: "headline" },
-    { id: "coming-soon", composition: "headline" },
-    { id: "name", composition: "headline" },
-    { id: "redy-break", composition: "headline" },
-    { id: "flawed-break", composition: "headline" },
-    { id: "free", composition: "spread" },
-    { id: "now", composition: "caption" },
+  const parity: { id: string; role: TypeRole }[] = [
+    { id: "new", role: "display" },
+    { id: "coming-soon", role: "display" },
+    { id: "name", role: "display" },
+    { id: "flawed-break", role: "editorial" },
+    { id: "free", role: "editorial" },
+    { id: "date-split", role: "folio" },
+    { id: "now", role: "caption" },
   ];
   for (const item of parity) {
-    const state = stateFor({ copyId: item.id, composition: item.composition });
+    const state = stateFor({
+      copyId: item.id,
+      role: item.role,
+      scale: item.role === "folio" ? 85 : 50,
+      spacing: item.role === "folio" || item.id === "free" ? 90 : 50,
+    });
     const a = layoutTypography(state, 500, 625);
     const b = layoutTypography(state, 1080, 1350);
     const c = layoutTypography(state, 2160, 2700);
