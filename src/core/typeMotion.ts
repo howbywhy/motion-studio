@@ -1,4 +1,4 @@
-/** Editorial type sequencing. Time only reveals already-positioned authored units.
+/** Editorial type sequencing. Each enabled block is one sequence unit.
  * Together is identity with the static layout. No kinetic effects. */
 import type { TypeRole, TypeSequenceMode, TypeState } from "./typeState";
 import type { TypeLayout } from "./typeLayout";
@@ -31,12 +31,6 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function unitCount(layout: TypeLayout): number {
-  let max = 0;
-  for (const line of layout.lines) max = Math.max(max, line.unit);
-  return max + 1;
-}
-
 function sequenceWindow(pace: number): number {
   return lerp(0.88, 0.34, clamp01(pace / 100));
 }
@@ -48,27 +42,13 @@ function arriveK(pace: number, role: TypeRole): number {
   return base;
 }
 
-function arrivalOffset(
-  role: TypeRole,
-  canvasW: number,
-  canvasH: number,
-  layout: TypeLayout,
-  unit: number,
-): { dx: number; dy: number } {
+function arrivalOffset(role: TypeRole, canvasW: number, canvasH: number): { dx: number; dy: number } {
   const s = canvasW / 500;
   if (role === "caption") return { dx: 0, dy: 6 * s };
   if (role === "editorial") return { dx: 0, dy: 10 * s };
   if (role === "display") return { dx: 0, dy: 16 * s };
-  let y = 0;
-  let n = 0;
-  for (const line of layout.lines) {
-    if (line.unit !== unit) continue;
-    y += line.y;
-    n += 1;
-  }
-  const cy = n > 0 ? y / n : canvasH * 0.5;
   const mag = 18 * s;
-  return { dx: 0, dy: cy < canvasH * 0.5 ? -mag : mag };
+  return { dx: 0, dy: canvasH * 0.5 < canvasH * 0.5 ? -mag : mag };
 }
 
 function rest(): TypeUnitMotion {
@@ -164,31 +144,44 @@ function alternateUnits(
   return out;
 }
 
+function identityState(n: number): TypeSequenceState[] {
+  return Array.from({ length: Math.max(1, n) }, () => ({
+    identity: true,
+    mode: "together" as const,
+    unitCount: 1,
+    units: [rest()],
+  }));
+}
+
+export function evaluateTypeSequences(
+  state: TypeState,
+  layouts: TypeLayout[],
+  loopPhase: number,
+): TypeSequenceState[] {
+  const n = layouts.length;
+  const mode = n <= 1 ? "together" : state.typeSequenceMode;
+  if (n === 0) return [];
+  if (mode === "together") return identityState(n);
+  const p = ((loopPhase % 1) + 1) % 1;
+  const W = sequenceWindow(state.typeSequencePace);
+  const offs = layouts.map((layout) => arrivalOffset(layout.composition, layout.canvasW, layout.canvasH));
+  const k = arriveK(state.typeSequencePace, layouts[0]?.composition ?? "display");
+  const units =
+    mode === "stagger" ? staggerUnits(p, n, W, k, offs) :
+    mode === "hold" ? holdUnits(p, n, k, offs) :
+    alternateUnits(p, n, W, k, offs);
+  return units.map((unit) => ({
+    identity: false,
+    mode,
+    unitCount: 1,
+    units: [unit],
+  }));
+}
+
 export function evaluateTypeSequence(
   state: TypeState,
   layout: TypeLayout,
   loopPhase: number,
 ): TypeSequenceState {
-  const n = unitCount(layout);
-  const mode = n <= 1 ? "together" : state.typeSequenceMode;
-  if (mode === "together") {
-    return {
-      identity: true,
-      mode: "together",
-      unitCount: n,
-      units: Array.from({ length: Math.max(1, n) }, rest),
-    };
-  }
-  const p = ((loopPhase % 1) + 1) % 1;
-  const role = layout.composition;
-  const W = sequenceWindow(state.typeSequencePace);
-  const k = arriveK(state.typeSequencePace, role);
-  const offs = Array.from({ length: n }, (_, i) =>
-    arrivalOffset(role, layout.canvasW, layout.canvasH, layout, i),
-  );
-  const units =
-    mode === "stagger" ? staggerUnits(p, n, W, k, offs) :
-    mode === "hold" ? holdUnits(p, n, k, offs) :
-    alternateUnits(p, n, W, k, offs);
-  return { identity: false, mode, unitCount: n, units };
+  return evaluateTypeSequences(state, [layout], loopPhase)[0] ?? identityState(1)[0]!;
 }

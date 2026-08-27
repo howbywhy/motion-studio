@@ -2,12 +2,9 @@ import { switzerFont, switzerReady } from "./typeFont";
 import { opticalFramePx, type TypeLayout } from "./typeLayout";
 import type { TypeSequenceState } from "./typeMotion";
 
-let overlayCanvas: HTMLCanvasElement | null = null;
-let overlayCtx: CanvasRenderingContext2D | null = null;
-let overlayKey = "";
-
-let unitCanvases: HTMLCanvasElement[] = [];
-let unitKey = "";
+const overlays: [HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null];
+const overlayCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null];
+const overlayKeys: [string, string] = ["", ""];
 
 function layer(existing: HTMLCanvasElement | null, w: number, h: number): HTMLCanvasElement {
   const c = existing ?? document.createElement("canvas");
@@ -34,7 +31,8 @@ function staticKey(layout: TypeLayout, color: string, opacity: number): string {
     layout.offsetX,
     layout.offsetY,
     layout.weight,
-    layout.lines.map((l) => `${l.unit}:${l.text}:${l.x}:${l.y}:${l.width}`).join("|"),
+    layout.textAlign,
+    layout.lines.map((l) => `${l.text}:${l.x}:${l.y}:${l.width}:${l.wordGap}`).join("|"),
   ].join("\t");
 }
 
@@ -49,12 +47,40 @@ function clipOptical(ctx: CanvasRenderingContext2D, w: number, h: number): void 
   ctx.clip();
 }
 
+function drawLine(
+  ctx: CanvasRenderingContext2D,
+  layout: TypeLayout,
+  line: TypeLayout["lines"][number],
+): void {
+  if (line.wordGap > 0.05) {
+    const words = line.text.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      let x = line.x;
+      const space = ctx.measureText(" ").width;
+      for (let i = 0; i < words.length; i++) {
+        ctx.fillText(words[i]!, x, line.y);
+        x += ctx.measureText(words[i]!).width;
+        if (i < words.length - 1) x += space + line.wordGap;
+      }
+      return;
+    }
+  }
+  if (layout.tracking !== 0 && typeof (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing !== "string") {
+    let x = line.x;
+    for (const ch of line.text) {
+      ctx.fillText(ch, x, line.y);
+      x += ctx.measureText(ch).width + layout.tracking;
+    }
+    return;
+  }
+  ctx.fillText(line.text, line.x, line.y);
+}
+
 function drawLines(
   ctx: CanvasRenderingContext2D,
   layout: TypeLayout,
   color: string,
   opacity: number,
-  unit: number | null,
 ): void {
   ctx.fillStyle = color;
   ctx.textBaseline = "alphabetic";
@@ -65,45 +91,35 @@ function drawLines(
   if (typeof spaced.letterSpacing === "string") {
     spaced.letterSpacing = `${layout.tracking}px`;
   }
-  for (const line of layout.lines) {
-    if (unit !== null && line.unit !== unit) continue;
-    if (layout.tracking !== 0 && typeof spaced.letterSpacing !== "string") {
-      let x = line.x;
-      for (const ch of line.text) {
-        ctx.fillText(ch, x, line.y);
-        x += ctx.measureText(ch).width + layout.tracking;
-      }
-    } else {
-      ctx.fillText(line.text, line.x, line.y);
-    }
-  }
+  for (const line of layout.lines) drawLine(ctx, layout, line);
 }
 
-function rasterUnits(layout: TypeLayout, color: string): HTMLCanvasElement[] {
-  const w = Math.max(1, Math.round(layout.canvasW));
-  const h = Math.max(1, Math.round(layout.canvasH));
-  const key = staticKey(layout, color, 1);
-  if (unitKey === key && unitCanvases.length > 0 && unitCanvases[0]?.width === w) return unitCanvases;
-  let n = 0;
-  for (const line of layout.lines) n = Math.max(n, line.unit + 1);
-  n = Math.max(1, n);
-  const next: HTMLCanvasElement[] = [];
-  for (let i = 0; i < n; i++) {
-    const c = layer(unitCanvases[i] ?? null, w, h);
-    const ctx = ctx2d(c, null);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, w, h);
-    ctx.save();
-    ctx.translate(layout.offsetX, layout.offsetY);
-    drawLines(ctx, layout, color, 1, i);
-    ctx.restore();
-    next.push(c);
+function ensureOverlay(
+  layout: TypeLayout,
+  color: string,
+  opacity: number,
+  slot: 0 | 1,
+  w: number,
+  h: number,
+): HTMLCanvasElement {
+  const key = staticKey(layout, color, opacity);
+  if (overlays[slot] && overlayKeys[slot] === key && overlays[slot]!.width === w && overlays[slot]!.height === h) {
+    return overlays[slot]!;
   }
-  unitCanvases = next;
-  unitKey = key;
-  return next;
+  overlays[slot] = layer(overlays[slot], w, h);
+  overlayCtxs[slot] = ctx2d(overlays[slot]!, overlayCtxs[slot]);
+  const ctx = overlayCtxs[slot]!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  clipOptical(ctx, w, h);
+  ctx.translate(layout.offsetX, layout.offsetY);
+  drawLines(ctx, layout, color, opacity);
+  ctx.restore();
+  overlayKeys[slot] = key;
+  return overlays[slot]!;
 }
 
 function paintStatic(
@@ -111,27 +127,9 @@ function paintStatic(
   layout: TypeLayout,
   color: string,
   opacity: number,
+  slot: 0 | 1,
 ): void {
-  const w = dest.canvas.width;
-  const h = dest.canvas.height;
-  const key = staticKey(layout, color, opacity);
-  if (overlayCanvas && overlayKey === key && overlayCanvas.width === w && overlayCanvas.height === h) {
-    dest.drawImage(overlayCanvas, 0, 0);
-    return;
-  }
-  overlayCanvas = layer(overlayCanvas, w, h);
-  overlayCtx = ctx2d(overlayCanvas, overlayCtx);
-  overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
-  overlayCtx.globalAlpha = 1;
-  overlayCtx.globalCompositeOperation = "source-over";
-  overlayCtx.clearRect(0, 0, w, h);
-  overlayCtx.save();
-  clipOptical(overlayCtx, w, h);
-  overlayCtx.translate(layout.offsetX, layout.offsetY);
-  drawLines(overlayCtx, layout, color, opacity, null);
-  overlayCtx.restore();
-  overlayKey = key;
-  dest.drawImage(overlayCanvas, 0, 0);
+  dest.drawImage(ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height), 0, 0);
 }
 
 function paintSequenced(
@@ -140,25 +138,20 @@ function paintSequenced(
   color: string,
   opacity: number,
   sequence: TypeSequenceState,
+  slot: 0 | 1,
 ): void {
-  const w = dest.canvas.width;
-  const h = dest.canvas.height;
-  const layers = rasterUnits(layout, color);
+  const motion = sequence.units[0];
+  if (!motion || motion.opacity < 0.004) return;
+  const src = ensureOverlay(layout, color, opacity, slot, dest.canvas.width, dest.canvas.height);
   dest.save();
-  clipOptical(dest, w, h);
-  for (let i = 0; i < sequence.units.length; i++) {
-    const u = sequence.units[i]!;
-    if (u.opacity < 0.004) continue;
-    const src = layers[i];
-    if (!src) continue;
-    dest.globalAlpha = Math.min(1, Math.max(0, opacity * u.opacity));
-    dest.drawImage(src, u.dx, u.dy);
-  }
+  clipOptical(dest, dest.canvas.width, dest.canvas.height);
+  dest.globalAlpha = Math.min(1, Math.max(0, motion.opacity));
+  dest.drawImage(src, motion.dx, motion.dy);
   dest.restore();
 }
 
-/** PRODUCT: one clean Switzer silhouette. Sequencing may fade / nudge authored
- * units. No scale, blur, tracking, or weight animation.
+/** PRODUCT: one clean Switzer silhouette per block. Sequencing may fade /
+ * nudge the whole block. No scale, blur, tracking, or weight animation.
  * Typography paints after Registration and must not alter the photographic
  * Registration algorithm (golden master 728ff08). */
 export function paintTypeLayer(
@@ -167,26 +160,24 @@ export function paintTypeLayer(
   color: string,
   opacity: number,
   sequence?: TypeSequenceState | null,
+  slot: 0 | 1 = 0,
 ): void {
   if (layout.lines.length === 0) return;
   if (!switzerReady()) return;
   if (!sequence || sequence.identity) {
-    paintStatic(dest, layout, color, opacity);
+    paintStatic(dest, layout, color, opacity, slot);
     return;
   }
-  paintSequenced(dest, layout, color, opacity, sequence);
+  paintSequenced(dest, layout, color, opacity, sequence, slot);
 }
 
 export function disposeTypeScratch(): void {
-  overlayKey = "";
-  unitKey = "";
-  if (overlayCanvas) {
-    overlayCanvas.width = 1;
-    overlayCanvas.height = 1;
+  overlayKeys[0] = "";
+  overlayKeys[1] = "";
+  for (const slot of [0, 1] as const) {
+    if (overlays[slot]) {
+      overlays[slot]!.width = 1;
+      overlays[slot]!.height = 1;
+    }
   }
-  for (const c of unitCanvases) {
-    c.width = 1;
-    c.height = 1;
-  }
-  unitCanvases = [];
 }

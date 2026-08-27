@@ -1,6 +1,6 @@
 import { switzerFont, SWITZER_FAMILY } from "./typeFont";
-import type { TypeAlign, TypeAnchor, TypeRole, TypeState } from "./typeState";
-import { alignFromAnchor } from "./typeState";
+import type { TypeAlign, TypeAnchor, TypeBlock, TypeRole, TypeState, TypeTextAlign } from "./typeState";
+import { activeTypeBlocks, alignFromAnchor } from "./typeState";
 
 export interface TypeLine {
   text: string;
@@ -8,6 +8,8 @@ export interface TypeLine {
   y: number;
   width: number;
   height: number;
+  /** Extra pixels between words for justification. 0 = natural. */
+  wordGap: number;
   /** Authored newline unit. Auto-wrapped lines share unit 0. */
   unit: number;
 }
@@ -23,6 +25,7 @@ export interface TypeLayout {
   color: string;
   opacity: number;
   align: TypeAlign;
+  textAlign: TypeTextAlign;
   offsetX: number;
   offsetY: number;
   composition: TypeRole;
@@ -58,6 +61,7 @@ interface Solution {
   fontSize: number;
   tracking: number;
   leading: number;
+  wordGaps: number[];
   localXs: number[];
   localYs: number[];
   bboxL: number;
@@ -71,7 +75,7 @@ interface CacheEntry {
   solution: Solution;
 }
 
-let cache: CacheEntry | null = null;
+const caches: [CacheEntry | null, CacheEntry | null] = [null, null];
 let measureCtx: CanvasRenderingContext2D | null = null;
 
 function measureContext(): CanvasRenderingContext2D {
@@ -332,11 +336,7 @@ function pickDisplayLines(
   return best;
 }
 
-function localXs(prepared: PreparedLine[]): number[] {
-  return prepared.map((line) => line.m.inkLeft);
-}
-
-function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[]): {
+function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[], wordGaps: number[] = []): {
   l: number;
   t: number;
   r: number;
@@ -348,12 +348,73 @@ function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[]): {
   let b = -Infinity;
   for (let i = 0; i < prepared.length; i++) {
     const m = prepared[i].m;
+    const extra = (wordGaps[i] ?? 0) * Math.max(0, wordCount(prepared[i].text) - 1);
     l = Math.min(l, xs[i] - m.inkLeft);
-    r = Math.max(r, xs[i] + m.inkRight);
+    r = Math.max(r, xs[i] + m.inkRight + extra);
     t = Math.min(t, ys[i] - m.ascent);
     b = Math.max(b, ys[i] + m.descent);
   }
   return { l, t, r, b };
+}
+
+function roleMeasure(role: TypeRole, innerW: number): number {
+  if (role === "editorial") return innerW * 0.74;
+  if (role === "caption") return innerW * 0.58;
+  return innerW;
+}
+
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function justifyExtra(
+  text: string,
+  weight: number,
+  size: number,
+  tracking: number,
+  targetW: number,
+  last: boolean,
+  only: boolean,
+): number {
+  if (only || last) return 0;
+  const n = wordCount(text);
+  if (n < 2) return 0;
+  const natural = inkWidth(measureLine(text, weight, size, tracking));
+  const extra = targetW - natural;
+  if (extra <= 0.5) return 0;
+  const space = Math.max(0.5, measureLine(" ", weight, size, tracking).advance);
+  const proposed = space + extra / (n - 1);
+  if (proposed > space * 1.8) return 0;
+  if (proposed < space * 0.85) return 0;
+  return proposed - space;
+}
+
+function greedyWrap(
+  words: string[],
+  weight: number,
+  size: number,
+  tracking: number,
+  measure: number,
+): string[] {
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let i = 0;
+  while (i < words.length) {
+    let j = i + 1;
+    let best = i + 1;
+    while (j <= words.length) {
+      const t = join(words, i, j);
+      if (inkWidth(measureLine(t, weight, size, tracking)) <= measure + 0.25) {
+        best = j;
+        j += 1;
+      } else {
+        break;
+      }
+    }
+    lines.push(join(words, i, best));
+    i = best;
+  }
+  return lines;
 }
 
 function extraGapFor(
@@ -382,15 +443,13 @@ function composeSolution(
   weight: number,
   unitW: number,
   unitH: number,
+  textAlign: TypeTextAlign,
 ): Solution {
   const innerW = unitW - FRAME * 2 - FIT_PAD * 2;
   const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
   const tEm = trackingEm(role, spacing);
   const lead = leadingRatio(role, spacing);
-  const measure =
-    role === "editorial" ? innerW * 0.74 :
-    role === "caption" ? innerW * 0.92 :
-    innerW;
+  const measure = roleMeasure(role, innerW);
   const legal = maxLegalSize(lines, weight, tEm, lead, measure, innerH);
   const u = u01(scale);
   let fontSize: number;
@@ -405,7 +464,14 @@ function composeSolution(
   }
   fontSize = Math.min(fontSize, legal);
   let tracking = tEm * fontSize;
-  let prepared = prepareLines(lines, weight, fontSize, tracking);
+  let used = lines;
+  if (textAlign === "justify") {
+    const words = lines.join(" ").split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      used = greedyWrap(words, weight, fontSize, tracking, measure);
+    }
+  }
+  let prepared = prepareLines(used, weight, fontSize, tracking);
   let leading = fontSize * lead;
   let box = lockupHeight(prepared, leading, 0);
   let width = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
@@ -414,24 +480,42 @@ function composeSolution(
     const sy = Math.min(1, innerH / Math.max(1, box.h));
     fontSize *= Math.min(sx, sy);
     tracking = tEm * fontSize;
-    prepared = prepareLines(lines, weight, fontSize, tracking);
+    if (textAlign === "justify") {
+      const words = lines.join(" ").split(/\s+/).filter(Boolean);
+      if (words.length >= 2) used = greedyWrap(words, weight, fontSize, tracking, measure);
+    }
+    prepared = prepareLines(used, weight, fontSize, tracking);
     leading = fontSize * lead;
     box = lockupHeight(prepared, leading, 0);
+    width = prepared.reduce((m, line) => Math.max(m, inkWidth(line.m)), 0);
   }
   const gap = extraGapFor(role, spacing, prepared.length, box.h, innerH);
   box = lockupHeight(prepared, leading, gap);
-  const xs = localXs(prepared);
+  const only = prepared.length <= 1;
+  const justify = textAlign === "justify" && !only;
+  const blockW = justify ? measure : width;
+  const wordGaps = prepared.map((line, i) =>
+    justify ? justifyExtra(line.text, weight, fontSize, tracking, measure, i === prepared.length - 1, only) : 0,
+  );
+  const xs = prepared.map((line, i) => {
+    const extra = wordGaps[i]! * Math.max(0, wordCount(line.text) - 1);
+    const lineW = inkWidth(line.m) + extra;
+    if (textAlign === "right") return blockW - lineW + line.m.inkLeft;
+    if (textAlign === "center") return (blockW - lineW) / 2 + line.m.inkLeft;
+    return line.m.inkLeft;
+  });
   const localYs: number[] = [];
   for (let i = 0; i < prepared.length; i++) {
     localYs.push(box.ascent + i * (leading + gap));
   }
-  const bounds = inkBounds(xs, localYs, prepared);
+  const bounds = inkBounds(xs, localYs, prepared, wordGaps);
   return {
-    lines,
+    lines: used,
     prepared,
     fontSize,
     tracking,
     leading,
+    wordGaps,
     localXs: xs,
     localYs,
     bboxL: bounds.l,
@@ -454,6 +538,7 @@ function nudgeIntoFrame(
   xs: number[],
   ys: number[],
   prepared: PreparedLine[],
+  wordGaps: number[],
   unitW: number,
   unitH: number,
 ): void {
@@ -461,7 +546,7 @@ function nudgeIntoFrame(
   const innerT = FRAME + FIT_PAD;
   const innerR = unitW - FRAME - FIT_PAD;
   const innerB = unitH - FRAME - FIT_PAD;
-  const box = inkBounds(xs, ys, prepared);
+  const box = inkBounds(xs, ys, prepared, wordGaps);
   let dx = 0;
   let dy = 0;
   if (box.l < innerL) dx += innerL - box.l;
@@ -475,7 +560,13 @@ function nudgeIntoFrame(
   }
 }
 
-function placeSolution(sol: Solution, anchor: TypeAnchor, unitW: number, unitH: number): {
+function placeSolution(
+  sol: Solution,
+  anchor: TypeAnchor,
+  unitW: number,
+  unitH: number,
+  place?: { hx?: number; hy?: number },
+): {
   xs: number[];
   ys: number[];
 } {
@@ -485,96 +576,147 @@ function placeSolution(sol: Solution, anchor: TypeAnchor, unitW: number, unitH: 
   const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
   const bw = sol.bboxR - sol.bboxL;
   const bh = sol.bboxB - sol.bboxT;
-  const { hx, hy } = anchorFractions(anchor);
+  const frac = anchorFractions(anchor);
+  const hx = place?.hx ?? frac.hx;
+  const hy = place?.hy ?? frac.hy;
   const left = innerL + hx * Math.max(0, innerW - bw);
   const top = innerT + hy * Math.max(0, innerH - bh);
   const dx = left - sol.bboxL;
   const dy = top - sol.bboxT;
   const xs = sol.localXs.map((x) => x + dx);
   const ys = sol.localYs.map((y) => y + dy);
-  nudgeIntoFrame(xs, ys, sol.prepared, unitW, unitH);
+  nudgeIntoFrame(xs, ys, sol.prepared, sol.wordGaps, unitW, unitH);
   return { xs, ys };
 }
 
-function composeKey(state: TypeState, aspectKey: number): string {
+function isTypeDocument(input: TypeState | TypeBlock): input is TypeState {
+  return Array.isArray((input as TypeState).blocks);
+}
+
+function composeKey(block: TypeBlock, aspectKey: number): string {
   return [
-    "v11",
+    "v12",
     aspectKey,
-    state.text,
-    state.composition,
-    state.scale,
-    state.spacing,
-    state.weight,
+    block.text,
+    block.composition,
+    block.textAlign,
+    block.scale,
+    block.spacing,
+    block.weight,
   ].join("\t");
 }
 
-export function layoutTypography(state: TypeState, canvasW: number, canvasH: number): TypeLayout | null {
-  if (!state.enabled) return null;
-  const text = state.text.replace(/\s+$/g, "");
+function layoutBlock(
+  block: TypeBlock,
+  canvasW: number,
+  canvasH: number,
+  slot: 0 | 1,
+  place?: { hx?: number; hy?: number },
+): TypeLayout | null {
+  if (!block.enabled) return null;
+  const text = block.text.replace(/\s+$/g, "");
   if (!text.trim()) return null;
   const w = Math.max(2, canvasW);
   const h = Math.max(2, canvasH);
   const aspectKey = Math.round((h / w) * 10000);
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
-  const key = composeKey(state, aspectKey);
-  const authored = hardBlocks(text).length;
+  const key = composeKey(block, aspectKey);
 
   let sol: Solution;
-  if (cache && cache.key === key) {
-    sol = cache.solution;
+  const hit = caches[slot];
+  if (hit && hit.key === key) {
+    sol = hit.solution;
   } else {
-    const role = state.composition;
+    const role = block.composition;
     const candidates = authoredOrBroken(text, role);
     if (candidates.length === 0) return null;
-    const tEm = trackingEm(role, state.spacing);
-    const lead = leadingRatio(role, state.spacing);
+    const tEm = trackingEm(role, block.spacing);
+    const lead = leadingRatio(role, block.spacing);
     const innerW = unitW - FRAME * 2 - FIT_PAD * 2;
     const innerH = unitH - FRAME * 2 - FIT_PAD * 2;
-    const measure = role === "editorial" ? innerW * 0.74 : innerW;
+    const measure = roleMeasure(role, innerW);
     let lines = [...(role === "display" && candidates.length > 1
-      ? pickDisplayLines(candidates, state.weight, tEm, lead, measure, innerH)
+      ? pickDisplayLines(candidates, block.weight, tEm, lead, measure, innerH)
       : candidates[0])];
     if (role === "caption" && lines.length === 1) {
       const words = lines[0].split(/\s+/).filter(Boolean);
       const cap = unitW * 0.05;
-      const probe = prepareLines(lines, state.weight, cap, tEm * cap);
-      if (words.length >= 5 && inkWidth(probe[0].m) > innerW * 0.92) {
+      const probe = prepareLines(lines, block.weight, cap, tEm * cap);
+      if (words.length >= 5 && inkWidth(probe[0].m) > measure) {
         const pair = splitTwo(words);
         if (pair) lines = [pair[0], pair[1]];
       }
     }
-    sol = composeSolution(lines, role, state.scale, state.spacing, state.weight, unitW, unitH);
-    cache = { key, solution: sol };
+    sol = composeSolution(lines, role, block.scale, block.spacing, block.weight, unitW, unitH, block.textAlign);
+    caches[slot] = { key, solution: sol };
   }
 
-  const placed = alignFromAnchor(state.anchor);
-  const pts = placeSolution(sol, state.anchor, unitW, unitH);
+  const placed = alignFromAnchor(block.anchor);
+  const pts = placeSolution(sol, block.anchor, unitW, unitH, place);
   const laid: TypeLine[] = sol.lines.map((textLine, i) => ({
     text: textLine,
     width: sol.prepared[i].m.advance,
     height: sol.fontSize,
     x: pts.xs[i],
     y: pts.ys[i],
-    unit: authored > 1 ? i : 0,
+    wordGap: sol.wordGaps[i] ?? 0,
+    unit: 0,
   }));
 
   const layout: TypeLayout = {
     lines: laid,
     fontSize: sol.fontSize,
-    weight: state.weight,
+    weight: block.weight,
     tracking: sol.tracking,
     lineHeight: sol.leading,
     canvasW: unitW,
     canvasH: unitH,
-    color: state.color,
-    opacity: state.opacity / 100,
+    color: block.color,
+    opacity: block.opacity / 100,
     align: placed.align,
+    textAlign: block.textAlign,
     offsetX: 0,
     offsetY: 0,
-    composition: state.composition,
+    composition: block.composition,
   };
-  return clampProjected(projectLayout(layout, w, h), w, h, state.weight);
+  return clampProjected(projectLayout(layout, w, h), w, h, block.weight);
+}
+
+export function layoutTypography(
+  input: TypeState | TypeBlock,
+  canvasW: number,
+  canvasH: number,
+  slot: 0 | 1 = 0,
+  place?: { hx?: number; hy?: number },
+): TypeLayout | null {
+  if (isTypeDocument(input)) {
+    if (!input.enabled) return null;
+    return layoutBlock(input.blocks[0], canvasW, canvasH, slot, place);
+  }
+  return layoutBlock(input, canvasW, canvasH, slot, place);
+}
+
+export function layoutTypeDocument(
+  state: TypeState,
+  canvasW: number,
+  canvasH: number,
+): { index: 0 | 1; layout: TypeLayout }[] {
+  const active = activeTypeBlocks(state);
+  const both = active.length === 2;
+  const arrangement = both ? state.arrangement : "independent";
+  const out: { index: 0 | 1; layout: TypeLayout }[] = [];
+  for (const item of active) {
+    let place: { hx?: number; hy?: number } | undefined;
+    if (arrangement === "between-v") {
+      place = { hy: item.index === 0 ? 0 : 1 };
+    } else if (arrangement === "between-h") {
+      place = { hx: item.index === 0 ? 0 : 1 };
+    }
+    const layout = layoutBlock(item.block, canvasW, canvasH, item.index, place);
+    if (layout) out.push({ index: item.index, layout });
+  }
+  return out;
 }
 
 function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): TypeLayout {
@@ -586,6 +728,7 @@ function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): Type
       y: l.y * s,
       width: l.width * s,
       height: l.height * s,
+      wordGap: l.wordGap * s,
       unit: l.unit,
     })),
     fontSize: unit.fontSize * s,
@@ -597,6 +740,7 @@ function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): Type
     color: unit.color,
     opacity: unit.opacity,
     align: unit.align,
+    textAlign: unit.textAlign,
     offsetX: 0,
     offsetY: 0,
     composition: unit.composition,
@@ -616,11 +760,12 @@ function clampProjected(
     text: line.text,
     m: measureLine(line.text, weight, layout.fontSize, layout.tracking),
   }));
+  const wordGaps = layout.lines.map((line) => line.wordGap);
   const innerL = frame;
   const innerT = frame;
   const innerR = canvasW - frame;
   const innerB = canvasH - frame;
-  const box = inkBounds(xs, ys, pxPrepared);
+  const box = inkBounds(xs, ys, pxPrepared, wordGaps);
   let dx = 0;
   let dy = 0;
   if (box.l < innerL) dx += innerL - box.l;
@@ -635,11 +780,12 @@ function clampProjected(
 }
 
 export function invalidateTypeLayout(): void {
-  cache = null;
+  caches[0] = null;
+  caches[1] = null;
 }
 
 export function typeHasCopy(state: TypeState): boolean {
-  return state.enabled && state.text.trim().length > 0;
+  return activeTypeBlocks(state).length > 0;
 }
 
 export function ensureSwitzerMeasure(): void {
@@ -647,8 +793,8 @@ export function ensureSwitzerMeasure(): void {
 }
 
 export function debugLinePlan(state: TypeState, canvasW: number, canvasH: number): string[] {
-  const layout = layoutTypography(state, canvasW, canvasH);
-  return layout ? layout.lines.map((l) => l.text) : [];
+  const laid = layoutTypeDocument(state, canvasW, canvasH);
+  return laid.flatMap((item) => item.layout.lines.map((l) => l.text));
 }
 
 export function opticalFramePx(canvasW: number): number {
@@ -663,16 +809,14 @@ export function editorialColumnsPx(canvasW: number): number[] {
 }
 
 export function typeInkBox(layout: TypeLayout): { l: number; t: number; r: number; b: number } {
-  let l = Infinity;
-  let t = Infinity;
-  let r = -Infinity;
-  let b = -Infinity;
-  for (const line of layout.lines) {
-    const m = measureLine(line.text, layout.weight, layout.fontSize, layout.tracking);
-    l = Math.min(l, line.x - m.inkLeft);
-    r = Math.max(r, line.x + m.inkRight);
-    t = Math.min(t, line.y - m.ascent);
-    b = Math.max(b, line.y + m.descent);
-  }
-  return { l, t, r, b };
+  const prepared = layout.lines.map((line) => ({
+    text: line.text,
+    m: measureLine(line.text, layout.weight, layout.fontSize, layout.tracking),
+  }));
+  return inkBounds(
+    layout.lines.map((l) => l.x),
+    layout.lines.map((l) => l.y),
+    prepared,
+    layout.lines.map((l) => l.wordGap),
+  );
 }

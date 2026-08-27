@@ -6,13 +6,15 @@ export interface PhaseControlHandle {
   setPairCount(count: number): void;
 }
 
-/** Compact AUTO / HOLD + one scrubber. Dragging the scrubber enters HOLD.
- *  AUTO resumes live animation from the current phase. The readout is HOLD-
- *  only — it is how a designer lands on 0.00 / 0.50 without guessing. */
+/** Compact AUTO / HOLD + one scrubber.
+ *  AUTO + drag: preview that point; on release AUTO resumes from there.
+ *  HOLD + drag: change the held phase; release remains held.
+ *  The scrubber never switches Auto → Hold. */
 export function buildPhaseControl(
   container: HTMLElement,
   onMode: (mode: ClockMode) => void,
-  onScrub: (phase: number) => void
+  onScrub: (phase: number) => void,
+  onScrubLock?: (active: boolean) => void,
 ): PhaseControlHandle {
   container.innerHTML = "";
   container.className = "phase-control";
@@ -43,7 +45,7 @@ export function buildPhaseControl(
   slider.step = "0.01";
   slider.value = "0";
   slider.className = "phase-slider";
-  slider.title = "Sequence position. HOLD to inspect a frame in the loop.";
+  slider.title = "Sequence position. Auto resumes from the released point.";
   container.appendChild(slider);
 
   const dots = document.createElement("div");
@@ -61,6 +63,7 @@ export function buildPhaseControl(
   let suppress = false;
   let pairCount = 2;
   let lastPhase = 0;
+  let scrubbing = false;
 
   function paintDots(phase: number): void {
     const n = Math.max(1, pairCount);
@@ -81,18 +84,22 @@ export function buildPhaseControl(
   function syncModeUi(): void {
     autoBtn.classList.toggle("active", mode === "auto");
     holdBtn.classList.toggle("active", mode === "hold");
-    readout.hidden = mode !== "hold";
+    readout.hidden = mode !== "hold" && !scrubbing;
   }
 
   function emitScrub(): void {
     const phase = parseFloat(slider.value);
+    lastPhase = phase;
     readout.textContent = phase.toFixed(2);
-    if (mode !== "hold") {
-      mode = "hold";
-      syncModeUi();
-      onMode("hold");
-    }
+    paintDots(phase);
     onScrub(phase);
+  }
+
+  function endScrub(): void {
+    if (!scrubbing) return;
+    scrubbing = false;
+    syncModeUi();
+    onScrubLock?.(false);
   }
 
   autoBtn.addEventListener("click", () => {
@@ -105,13 +112,15 @@ export function buildPhaseControl(
     syncModeUi();
     onMode("hold");
   });
-  slider.addEventListener("pointerdown", () => {
-    if (mode !== "hold") {
-      mode = "hold";
-      syncModeUi();
-      onMode("hold");
-    }
+  slider.addEventListener("pointerdown", (e) => {
+    scrubbing = true;
+    slider.setPointerCapture(e.pointerId);
+    syncModeUi();
+    onScrubLock?.(true);
   });
+  slider.addEventListener("pointerup", endScrub);
+  slider.addEventListener("pointercancel", endScrub);
+  slider.addEventListener("lostpointercapture", endScrub);
   slider.addEventListener("input", () => {
     if (suppress) return;
     emitScrub();
@@ -124,6 +133,7 @@ export function buildPhaseControl(
     setDisplayedPhase(phase: number): void {
       const v = Math.min(1, Math.max(0, phase));
       lastPhase = v;
+      if (scrubbing) return;
       suppress = true;
       slider.value = String(v);
       readout.textContent = v.toFixed(2);

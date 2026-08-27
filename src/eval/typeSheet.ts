@@ -1,12 +1,13 @@
 import { mbmById } from "./mbmCopy";
 import {
   clampTypeState,
+  primaryBlock,
   TYPE_ANCHORS,
   type TypeAnchor,
   type TypeRole,
   type TypeState,
 } from "../core/typeState";
-import { editorialColumnsPx, layoutTypography, opticalFramePx, typeInkBox } from "../core/typeLayout";
+import { editorialColumnsPx, layoutTypography, layoutTypeDocument, opticalFramePx, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 
@@ -168,7 +169,7 @@ function cell(
   const ctx = canvas.getContext("2d")!;
   photoGround(ctx, w, h);
   const layout = layoutTypography(state, w, h);
-  if (layout) paintTypeLayer(ctx, layout, state.color, layout.opacity);
+  if (layout) paintTypeLayer(ctx, layout, layout.color, layout.opacity);
   if (guide) drawGrid(ctx, w, h);
   const cap = document.createElement("figcaption");
   cap.textContent = label;
@@ -197,7 +198,8 @@ function pages(
     row.className = "page-row";
     root.appendChild(row);
     const state = stateFor(c);
-    const extra = [c.note, `s${state.scale}`, `sp${state.spacing}`, state.anchor].filter(Boolean).join(" · ");
+    const block = primaryBlock(state);
+    const extra = [c.note, `s${block.scale}`, `sp${block.spacing}`, block.anchor].filter(Boolean).join(" · ");
     for (const aspect of ASPECTS) {
       const r = cell(row, `${c.copyId} · ${c.role} · ${aspect.id} · ${extra}`, aspect.w, aspect.h, state, guide);
       out.push({ copy: c.copyId, composition: c.role, aspect: aspect.id, lines: r.lines, fontSize: r.fontSize });
@@ -213,8 +215,8 @@ function countOutsidePixels(w: number, h: number, state: TypeState): number {
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
-  const layout = layoutTypography(state, w, h);
-  if (layout) paintTypeLayer(ctx, layout, "#ffffff", 1);
+  const laid = layoutTypeDocument(state, w, h);
+  for (const item of laid) paintTypeLayer(ctx, item.layout, "#ffffff", 1, null, item.index);
   const frame = opticalFramePx(w);
   const insideL = Math.max(0, Math.ceil(frame));
   const insideT = Math.max(0, Math.ceil(frame));
@@ -388,6 +390,11 @@ export interface SheetReport {
   overflow: { outsideTotal: number; inkOutsideTotal: number; failures: ProofCase[] };
   positionInvariant: { copy: string; match: boolean; lines: string[] }[];
   longCopy: { text: string; lines: string[]; fontSize: number; lineCount: number };
+  twoBlocks: {
+    betweenV: boolean;
+    betweenH: boolean;
+    justify: { lines: number; lastGap: number; innerGap: number };
+  };
   proofCount: number;
   elapsedMs: number;
 }
@@ -477,6 +484,55 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
   const invariant = positionInvariant();
   const proofCount = PROOF_SETS.length * 5 * TYPE_ANCHORS.length * ASPECTS.length + 3 * TYPE_ANCHORS.length * 2;
 
+  const twoFolio = clampTypeState({
+    enabled: true,
+    arrangement: "between-v",
+    blocks: [
+      { enabled: true, text: "07.09", composition: "folio", scale: 100, anchor: "tc", color: "#f3efe6" },
+      { enabled: true, text: "2026", composition: "folio", scale: 100, anchor: "bc", color: "#f3efe6" },
+    ],
+  });
+  const twoH = clampTypeState({
+    enabled: true,
+    arrangement: "between-h",
+    blocks: [
+      { enabled: true, text: "MADE BY MADELEN", composition: "display", scale: 50, anchor: "ml", color: "#f3efe6" },
+      { enabled: true, text: "07.09.2026", composition: "folio", scale: 40, anchor: "mr", color: "#f3efe6" },
+    ],
+  });
+  const justState = clampTypeState({
+    enabled: true,
+    blocks: [{
+      enabled: true,
+      text: "WELCOME TO THE MBM WORLD MADE BY MADELEN",
+      composition: "editorial",
+      textAlign: "justify",
+      scale: 80,
+      spacing: 50,
+      color: "#f3efe6",
+      anchor: "ml",
+    }],
+  });
+  const vLaid = layoutTypeDocument(twoFolio, 500, 625);
+  const hLaid = layoutTypeDocument(twoH, 500, 625);
+  const justLayout = layoutTypography(justState, 500, 625);
+  const vTop = vLaid[0]?.layout;
+  const vBot = vLaid[1]?.layout;
+  const hLeft = hLaid[0]?.layout;
+  const hRight = hLaid[1]?.layout;
+  const betweenV = Boolean(vTop && vBot && vBot.lines[0]!.y - vTop.lines[0]!.y > 200 && vTop.lines[0]!.y < vBot.lines[0]!.y);
+  const betweenH = Boolean(hLeft && hRight && hRight.lines[0]!.x - hLeft.lines[0]!.x > 40);
+
+  for (const pair of [twoFolio, twoH, justState]) {
+    for (const aspect of [...ASPECTS, { id: "1080", w: 1080, h: 1350 }]) {
+      const outside = countOutsidePixels(aspect.w, aspect.h, pair);
+      if (outside > 0) overflow.outsideTotal += outside;
+    }
+  }
+
+  const justInner = justLayout?.lines.slice(0, -1).reduce((m, l) => Math.max(m, l.wordGap), 0) ?? 0;
+  const justLast = justLayout?.lines.length ? justLayout.lines[justLayout.lines.length - 1]!.wordGap : 0;
+
   return {
     plans,
     exportParity,
@@ -497,6 +553,15 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
       lines: welcomeLayout?.lines.map((l) => l.text) ?? [],
       fontSize: welcomeLayout?.fontSize ?? 0,
       lineCount: welcomeLayout?.lines.length ?? 0,
+    },
+    twoBlocks: {
+      betweenV,
+      betweenH,
+      justify: {
+        lines: justLayout?.lines.length ?? 0,
+        lastGap: justLast,
+        innerGap: justInner,
+      },
     },
     proofCount,
     elapsedMs: Math.round(performance.now() - t0),

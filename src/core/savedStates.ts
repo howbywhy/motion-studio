@@ -1,6 +1,6 @@
 import type { MediaAsset, MediaTransform } from "./media";
 import type { ParamValues } from "./types";
-import type { TypeState } from "./typeState";
+import { clampTypeState, cloneTypeState, type TypeState } from "./typeState";
 
 /** A lightweight, in-memory (session-only) capture of enough state to
  * recreate the exact output: behavior, expression/treatment (folded into
@@ -75,7 +75,7 @@ export function duplicateSavedState(id: string): SavedState | null {
     name: `${found.name} copy`,
     createdAt: Date.now(),
     params: { ...found.params },
-    type: found.type ? { ...found.type } : undefined,
+    type: found.type ? cloneTypeState(clampTypeState(found.type)) : undefined,
     sources: found.sources.map((s) => ({ ...s, transform: { ...s.transform } })),
   };
   states = [...states, copy];

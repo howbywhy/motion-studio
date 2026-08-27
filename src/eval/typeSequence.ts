@@ -1,8 +1,8 @@
 import { mbmById } from "./mbmCopy";
-import { clampTypeState, type TypeRole, type TypeSequenceMode, type TypeState } from "../core/typeState";
-import { layoutTypography } from "../core/typeLayout";
+import { clampTypeState, type TypeAnchor, type TypeRole, type TypeSequenceMode, type TypeState } from "../core/typeState";
+import { layoutTypeDocument, layoutTypography } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
-import { evaluateTypeSequence } from "../core/typeMotion";
+import { evaluateTypeSequence, evaluateTypeSequences } from "../core/typeMotion";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 
 const ASPECTS: { id: string; w: number; h: number }[] = [
@@ -18,7 +18,7 @@ interface SeqCase {
   role: TypeRole;
   scale: number;
   spacing: number;
-  anchor?: TypeState["anchor"];
+  anchor?: TypeAnchor;
 }
 
 const CASES: SeqCase[] = [
@@ -53,6 +53,19 @@ function stateFor(c: SeqCase, mode: TypeSequenceMode, pace = 50): TypeState {
   });
 }
 
+function twoFolio(mode: TypeSequenceMode): TypeState {
+  return clampTypeState({
+    enabled: true,
+    arrangement: "between-v",
+    typeSequenceMode: mode,
+    typeSequencePace: 50,
+    blocks: [
+      { enabled: true, text: "07.09", composition: "folio", scale: 100, anchor: "tc", color: "#f3efe6" },
+      { enabled: true, text: "2026", composition: "folio", scale: 100, anchor: "bc", color: "#f3efe6" },
+    ],
+  });
+}
+
 function photo(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const g = ctx.createLinearGradient(0, 0, w, h);
   g.addColorStop(0, "#6a3f2c");
@@ -79,14 +92,17 @@ function paint(state: TypeState, w: number, h: number, phase: number, sequenced:
   const ctx = c.getContext("2d")!;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, w, h);
-  const layout = layoutTypography(state, w, h);
-  if (!layout) return c;
+  const laid = layoutTypeDocument(state, w, h);
+  if (laid.length === 0) return c;
   if (!sequenced) {
-    paintTypeLayer(ctx, layout, "#ffffff", 1);
+    for (const item of laid) paintTypeLayer(ctx, item.layout, item.layout.color, item.layout.opacity, null, item.index);
     return c;
   }
-  const seq = evaluateTypeSequence(state, layout, phase);
-  paintTypeLayer(ctx, layout, "#ffffff", 1, seq);
+  const seqs = evaluateTypeSequences(state, laid.map((item) => item.layout), phase);
+  for (let i = 0; i < laid.length; i++) {
+    const item = laid[i]!;
+    paintTypeLayer(ctx, item.layout, item.layout.color, item.layout.opacity, seqs[i], item.index);
+  }
   return c;
 }
 
@@ -110,7 +126,7 @@ export async function runTypeSequence(root: HTMLElement): Promise<SequenceReport
   title.textContent = "MBM type sequence";
   root.appendChild(title);
   const lead = document.createElement("p");
-  lead.textContent = "Eval-only. Static layout first. Time only reveals authored newline units.";
+  lead.textContent = "Eval-only. Each enabled block is one sequence unit. Together is identity.";
   root.appendChild(lead);
 
   for (const c of CASES) {
@@ -136,7 +152,7 @@ export async function runTypeSequence(root: HTMLElement): Promise<SequenceReport
           const layout = layoutTypography(state, aspect.w, aspect.h);
           if (layout) {
             const seq = evaluateTypeSequence(state, layout, phase);
-            paintTypeLayer(ctx, layout, state.color, layout.opacity, seq);
+            paintTypeLayer(ctx, layout, layout.color, layout.opacity, seq);
           }
           const cap = document.createElement("figcaption");
           cap.textContent = `${aspect.id} · p${phase}`;
@@ -171,57 +187,58 @@ export async function runTypeSequence(root: HTMLElement): Promise<SequenceReport
 
   const holdKeepsPosition: SequenceReport["holdKeepsPosition"] = [];
   {
-    const state = stateFor({ copyId: "date-split", role: "folio", scale: 100, spacing: 100, anchor: "mc" }, "hold");
-    const layout = layoutTypography(state, 500, 625)!;
-    const seq0 = evaluateTypeSequence(state, layout, 0.1);
-    const seq1 = evaluateTypeSequence(state, layout, 0.7);
-    const top = layout.lines.find((l) => l.unit === 0)!;
-    const bot = layout.lines.find((l) => l.unit === 1)!;
+    const state = twoFolio("hold");
+    const laid = layoutTypeDocument(state, 500, 625);
+    const seq0 = evaluateTypeSequences(state, laid.map((item) => item.layout), 0.1);
+    const seq1 = evaluateTypeSequences(state, laid.map((item) => item.layout), 0.7);
+    const top = laid[0]!.layout.lines[0]!;
+    const bot = laid[1]!.layout.lines[0]!;
     holdKeepsPosition.push({
-      copy: "date-split",
+      copy: "07.09 / 2026",
       line: top.text,
       restY: top.y,
       phase: 0.1,
-      match: seq0.units[0]!.opacity > 0.9 && Math.abs(seq0.units[0]!.dx) < 0.5 && seq0.units[1]!.opacity < 0.05,
+      match: seq0[0]!.units[0]!.opacity > 0.9 && Math.abs(seq0[0]!.units[0]!.dx) < 0.5 && seq0[1]!.units[0]!.opacity < 0.05,
     });
     holdKeepsPosition.push({
-      copy: "date-split",
+      copy: "07.09 / 2026",
       line: bot.text,
       restY: bot.y,
       phase: 0.7,
-      match: seq1.units[1]!.opacity > 0.9 && seq1.units[0]!.opacity < 0.05 && bot.y > 400,
+      match: seq1[1]!.units[0]!.opacity > 0.9 && seq1[0]!.units[0]!.opacity < 0.05 && bot.y > 400,
     });
   }
 
   const exportParity: SequenceReport["exportParity"] = [];
   for (const mode of ["stagger", "hold", "alternate"] as TypeSequenceMode[]) {
-    const state = stateFor({ copyId: "date-split", role: "folio", scale: 100, spacing: 100 }, mode);
-    const la = layoutTypography(state, 500, 625)!;
-    const lb = layoutTypography(state, 1080, 1350)!;
-    const lc = layoutTypography(state, 2160, 2700)!;
-    const pa = evaluateTypeSequence(state, la, 0.3);
-    const pb = evaluateTypeSequence(state, lb, 0.3);
-    const pc = evaluateTypeSequence(state, lc, 0.3);
-    const opacities = (s: typeof pa) => s.units.map((u) => Number(u.opacity.toFixed(4)));
+    const state = twoFolio(mode);
+    const la = layoutTypeDocument(state, 500, 625);
+    const lb = layoutTypeDocument(state, 1080, 1350);
+    const lc = layoutTypeDocument(state, 2160, 2700);
+    const pa = evaluateTypeSequences(state, la.map((item) => item.layout), 0.3);
+    const pb = evaluateTypeSequences(state, lb.map((item) => item.layout), 0.3);
+    const pc = evaluateTypeSequences(state, lc.map((item) => item.layout), 0.3);
+    const opacities = (s: typeof pa) => s.map((item) => Number(item.units[0]!.opacity.toFixed(4)));
     exportParity.push({
-      copy: "date-split",
+      copy: "07.09 / 2026",
       mode,
       preview: opacities(pa),
       full: opacities(pb),
       match:
         opacities(pa).join() === opacities(pb).join() &&
         opacities(pb).join() === opacities(pc).join() &&
-        la.lines.map((l) => l.text).join("|") === lc.lines.map((l) => l.text).join("|"),
+        la.map((item) => item.layout.lines.map((l) => l.text).join("|")).join("/") ===
+          lc.map((item) => item.layout.lines.map((l) => l.text).join("|")).join("/"),
     });
   }
 
   const folio: SequenceReport["folio"] = [];
   {
-    const state = stateFor({ copyId: "date-split", role: "folio", scale: 100, spacing: 100 }, "stagger");
-    const layout = layoutTypography(state, 500, 625)!;
+    const state = twoFolio("stagger");
+    const laid = layoutTypeDocument(state, 500, 625);
     for (const phase of PHASES) {
-      const seq = evaluateTypeSequence(state, layout, phase);
-      folio.push({ mode: "stagger", phase, opacities: seq.units.map((u) => Number(u.opacity.toFixed(3))) });
+      const seq = evaluateTypeSequences(state, laid.map((item) => item.layout), phase);
+      folio.push({ mode: "stagger", phase, opacities: seq.map((item) => Number(item.units[0]!.opacity.toFixed(3))) });
     }
   }
 

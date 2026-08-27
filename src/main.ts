@@ -15,9 +15,9 @@ import { buildBloomFieldMap } from "./ui/bloomFieldMap";
 import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
 import { loadSwitzer } from "./core/typeFont";
-import { clampTypeState, defaultTypeState } from "./core/typeState";
-import { debugLinePlan, layoutTypography } from "./core/typeLayout";
-import { evaluateTypeSequence } from "./core/typeMotion";
+import { clampTypeState, cloneTypeState, defaultTypeState } from "./core/typeState";
+import { debugLinePlan, layoutTypeDocument } from "./core/typeLayout";
+import { evaluateTypeSequences } from "./core/typeMotion";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
@@ -125,9 +125,15 @@ app.innerHTML = `
         </div>
       </section>
       <aside class="control-panel">
+        <div class="inspector-tabs" id="inspector-tabs">
+          <button type="button" data-tab="composition" class="active">Composition</button>
+          <button type="button" data-tab="type">Type</button>
+          <button type="button" data-tab="bloom">Bloom</button>
+        </div>
+        <div class="tab-page" data-page="composition">
           <div class="composition-panel" id="composition-panel">
             <div class="panel-label-row">
-              <label class="panel-label">Composition</label>
+              <label class="panel-label">Source</label>
             </div>
             <div id="composition-controls"></div>
             <button type="button" class="reset-btn" id="composition-reset">Reset</button>
@@ -137,33 +143,38 @@ app.innerHTML = `
               <button type="button" class="reset-btn" id="bg-colour-reset" title="Restore the default background colour">Reset</button>
             </div>
           </div>
-        <div id="type-panel" class="type-panel"></div>
-        <div class="graphic-panel" id="graphic-panel" hidden></div>
-        <div class="behavior-meta">
-          <h2 id="behavior-title"></h2>
-          <p id="behavior-desc" class="behavior-desc"></p>
-        </div>
-        <div class="treatment-panel" id="treatment-panel" hidden>
-          <label class="panel-label" id="treatment-label">Treatment</label>
-          <div class="seg-toggle treatment-toggle" id="treatment-toggle"></div>
-          <button type="button" class="diagnostic-toggle image-aware-toggle" id="image-aware" title="Experimental: bias field placement toward visually information-rich areas of the photograph">
-            Image Aware
-          </button>
-        </div>
-        <div class="preset-panel" id="preset-panel" hidden>
-          <label class="panel-label" id="preset-label">Preset</label>
-          <div class="seg-toggle preset-toggle" id="preset-toggle"></div>
-        </div>
-        <div class="saved-panel">
-          <div class="panel-label-row">
-            <label class="panel-label">Saved States</label>
-            <button type="button" class="reset-btn" id="save-state-btn">Save Current</button>
+          <div class="saved-panel">
+            <div class="panel-label-row">
+              <label class="panel-label">Saved States</label>
+              <button type="button" class="reset-btn" id="save-state-btn">Save Current</button>
+            </div>
+            <div id="saved-states-list" class="saved-states-list"></div>
+            <p class="saved-states-empty" id="saved-states-empty">No saved states yet.</p>
           </div>
-          <div id="saved-states-list" class="saved-states-list"></div>
-          <p class="saved-states-empty" id="saved-states-empty">No saved states yet.</p>
         </div>
-        <div id="bloom-field-map" hidden></div>
-        <div id="controls"></div>
+        <div class="tab-page" data-page="type" hidden>
+          <div id="type-panel" class="type-panel"></div>
+        </div>
+        <div class="tab-page" data-page="bloom" hidden>
+          <div class="graphic-panel" id="graphic-panel" hidden></div>
+          <div class="behavior-meta">
+            <h2 id="behavior-title"></h2>
+            <p id="behavior-desc" class="behavior-desc"></p>
+          </div>
+          <div class="treatment-panel" id="treatment-panel" hidden>
+            <label class="panel-label" id="treatment-label">Treatment</label>
+            <div class="seg-toggle treatment-toggle" id="treatment-toggle"></div>
+            <button type="button" class="diagnostic-toggle image-aware-toggle" id="image-aware" title="Experimental: bias field placement toward visually information-rich areas of the photograph">
+              Image Aware
+            </button>
+          </div>
+          <div class="preset-panel" id="preset-panel" hidden>
+            <label class="panel-label" id="preset-label">Preset</label>
+            <div class="seg-toggle preset-toggle" id="preset-toggle"></div>
+          </div>
+          <div id="bloom-field-map" hidden></div>
+          <div id="controls"></div>
+        </div>
       </aside>
     </main>
   </div>
@@ -223,6 +234,17 @@ const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
   renderer.patchTypeState(patch);
 });
 
+const inspectorTabs = document.querySelector<HTMLDivElement>("#inspector-tabs")!;
+inspectorTabs.addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest("button");
+  const tab = btn?.getAttribute("data-tab");
+  if (!tab) return;
+  inspectorTabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll<HTMLElement>(".tab-page").forEach((page) => {
+    page.hidden = page.getAttribute("data-page") !== tab;
+  });
+});
+
 const phaseUi = buildPhaseControl(
   document.querySelector<HTMLDivElement>("#phase-control")!,
   (mode) => {
@@ -230,8 +252,12 @@ const phaseUi = buildPhaseControl(
     phaseUi.setDisplayedPhase(renderer.getPhase());
   },
   (phase) => {
-    renderer.setHoldPhase(phase);
-  }
+    renderer.seekLoopPhase(phase);
+  },
+  (active) => {
+    if (active) renderer.beginPhaseScrub();
+    else renderer.endPhaseScrub();
+  },
 );
 
 const bloomFieldMap = buildBloomFieldMap(document.querySelector<HTMLDivElement>("#bloom-field-map")!);
@@ -427,9 +453,9 @@ renderer.onFrame = () => {
 };
 
 const transformParamDefs: ParamDef[] = [
-  { type: "range", key: "scale", label: "Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" },
-  { type: "range", key: "x", label: "Position X", min: -100, max: 100, step: 1, default: 0, unit: "%" },
-  { type: "range", key: "y", label: "Position Y", min: -100, max: 100, step: 1, default: 0, unit: "%" },
+  { type: "range", key: "scale", label: "Source Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" },
+  { type: "range", key: "x", label: "Source Position X", min: -100, max: 100, step: 1, default: 0, unit: "%" },
+  { type: "range", key: "y", label: "Source Position Y", min: -100, max: 100, step: 1, default: 0, unit: "%" },
 ];
 
 function compositionValues(): ParamValues {
@@ -1065,7 +1091,7 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     frozen: renderer.isFrozen(),
     playing: renderer.isPlaying(),
     randomisationSeed,
-    type: { ...renderer.getTypeState() },
+    type: cloneTypeState(renderer.getTypeState()),
     sources: renderer.getSequence().map((item) => ({
       id: item.id,
       asset: item.asset,
@@ -1391,6 +1417,12 @@ Object.assign(window, {
       phaseUi.setMode("hold");
       phaseUi.setDisplayedPhase(phase);
     },
+    seekLoopPhase: (phase: number) => {
+      renderer.seekLoopPhase(phase);
+      phaseUi.setDisplayedPhase(phase);
+    },
+    beginPhaseScrub: () => renderer.beginPhaseScrub(),
+    endPhaseScrub: () => renderer.endPhaseScrub(),
     setClockMode: (mode: "auto" | "hold") => {
       renderer.setClockMode(mode);
       phaseUi.setMode(mode);
@@ -1451,7 +1483,7 @@ Object.assign(window, {
       rebuildPlaceholderAssets();
     },
     getPlaceholderBg: () => placeholderBg,
-    getTypeState: () => ({ ...renderer.getTypeState() }),
+    getTypeState: () => cloneTypeState(renderer.getTypeState()),
     setTypeState: (patch: Record<string, unknown>) => {
       renderer.patchTypeState(clampTypeState({ ...renderer.getTypeState(), ...patch }));
       typeUi.sync(renderer.getTypeState());
@@ -1461,17 +1493,22 @@ Object.assign(window, {
       const cw = w ?? size.width;
       const ch = h ?? size.height;
       const state = renderer.getTypeState();
-      const layout = layoutTypography(state, cw, ch);
-      const sequence = layout ? evaluateTypeSequence(state, layout, renderer.getLoopPhase()) : null;
+      const laid = layoutTypeDocument(state, cw, ch);
+      const sequences = evaluateTypeSequences(state, laid.map((item) => item.layout), renderer.getLoopPhase());
       return {
         lines: debugLinePlan(state, cw, ch),
-        fontSize: layout?.fontSize ?? 0,
+        fontSize: laid[0]?.layout.fontSize ?? 0,
         canvas: { w: cw, h: ch },
-        opacity: layout?.opacity ?? 0,
-        offsetX: layout?.offsetX ?? 0,
-        offsetY: layout?.offsetY ?? 0,
-        placed: layout?.lines.map((l) => ({ text: l.text, x: l.x, y: l.y, width: l.width, height: l.height, unit: l.unit })) ?? [],
-        sequence,
+        blocks: laid.map((item, i) => ({
+          index: item.index,
+          opacity: item.layout.opacity,
+          offsetX: item.layout.offsetX,
+          offsetY: item.layout.offsetY,
+          placed: item.layout.lines.map((l) => ({
+            text: l.text, x: l.x, y: l.y, width: l.width, height: l.height, wordGap: l.wordGap, unit: l.unit,
+          })),
+          sequence: sequences[i] ?? null,
+        })),
         phase: renderer.getLoopPhase(),
       };
     },

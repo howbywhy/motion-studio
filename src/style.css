@@ -487,6 +487,42 @@ body {
   overflow-y: auto;
 }
 
+.inspector-tabs {
+  display: flex;
+  gap: 0;
+  margin: -20px -20px 16px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--panel-border);
+  position: sticky;
+  top: -20px;
+  background: var(--panel);
+  z-index: 2;
+}
+
+.inspector-tabs button {
+  flex: 1;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 12px 4px 10px;
+  cursor: pointer;
+}
+
+.inspector-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.tab-page[hidden] {
+  display: none;
+}
+
 .behavior-meta h2 {
   font-size: 14px;
   margin: 0 0 6px;
@@ -503,8 +539,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 20px;
-  padding-bottom: 20px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--panel-border);
 }
 
@@ -540,9 +576,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .type-panel .control-row {
@@ -595,6 +631,17 @@ body {
 .type-disabled .type-group,
 .type-disabled .type-panel-body {
   display: none;
+}
+
+.type-block-on {
+  margin-left: auto;
+  font-size: 9px;
+}
+
+.type-arrange {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-border);
 }
 
 .type-xy-svg {

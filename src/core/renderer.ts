@@ -6,9 +6,9 @@ import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrati
 import { paintGoldenMasterRegistration } from "./globalRegistration";
 import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
-import { layoutTypography } from "./typeLayout";
+import { layoutTypeDocument } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
-import { evaluateTypeSequence } from "./typeMotion";
+import { evaluateTypeSequences } from "./typeMotion";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -204,6 +204,8 @@ export class Renderer {
    * (phase only) and Video Pause (source video only). Export ignores this
    * and still walks the full deterministic loop. */
   private frozen = false;
+  /** True while the loop scrubber is held. Auto elapsed does not advance. */
+  private phaseScrubbing = false;
   lastProfile: FrameProfile | null = null;
   private exporting = false;
   private exportClock: { loopPhase: number; graphicTime: number } | null = null;
@@ -522,12 +524,12 @@ export class Renderer {
     this.renderFrame();
   }
 
-  setTypeState(next: TypeState | Partial<TypeState>): void {
+  setTypeState(next: TypeState | Partial<TypeState> | Record<string, unknown>): void {
     this.typeState = clampTypeState({ ...this.typeState, ...next });
     this.renderFrame();
   }
 
-  patchTypeState(patch: Partial<TypeState>): void {
+  patchTypeState(patch: Partial<TypeState> | Record<string, unknown>): void {
     this.setTypeState({ ...this.typeState, ...patch });
   }
 
@@ -595,6 +597,24 @@ export class Renderer {
     this.clockMode = "hold";
     this.holdPhase = clampLoopPhase(phase);
     this.renderFrame();
+  }
+
+  /** Seek the loop without changing Auto / Hold. Renderer remains the clock. */
+  seekLoopPhase(phase: number): void {
+    const p = clampLoopPhase(phase);
+    if (this.clockMode === "hold") this.holdPhase = p;
+    else this.elapsed = p * this.loopSeconds;
+    this.renderFrame();
+  }
+
+  beginPhaseScrub(): void {
+    this.phaseScrubbing = true;
+  }
+
+  endPhaseScrub(): void {
+    if (!this.phaseScrubbing) return;
+    this.phaseScrubbing = false;
+    this.lastTs = performance.now();
   }
 
   restoreClock(mode: ClockMode, holdPhase: number, elapsed: number): void {
@@ -1062,7 +1082,7 @@ export class Renderer {
     const dt = (ts - this.lastTs) / 1000;
     this.lastTs = ts;
     if (!this.frozen) {
-      if (this.clockMode === "auto") this.elapsed += dt;
+      if (this.clockMode === "auto" && !this.phaseScrubbing) this.elapsed += dt;
       if (this.hasLiveGraphic()) this.graphicElapsed += dt;
       this.renderFrame();
       this.syncAudio();
@@ -1387,10 +1407,13 @@ export class Renderer {
 
     const paintType = (): void => {
       const type = this.typeState;
-      const layout = layoutTypography(type, width, height);
-      if (!layout) return;
-      const sequence = evaluateTypeSequence(type, layout, this.getLoopPhase());
-      paintTypeLayer(composedCtx, layout, type.color, layout.opacity, sequence);
+      const laid = layoutTypeDocument(type, width, height);
+      if (laid.length === 0) return;
+      const sequences = evaluateTypeSequences(type, laid.map((item) => item.layout), this.getLoopPhase());
+      for (let i = 0; i < laid.length; i++) {
+        const item = laid[i]!;
+        paintTypeLayer(composedCtx, item.layout, item.layout.color, item.layout.opacity, sequences[i], item.index);
+      }
     };
 
     if (this.typeBeforeRegistration) paintType();
