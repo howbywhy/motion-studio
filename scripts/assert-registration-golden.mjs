@@ -40,6 +40,14 @@ mustContain("src/behaviors/bloom/treatments.ts", "true,");
 mustContain("src/core/renderer.ts", "paintGoldenMasterRegistration");
 mustContain("src/core/renderer.ts", "lastBloomFieldMap()");
 mustContain("src/core/renderer.ts", "this.bwMode === \"both\"");
+mustContain("src/core/globalRegistration.ts", "export const REGISTRATION_AMOUNT_DEFAULT = 50");
+mustContain("src/core/globalRegistration.ts", "registrationPaintAmount");
+mustContain("src/core/globalRegistration.ts", "(clampRegistrationAmount(uiAmount) / 100) * (BLOOM_REGISTRATION_AMOUNT * 2)");
+mustContain("src/core/renderer.ts", "this.registrationAmount");
+mustContain("src/core/endBehaviour.ts", 'if (raw === "flicker" || raw === "fracture") return "flicker"');
+
+mustNotContain("src/ui/endBehaviourPanel.ts", "Fracture");
+mustNotContain("src/core/endBehaviour.ts", 'kind: "fracture"');
 
 mustNotContain("src/core/renderer.ts", "prepareFieldPrintInk");
 mustNotContain("src/core/renderer.ts", "paintLockedGlobalRegistration");

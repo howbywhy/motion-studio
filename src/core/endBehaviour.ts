@@ -4,7 +4,7 @@ import type { PlaybackMode } from "./sequence";
  * It is a loop-seam interruption, not a continuous effect and not a second clock.
  * OFF is a true bypass: no canvas reads, no snapshots, no draws. */
 
-export type EndBehaviourMode = "off" | "flicker" | "fracture";
+export type EndBehaviourMode = "off" | "flicker";
 export type EndRegion = "off" | "pingpong" | "before" | "hold" | "disrupt";
 export type FlickerState = "resolved" | "joltA" | "joltB" | "joltC";
 
@@ -40,7 +40,7 @@ export interface EndPlan {
   local: number;
   envelope: number;
   seed: number;
-  kind: "identity" | "flicker" | "fracture";
+  kind: "identity" | "flicker";
   flickerState: FlickerState | null;
   fragmentCount: number;
   maxDisplacement: number;
@@ -88,12 +88,6 @@ export const END_BEHAVIOUR_FLICKER_DEFAULTS: Pick<EndBehaviourSettings, "amount"
   duration: 35,
 };
 
-export const END_BEHAVIOUR_FRACTURE_DEFAULTS: Pick<EndBehaviourSettings, "amount" | "hold" | "duration"> = {
-  amount: 50,
-  hold: 40,
-  duration: 45,
-};
-
 const RGB_SKIP = 0.42;
 
 const scratchPool: Record<string, HTMLCanvasElement> = {};
@@ -138,18 +132,20 @@ function signed(seed: number, lane: number): number {
   return unit(seed, lane) * 2 - 1;
 }
 
+/** PRODUCT: off | flicker. COMPAT: legacy `"fracture"` maps to flicker. */
 export function parseEndBehaviourMode(raw: unknown): EndBehaviourMode {
-  if (raw === "flicker" || raw === "fracture") return raw;
+  if (raw === "flicker" || raw === "fracture") return "flicker";
   return "off";
 }
 
-export function clampEndBehaviourSettings(raw: Partial<EndBehaviourSettings> | null | undefined): EndBehaviourSettings {
+export function clampEndBehaviourSettings(raw: {
+  mode?: unknown;
+  amount?: number;
+  hold?: number;
+  duration?: number;
+} | null | undefined): EndBehaviourSettings {
   const mode = parseEndBehaviourMode(raw?.mode);
-  const fallback = mode === "flicker"
-    ? END_BEHAVIOUR_FLICKER_DEFAULTS
-    : mode === "fracture"
-      ? END_BEHAVIOUR_FRACTURE_DEFAULTS
-      : END_BEHAVIOUR_OFF;
+  const fallback = mode === "flicker" ? END_BEHAVIOUR_FLICKER_DEFAULTS : END_BEHAVIOUR_OFF;
   return {
     mode,
     amount: clamp100(raw?.amount, fallback.amount),
@@ -160,7 +156,6 @@ export function clampEndBehaviourSettings(raw: Partial<EndBehaviourSettings> | n
 
 export function defaultsForEndMode(mode: EndBehaviourMode): EndBehaviourSettings {
   if (mode === "flicker") return { mode, ...END_BEHAVIOUR_FLICKER_DEFAULTS };
-  if (mode === "fracture") return { mode, ...END_BEHAVIOUR_FRACTURE_DEFAULTS };
   return { ...END_BEHAVIOUR_OFF };
 }
 
@@ -173,7 +168,7 @@ export function endWindows(hold: number, duration: number): EndWindow {
 }
 
 export function endBehaviourSeed(settings: EndBehaviourSettings): number {
-  const modeBit = settings.mode === "fracture" ? 3 : settings.mode === "flicker" ? 1 : 0;
+  const modeBit = settings.mode === "flicker" ? 1 : 0;
   return mix(((settings.amount | 0) * 2654435761) ^ (modeBit * 1597334677));
 }
 
@@ -183,7 +178,11 @@ function envelope(local: number): number {
 }
 
 function amountCurve(amount: number): number {
-  return Math.pow(clamp100(amount, 50) / 100, 1.6);
+  const t = clamp100(amount, 50) / 100;
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  // Lift 0–40 vs previous ^1.6 so the low end is usable; 100 stays 1.
+  return Math.pow(t, 1.28);
 }
 
 function fragmentCountFor(amount: number): number {
@@ -195,7 +194,9 @@ function maxDisplacementPx(amount: number, width: number, height: number): numbe
 }
 
 function rgbPxFor(amount: number): number {
-  return lerp(0, 6.5, Math.pow(clamp100(amount, 50) / 100, 1.8));
+  const t = clamp100(amount, 50) / 100;
+  if (t >= 1) return 6.5;
+  return lerp(0, 6.5, Math.pow(t, 1.45));
 }
 
 export function endRegionFor(phase: number, settings: EndBehaviourSettings, playbackMode: PlaybackMode): EndRegion {
@@ -239,55 +240,6 @@ function horizontalCuts(seed: number, count: number, height: number): number[] {
   }
   cuts[cuts.length - 1] = height;
   return cuts;
-}
-
-function fractureBands(
-  seed: number,
-  amount: number,
-  width: number,
-  height: number,
-  envelopeAmt: number,
-  maxDisp: number,
-  rgbBase: number,
-): EndBand[] {
-  const count = fragmentCountFor(amount);
-  const cuts = horizontalCuts(seed, count, height);
-  const bands: EndBand[] = [];
-  const rgb = rgbBase * envelopeAmt;
-  for (let i = 0; i < count; i++) {
-    const y = cuts[i]!;
-    const next = cuts[i + 1]!;
-    const h = Math.max(1, next - y);
-    const weight = 0.55 + unit(seed, 80 + i) * 0.7;
-    const dx = maxDisp * envelopeAmt * signed(seed, 120 + i) * weight;
-    const dy = maxDisp * 0.22 * envelopeAmt * signed(seed, 160 + i);
-    bands.push({
-      axis: "h",
-      x: 0,
-      y,
-      w: width,
-      h,
-      dx,
-      dy,
-      rgb: rgb * (0.35 + 0.65 * unit(seed, 200 + i)),
-    });
-  }
-  if (amount >= 48) {
-    const slabW = Math.round(width * (0.2 + unit(seed, 9) * 0.16));
-    const fromRight = unit(seed, 11) > 0.5;
-    const x = fromRight ? width - slabW : 0;
-    bands.push({
-      axis: "v",
-      x,
-      y: 0,
-      w: Math.max(8, slabW),
-      h: height,
-      dx: maxDisp * 0.72 * envelopeAmt * signed(seed, 13),
-      dy: maxDisp * 0.18 * envelopeAmt * signed(seed, 15),
-      rgb: rgb * 0.85,
-    });
-  }
-  return bands;
 }
 
 function flickerBands(
@@ -403,39 +355,19 @@ export function planEndBehaviour(
   const env = envelope(local);
   const maxDisp = maxDisplacementPx(settings.amount, width, height);
   const rgbBase = rgbPxFor(settings.amount);
-
-  if (settings.mode === "flicker") {
-    const nBeats = 7 + Math.round((settings.amount / 100) * 5);
-    const beat = Math.min(nBeats - 1, Math.floor(Math.min(0.999999, local) * nBeats));
-    const flickerState = flickerStateAt(seed, beat, nBeats);
-    const bands = flickerBands(flickerState, seed, width, height, env, maxDisp, rgbBase);
-    return {
-      active: flickerState !== "resolved" && bands.length > 0 && env > 0.02,
-      region,
-      phase,
-      local,
-      envelope: env,
-      seed,
-      kind: "flicker",
-      flickerState,
-      fragmentCount: fragmentCountFor(settings.amount),
-      maxDisplacement: maxDisp,
-      rgbDisplacement: rgbBase,
-      bands,
-      window: win,
-    };
-  }
-
-  const bands = fractureBands(seed, settings.amount, width, height, env, maxDisp, rgbBase);
+  const nBeats = 7 + Math.round((settings.amount / 100) * 5);
+  const beat = Math.min(nBeats - 1, Math.floor(Math.min(0.999999, local) * nBeats));
+  const flickerState = flickerStateAt(seed, beat, nBeats);
+  const bands = flickerBands(flickerState, seed, width, height, env, maxDisp, rgbBase);
   return {
-    active: env > 0.02,
+    active: flickerState !== "resolved" && bands.length > 0 && env > 0.02,
     region,
     phase,
     local,
     envelope: env,
     seed,
-    kind: "fracture",
-    flickerState: null,
+    kind: "flicker",
+    flickerState,
     fragmentCount: fragmentCountFor(settings.amount),
     maxDisplacement: maxDisp,
     rgbDisplacement: rgbBase,

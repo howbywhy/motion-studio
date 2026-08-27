@@ -12,8 +12,9 @@ import type { ParamValues } from "./types";
  * Phase (local to the current pair):
  *   ~50% 0.18–0.40, 30% 0.40–0.55, 10% 0.12–0.18, 10% 0.55–0.68
  *
- * Does not touch media, sequence, Registration, B&W, background, audio,
- * export, or aspect. Does not randomise FIELD or Shift.
+ * Does not touch media, sequence, Registration (including Amount), End
+ * Behaviour, B&W, background, audio, export, or aspect. Does not randomise
+ * FIELD or Shift.
  */
 
 export interface RandomiseInput {

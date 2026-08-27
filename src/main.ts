@@ -16,6 +16,7 @@ import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
 import { mountEndBehaviourPanel } from "./ui/endBehaviourPanel";
 import { clampEndBehaviourSettings, END_BEHAVIOUR_OFF } from "./core/endBehaviour";
+import { clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./core/globalRegistration";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, cloneTypeState, defaultTypeState } from "./core/typeState";
 import { debugLinePlan, layoutTypeDocument } from "./core/typeLayout";
@@ -144,6 +145,18 @@ app.innerHTML = `
               <button type="button" class="reset-btn" id="bg-colour-reset" title="Restore the default background colour">Reset</button>
             </div>
           </div>
+          <div class="registration-amount-panel" id="registration-amount-panel" hidden>
+            <div class="panel-label-row">
+              <label class="panel-label">Registration</label>
+            </div>
+            <div class="control-row">
+              <label for="registration-amount">Amount</label>
+              <div class="control-input-row">
+                <input type="range" id="registration-amount" min="0" max="100" step="1" value="50" />
+                <span class="control-value" id="registration-amount-value">50</span>
+              </div>
+            </div>
+          </div>
           <div id="end-behaviour-panel"></div>
           <div class="saved-panel">
             <div class="panel-label-row">
@@ -202,6 +215,9 @@ const sourceName = document.querySelector<HTMLSpanElement>("#source-name")!;
 const sourceType = document.querySelector<HTMLSpanElement>("#source-type")!;
 const sourceRemoveBtn = document.querySelector<HTMLButtonElement>("#source-remove")!;
 const registrationBtn = document.querySelector<HTMLButtonElement>("#registration-toggle")!;
+const registrationAmountPanel = document.querySelector<HTMLDivElement>("#registration-amount-panel")!;
+const registrationAmountInput = document.querySelector<HTMLInputElement>("#registration-amount")!;
+const registrationAmountValue = document.querySelector<HTMLSpanElement>("#registration-amount-value")!;
 const bwToggle = document.querySelector<HTMLDivElement>("#bw-toggle")!;
 const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
 const treatmentLabel = document.querySelector<HTMLLabelElement>("#treatment-label")!;
@@ -1027,10 +1043,26 @@ function resolveSavedBwMode(state: { bwMode?: BwMode; bwOn: boolean }): BwMode {
 }
 
 // --- global output-layer toggles: Registration, selective B&W. ---
+function syncRegistrationAmountUi(): void {
+  const on = renderer.isRegistrationEnabled();
+  registrationAmountPanel.hidden = !on;
+  registrationBtn.classList.toggle("active", on);
+  if (!on) return;
+  const v = renderer.getRegistrationAmount();
+  registrationAmountInput.value = String(v);
+  registrationAmountValue.textContent = String(Math.round(v));
+}
+
 registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
 registrationBtn.addEventListener("click", () => {
   renderer.setRegistrationEnabled(!renderer.isRegistrationEnabled());
-  registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
+  syncRegistrationAmountUi();
+});
+
+registrationAmountInput.addEventListener("input", () => {
+  const v = clampRegistrationAmount(parseFloat(registrationAmountInput.value));
+  registrationAmountValue.textContent = String(Math.round(v));
+  renderer.setRegistrationAmount(v);
 });
 
 syncBwToggle();
@@ -1094,6 +1126,7 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     behaviorId: currentBehavior.id,
     params: { ...currentParams },
     registrationOn: renderer.isRegistrationEnabled(),
+    registrationAmount: renderer.getRegistrationAmount(),
     bwOn: renderer.getBwMode() === "both",
     bwMode: renderer.getBwMode(),
     placeholderBg,
@@ -1127,7 +1160,10 @@ function loadSavedState(state: SavedState): void {
   selectBehavior(state.behaviorId, { ...state.params });
 
   renderer.setRegistrationEnabled(state.registrationOn);
-  registrationBtn.classList.toggle("active", state.registrationOn);
+  renderer.setRegistrationAmount(
+    state.registrationAmount == null ? REGISTRATION_AMOUNT_DEFAULT : state.registrationAmount,
+  );
+  syncRegistrationAmountUi();
   renderer.setTypeState(clampTypeState(state.type));
   typeUi.sync(renderer.getTypeState());
   renderer.setEndBehaviour(clampEndBehaviourSettings({
@@ -1420,7 +1456,8 @@ function applyProductDefault(): void {
   rebuildCompositionPanel();
   sequenceStrip.refresh();
   renderer.setRegistrationEnabled(true);
-  registrationBtn.classList.toggle("active", true);
+  renderer.setRegistrationAmount(REGISTRATION_AMOUNT_DEFAULT);
+  syncRegistrationAmountUi();
   renderer.setBwMode("off");
   syncBwToggle();
   placeholderBg = PLACEHOLDER_DEFAULT_BG;
@@ -1491,7 +1528,12 @@ Object.assign(window, {
       })),
     setRegistration: (on: boolean) => {
       renderer.setRegistrationEnabled(on);
-      registrationBtn.classList.toggle("active", on);
+      syncRegistrationAmountUi();
+    },
+    getRegistrationAmount: () => renderer.getRegistrationAmount(),
+    setRegistrationAmount: (value: number) => {
+      renderer.setRegistrationAmount(value);
+      syncRegistrationAmountUi();
     },
     setTypeBeforeRegistration: (on: boolean) => renderer.setTypeBeforeRegistration(on),
     setRegistrationStrategy: (mode: "tonal" | "offset" | "edge") => renderer.setRegistrationStrategy(mode),

@@ -572,13 +572,38 @@ body {
   display: none;
 }
 
+.registration-amount-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.registration-amount-panel .control-row {
+  margin-bottom: 0;
+}
+
+.registration-amount-panel[hidden] {
+  display: none;
+}
+
 .end-behaviour-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 0 0 16px;
-  padding: 4px 0 16px;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--panel-border);
+}
+
+.end-behaviour-panel .control-row {
+  margin-bottom: 8px;
+}
+
+.end-behaviour-panel .end-behaviour-fields .control-row:last-child {
+  margin-bottom: 0;
 }
 
 .end-behaviour-panel .seg-toggle {

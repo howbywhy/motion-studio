@@ -209,7 +209,7 @@ export async function runHoldExportSheet(root: HTMLElement): Promise<HoldExportR
 
   const endRows: Record<string, unknown> = {};
   let endBehaviourHold = true;
-  for (const mode of ["off", "flicker", "fracture"] as EndBehaviourMode[]) {
+  for (const mode of ["off", "flicker"] as EndBehaviourMode[]) {
     renderer.setEndBehaviour(
       clampEndBehaviourSettings({
         mode,

@@ -3,7 +3,7 @@ import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { getSeamCandidate, limitedSequenceResolve, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
-import { paintGoldenMasterRegistration } from "./globalRegistration";
+import { paintGoldenMasterRegistration, clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./globalRegistration";
 import { lastBloomFieldMap } from "../behaviors/bloom/index";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypeDocument } from "./typeLayout";
@@ -136,7 +136,7 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * output-layer states on top of that, before copying the result onto the
  * visible canvas:
  *   Bloom compose (Clean)
- *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink, amount 0.4)
+ *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink; UI 50 = amount 0.4)
  *   → static typography (must not mutate Registration)
  *   → End Behaviour (loop seam only; OFF is a true bypass)
  *   → visible canvas
@@ -181,6 +181,7 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
+  private registrationAmount = REGISTRATION_AMOUNT_DEFAULT;
   private typeState: TypeState = defaultTypeState();
   private endBehaviour: EndBehaviourSettings = { ...END_BEHAVIOUR_OFF };
   lastEndDiagnostics: EndDiagnostics | null = null;
@@ -527,6 +528,18 @@ export class Renderer {
 
   isRegistrationEnabled(): boolean {
     return this.registrationOn;
+  }
+
+  setRegistrationAmount(value: number): void {
+    this.registrationAmount = clampRegistrationAmount(value);
+    if (this.registrationOn) {
+      this.invalidatePrintInk();
+      this.renderFrame();
+    }
+  }
+
+  getRegistrationAmount(): number {
+    return this.registrationAmount;
   }
 
   /** Debug-only compositing swap. Product remains Registration then type. */
@@ -1472,6 +1485,7 @@ export class Renderer {
         width,
         height,
         this.bwMode === "both",
+        this.registrationAmount,
       );
     }
     const tReg = mark();

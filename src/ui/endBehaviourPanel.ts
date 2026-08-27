@@ -135,7 +135,6 @@ export function mountEndBehaviourPanel(
       [
         { value: "off", label: "Off" },
         { value: "flicker", label: "Flicker" },
-        { value: "fracture", label: "Fracture" },
       ],
       state.mode,
       (value) => applyMode(parseEndBehaviourMode(value)),

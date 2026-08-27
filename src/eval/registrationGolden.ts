@@ -6,7 +6,12 @@
  */
 import type { ResolvedField } from "../behaviors/bloom/fields";
 import { paintClean } from "../behaviors/bloom/treatments";
-import { paintGoldenMasterRegistration, REGISTRATION_GOLDEN_MASTER } from "../core/globalRegistration";
+import {
+  paintGoldenMasterRegistration,
+  REGISTRATION_AMOUNT_DEFAULT,
+  REGISTRATION_GOLDEN_MASTER,
+  registrationPaintAmount,
+} from "../core/globalRegistration";
 import { BLOOM_REGISTRATION_AMOUNT, resetRegistrationInkTintCache } from "../core/registrationInk";
 
 export const FIXTURE_WIDTH = 480;
@@ -196,7 +201,10 @@ export function compareImageData(a: ImageData, b: ImageData): { mad: number; max
   return { mad: sum / pixels, maxAbs: max };
 }
 
-export async function renderGoldenFrame(bw = false): Promise<{ canvas: HTMLCanvasElement; image: ImageData; paintMs: number }> {
+export async function renderGoldenFrame(
+  bw = false,
+  uiAmount: number = REGISTRATION_AMOUNT_DEFAULT,
+): Promise<{ canvas: HTMLCanvasElement; image: ImageData; paintMs: number }> {
   resetRegistrationInkTintCache();
   const w = FIXTURE_WIDTH;
   const h = FIXTURE_HEIGHT;
@@ -209,15 +217,37 @@ export async function renderGoldenFrame(bw = false): Promise<{ canvas: HTMLCanva
   const ctx = dest.getContext("2d")!;
   const t0 = performance.now();
   paintClean(ctx, a, b, mask, w, h);
-  paintGoldenMasterRegistration(ctx, b, FIXED_FIELDS, w, h, bw);
+  paintGoldenMasterRegistration(ctx, b, FIXED_FIELDS, w, h, bw, uiAmount);
   const paintMs = performance.now() - t0;
   if (BLOOM_REGISTRATION_AMOUNT !== 0.4) {
     throw new Error("BLOOM_REGISTRATION_AMOUNT drifted from golden master 0.4");
+  }
+  if (registrationPaintAmount(REGISTRATION_AMOUNT_DEFAULT) !== BLOOM_REGISTRATION_AMOUNT) {
+    throw new Error("UI default Amount must paint golden-master 0.4");
+  }
+  if (registrationPaintAmount(0) !== 0) {
+    throw new Error("UI Amount 0 must paint 0");
   }
   if (REGISTRATION_GOLDEN_MASTER.commit !== "728ff088b3ee01e6b1ee968a6388fa6c4fc56200") {
     throw new Error("Golden-master commit id drifted");
   }
   return { canvas: dest, image: ctx.getImageData(0, 0, w, h), paintMs };
+}
+
+/** Amount 0 must match a Clean frame with Registration skipped. */
+export async function renderCleanOnlyFrame(): Promise<ImageData> {
+  resetRegistrationInkTintCache();
+  const w = FIXTURE_WIDTH;
+  const h = FIXTURE_HEIGHT;
+  const a = makeCanvas(w, h);
+  const b = makeCanvas(w, h);
+  const mask = makeCanvas(w, h);
+  const dest = makeCanvas(w, h);
+  paintSources(a, b);
+  paintMask(mask, FIXED_FIELDS);
+  const ctx = dest.getContext("2d")!;
+  paintClean(ctx, a, b, mask, w, h);
+  return ctx.getImageData(0, 0, w, h);
 }
 
 export async function measureFrame(image: ImageData, paintMs: number): Promise<FrameMetrics> {

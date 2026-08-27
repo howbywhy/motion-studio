@@ -45,11 +45,14 @@ export interface SavedState {
   bwMode?: "off" | "A" | "B" | "both";
   placeholderBg?: string;
   type?: TypeState;
-  /** Loop-seam interruption. Older saves omit these and load as Off. */
+  /** Loop-seam interruption. Older saves omit these and load as Off.
+   * Legacy `"fracture"` is accepted on load and mapped to flicker. */
   endBehaviourMode?: "off" | "flicker" | "fracture";
   endBehaviourAmount?: number;
   endBehaviourHold?: number;
   endBehaviourDuration?: number;
+  /** Master Registration presence 0–100. Legacy saves omit this and load as 50. */
+  registrationAmount?: number;
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;

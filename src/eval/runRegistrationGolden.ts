@@ -2,8 +2,10 @@ import fixture from "./fixtures/registration-golden.json";
 import {
   CROPS,
   canvasToImageData,
+  compareImageData,
   evaluateAgainstFixture,
   measureFrame,
+  renderCleanOnlyFrame,
   renderGoldenFrame,
 } from "./registrationGolden";
 
@@ -18,6 +20,18 @@ const out = document.getElementById("out")!;
 const frames = document.getElementById("frames")!;
 
 const { canvas, image, paintMs } = await renderGoldenFrame(false);
+const omitted = await renderGoldenFrame(false);
+const atDefault = await renderGoldenFrame(false, 50);
+const atZero = await renderGoldenFrame(false, 0);
+const cleanOnly = await renderCleanOnlyFrame();
+const defaultIdentical = compareImageData(omitted.image, atDefault.image);
+const zeroIsOff = compareImageData(atZero.image, cleanOnly);
+if (defaultIdentical.mad !== 0 || defaultIdentical.maxAbs !== 0) {
+  throw new Error("Amount 50 is not pixel-identical to omitted golden-master paint");
+}
+if (zeroIsOff.mad !== 0 || zeroIsOff.maxAbs !== 0) {
+  throw new Error("Amount 0 is not pixel-identical to Registration skipped");
+}
 frames.appendChild(canvas);
 const metrics = await measureFrame(image, paintMs);
 
@@ -35,7 +49,17 @@ const result = capturing
   ? { ok: true, failures: ["CAPTURE"], metrics, pngExact: true, webpTextureVisible: true, typeDoesNotMutate: true }
   : evaluateAgainstFixture(metrics, fixture, image, png, webpHf);
 
-window.__REGISTRATION_GOLDEN_RESULT__ = { capturing, result, metrics, fixture, crops: CROPS };
+window.__REGISTRATION_GOLDEN_RESULT__ = {
+  capturing,
+  result,
+  metrics,
+  fixture,
+  crops: CROPS,
+  amountIdentity: {
+    defaultIsGolden: defaultIdentical.mad === 0 && defaultIdentical.maxAbs === 0,
+    zeroIsOff: zeroIsOff.mad === 0 && zeroIsOff.maxAbs === 0,
+  },
+};
 
 status.className = result.ok || capturing ? "ok" : "fail";
 status.textContent = capturing

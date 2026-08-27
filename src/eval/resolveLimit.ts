@@ -178,7 +178,7 @@ export async function runResolveLimitSheet(root: HTMLElement): Promise<ResolveLi
 
   const ends = section(root, "End Behaviour at phase 0.96 — Limit 100 vs 50");
   for (const limit of [100, 50]) {
-    for (const mode of ["off", "flicker", "fracture"] as EndBehaviourMode[]) {
+    for (const mode of ["off", "flicker"] as EndBehaviourMode[]) {
       renderer.setParams(bloomParams(limit));
       renderer.setEndBehaviour(clampEndBehaviourSettings({ mode, amount: 50, hold: 40, duration: 45 }));
       renderer.setClockMode("hold");

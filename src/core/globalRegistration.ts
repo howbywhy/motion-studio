@@ -24,8 +24,22 @@ export const REGISTRATION_GOLDEN_MASTER = Object.freeze({
   amount: BLOOM_REGISTRATION_AMOUNT,
 });
 
+/** Product UI default. 50 maps exactly to golden-master paint amount 0.4. */
+export const REGISTRATION_AMOUNT_DEFAULT = 50;
+
+export function clampRegistrationAmount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return REGISTRATION_AMOUNT_DEFAULT;
+  return Math.min(100, Math.max(0, value));
+}
+
+/** UI 0–100 → paint amount. 0 is off, 50 is 0.4, 100 is 0.8. */
+export function registrationPaintAmount(uiAmount: unknown): number {
+  return (clampRegistrationAmount(uiAmount) / 100) * (BLOOM_REGISTRATION_AMOUNT * 2);
+}
+
 /** Single product global Registration paint. Call after Bloom compose,
- * before typography. `bw` tints the ink when B&W is Both. */
+ * before typography. `bw` tints the ink when B&W is Both.
+ * `uiAmount` is the 0–100 master control; omit for golden-master 0.4. */
 export function paintGoldenMasterRegistration(
   dest: CanvasRenderingContext2D,
   bLayer: HTMLCanvasElement,
@@ -33,6 +47,7 @@ export function paintGoldenMasterRegistration(
   width: number,
   height: number,
   bw = false,
+  uiAmount: number = REGISTRATION_AMOUNT_DEFAULT,
 ): void {
   paintRegistrationSurface(
     dest,
@@ -40,7 +55,7 @@ export function paintGoldenMasterRegistration(
     fields,
     width,
     height,
-    REGISTRATION_GOLDEN_MASTER.amount,
+    registrationPaintAmount(uiAmount),
     bw,
   );
 }
