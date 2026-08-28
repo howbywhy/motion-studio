@@ -664,6 +664,7 @@ body {
   border-bottom: 1px solid var(--panel-border);
 }
 
+.type-states-tabs > label,
 .type-states > label {
   display: block;
   margin-bottom: 4px;
@@ -672,6 +673,23 @@ body {
 
 .type-state-remove {
   margin-top: 6px;
+}
+
+.type-states-row button[draggable="true"] {
+  cursor: grab;
+}
+
+.type-states-row button.dragging {
+  opacity: 0.45;
+}
+
+.type-states-row button.drag-over {
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+
+.type-sequence-speed {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .type-panel .type-seg button {

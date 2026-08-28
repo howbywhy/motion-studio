@@ -7,7 +7,7 @@ import {
   type TypeDistribution,
   type TypeState,
 } from "../core/typeState";
-import { editorialColumnsPx, layoutTypography, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
+import { editorialColumnsPx, headlineEdgeBleed, layoutTypography, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 
@@ -119,8 +119,12 @@ function countOutside(w: number, h: number, state: TypeState): { pixels: number;
   const frame = opticalFramePx(w);
   let ink = false;
   for (const item of laid) {
+    const bleed = headlineEdgeBleed(state.blocks[item.index]!);
     const box = typeInkBox(item.layout);
-    if (box.l < frame - 0.6 || box.t < frame - 0.6 || box.r > w - frame + 0.6 || box.b > h - frame + 0.6) ink = true;
+    if (!bleed.l && box.l < frame - 0.6) ink = true;
+    if (!bleed.r && box.r > w - frame + 0.6) ink = true;
+    if (!bleed.t && box.t < frame - 0.6) ink = true;
+    if (!bleed.b && box.b > h - frame + 0.6) ink = true;
   }
   let pixels = 0;
   if (ink) {
@@ -132,6 +136,11 @@ function countOutside(w: number, h: number, state: TypeState): { pixels: number;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (x >= insideL && x < insideR && y >= insideT && y < insideB) continue;
+        const allowL = x < insideL && laid.some((item) => headlineEdgeBleed(state.blocks[item.index]!).l);
+        const allowR = x >= insideR && laid.some((item) => headlineEdgeBleed(state.blocks[item.index]!).r);
+        const allowT = y < insideT && laid.some((item) => headlineEdgeBleed(state.blocks[item.index]!).t);
+        const allowB = y >= insideB && laid.some((item) => headlineEdgeBleed(state.blocks[item.index]!).b);
+        if (allowL || allowR || allowT || allowB) continue;
         const i = (y * w + x) * 4;
         if (img[i]! > 12) pixels += 1;
       }

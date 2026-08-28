@@ -1,9 +1,9 @@
 import { mbmById } from "./mbmCopy";
-import { clampTypeState, cloneTypeState, type TypeBlock, type TypeState } from "../core/typeState";
-import { layoutTypeDocument, typeGeometryKey } from "../core/typeLayout";
+import { clampTypeState, cloneTypeState, TYPE_ANCHORS, type TypeAnchor, type TypeBlock, type TypeState } from "../core/typeState";
+import { HEADLINE_INK_BLEED, headlineEdgeBleed, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
-import { typePageIndexAtPhase, typeStateAtPhase } from "../core/typePages";
+import { SEQUENCE_SPEED_DEFAULT, typePageCuts, typePageIndexAtPhase, typeStateAtPhase } from "../core/typePages";
 import { bloomBehavior } from "../behaviors/bloom";
 import { Renderer } from "../core/renderer";
 import { placeholderA } from "../core/placeholder";
@@ -13,10 +13,22 @@ import { presetsForTreatment } from "../core/presets";
 import { clampEndBehaviourSettings } from "../core/endBehaviour";
 
 const PHASES = [0, 0.2, 0.29, 0.31, 0.42, 0.5, 0.57, 0.59, 0.8, 0.95];
+const SPEED_PHASES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 const W45 = 320;
 const H45 = 400;
 const W916 = 270;
 const H916 = 480;
+const ANCHOR_LABEL: Record<TypeAnchor, string> = {
+  tl: "Top Left",
+  tc: "Top Centre",
+  tr: "Top Right",
+  ml: "Centre Left",
+  mc: "Centre",
+  mr: "Centre Right",
+  bl: "Bottom Left",
+  bc: "Bottom Centre",
+  br: "Bottom Right",
+};
 
 function photoGround(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const g = ctx.createLinearGradient(0, h * 0.08, w, h);
@@ -53,12 +65,13 @@ function page(a: Partial<TypeBlock>, b?: Partial<TypeBlock>): [Partial<TypeBlock
   ];
 }
 
-function book(pages: [Partial<TypeBlock>, Partial<TypeBlock>][]): TypeState {
+function book(pages: [Partial<TypeBlock>, Partial<TypeBlock>][], sequenceSpeed = SEQUENCE_SPEED_DEFAULT): TypeState {
   return clampTypeState({
     enabled: true,
     blocks: pages[0],
     pages,
     selected: 0,
+    sequenceSpeed,
   });
 }
 
@@ -108,8 +121,108 @@ function strip(root: HTMLElement, title: string, state: TypeState, w: number, h:
   const grid = section(root, title);
   const n = state.pages.length;
   for (const p of PHASES) {
-    const i = typePageIndexAtPhase(p, n);
+    const i = typePageIndexAtPhase(p, n, state.sequenceSpeed);
     cell(grid, `${p.toFixed(2)}  0${i + 1}`, paintResolved(state, w, h, p));
+  }
+}
+
+function cropCaption(state: TypeState, w: number, h: number): string {
+  const laid = layoutTypeDocument(state, w, h);
+  const frame = opticalFramePx(w);
+  const parts: string[] = [];
+  for (const item of laid) {
+    const block = state.blocks[item.index]!;
+    const bleed = headlineEdgeBleed(block);
+    const box = typeInkBox(item.layout);
+    const inkH = Math.max(1, box.b - box.t);
+    const over = {
+      l: Math.max(0, -box.l),
+      r: Math.max(0, box.r - w),
+      t: Math.max(0, -box.t),
+      b: Math.max(0, box.b - h),
+    };
+    const pct = (px: number) => `${Math.round((px / inkH) * 100)}%`;
+    const crops: string[] = [];
+    if (over.t > 0.5) crops.push(`T ${pct(over.t)}`);
+    if (over.b > 0.5) crops.push(`B ${pct(over.b)}`);
+    if (over.l > 0.5) crops.push(`L ${pct(over.l)}`);
+    if (over.r > 0.5) crops.push(`R ${pct(over.r)}`);
+    const unsafe: string[] = [];
+    if (!bleed.l && box.l < frame - 0.6) unsafe.push("L");
+    if (!bleed.r && box.r > w - frame + 0.6) unsafe.push("R");
+    if (!bleed.t && box.t < frame - 0.6) unsafe.push("T");
+    if (!bleed.b && box.b > h - frame + 0.6) unsafe.push("B");
+    parts.push(crops.length ? crops.join(" ") : "contained");
+    if (unsafe.length) parts.push(`UNSAFE ${unsafe.join("")}`);
+  }
+  return parts.join(" · ") || "empty";
+}
+
+function paintBleed(state: TypeState, w: number, h: number): HTMLCanvasElement {
+  const canvas = paintResolved(state, w, h, 0);
+  const ctx = canvas.getContext("2d")!;
+  const frame = opticalFramePx(w);
+  ctx.save();
+  ctx.strokeStyle = "rgba(90,170,255,0.7)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.strokeRect(frame + 0.5, frame + 0.5, w - frame * 2 - 1, h - frame * 2 - 1);
+  ctx.setLineDash([]);
+  for (const item of layoutTypeDocument(state, w, h)) {
+    const box = typeInkBox(item.layout);
+    ctx.strokeStyle = "rgba(255,70,90,0.95)";
+    ctx.strokeRect(box.l + 0.5, box.t + 0.5, box.r - box.l - 1, box.b - box.t - 1);
+  }
+  ctx.restore();
+  return canvas;
+}
+
+function headlinePage(text: string, anchor: TypeAnchor, scale: number): TypeState {
+  return book([page({ text, composition: "headline", scale, anchor, distribution: "packed" })]);
+}
+
+function inkOver(state: TypeState, w: number, h: number): { l: number; r: number; t: number; b: number; inkW: number; inkH: number } {
+  const laid = layoutTypeDocument(state, w, h)[0];
+  if (!laid) return { l: 0, r: 0, t: 0, b: 0, inkW: 1, inkH: 1 };
+  const box = typeInkBox(laid.layout);
+  return {
+    l: Math.max(0, -box.l),
+    r: Math.max(0, box.r - w),
+    t: Math.max(0, -box.t),
+    b: Math.max(0, box.b - h),
+    inkW: Math.max(1, box.r - box.l),
+    inkH: Math.max(1, box.b - box.t),
+  };
+}
+
+function opticalContained(state: TypeState, w: number, h: number): boolean {
+  const frame = opticalFramePx(w);
+  return layoutTypeDocument(state, w, h).every((item) => {
+    const box = typeInkBox(item.layout);
+    return box.l >= frame - 0.6 && box.t >= frame - 0.6 && box.r <= w - frame + 0.6 && box.b <= h - frame + 0.6;
+  });
+}
+
+function unrelatedEdgesSafe(state: TypeState, w: number, h: number): boolean {
+  const bleed = headlineEdgeBleed(state.blocks[0]!);
+  const over = inkOver(state, w, h);
+  if (!bleed.l && over.l > 0.6) return false;
+  if (!bleed.r && over.r > 0.6) return false;
+  if (!bleed.t && over.t > 0.6) return false;
+  if (!bleed.b && over.b > 0.6) return false;
+  return true;
+}
+
+function obviousCrop(px: number, dim: number): boolean {
+  const t = px / dim;
+  return t >= 0.06 && t <= 0.22;
+}
+
+function edgeMatrix(root: HTMLElement, title: string, word: string, scale: number, w: number, h: number): void {
+  const grid = section(root, title);
+  for (const anchor of TYPE_ANCHORS) {
+    const state = headlinePage(word, anchor, scale);
+    cell(grid, `${ANCHOR_LABEL[anchor]}  ${cropCaption(state, w, h)}`, paintBleed(state, w, h));
   }
 }
 
@@ -176,6 +289,14 @@ export interface TypeStatesReport {
   holdExportIdentical: boolean;
   autoCuts: boolean;
   geometryStable: boolean;
+  headlineBleed: boolean;
+  centreSafe: boolean;
+  paragraphSafe: boolean;
+  footnoteSafe: boolean;
+  speed50MatchesCadence: boolean;
+  speedMovesCutsOnly: boolean;
+  orderPreservesDocuments: boolean;
+  insertAfterSelected: boolean;
   elapsedMs: number;
   details: Record<string, unknown>;
 }
@@ -232,6 +353,53 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   strip(root, "SPRING SUMMER 2026  two states", ss, W45, H45);
   strip(root, "A  9:16", sequenceA, W916, H916);
 
+  edgeMatrix(root, `Headline edge · MADELEN · Scale 50 · 4:5 · bleed ${Math.round(HEADLINE_INK_BLEED * 100)}%`, "MADELEN", 50, W45, H45);
+  edgeMatrix(root, "Headline edge · MADELEN · Scale 78 · 4:5", "MADELEN", 78, W45, H45);
+  edgeMatrix(root, "Headline edge · MADELEN · Scale 100 · 4:5", "MADELEN", 100, W45, H45);
+  edgeMatrix(root, "Headline edge · MADELEN · Scale 78 · 9:16", "MADELEN", 78, W916, H916);
+  edgeMatrix(root, "Headline edge · MADELEN · Scale 100 · 9:16", "MADELEN", 100, W916, H916);
+
+  const shapeGrid = section(root, "Headline edge · MADE / COMING / NEW · Scale 100 · 4:5");
+  for (const word of ["MADE", "COMING", "NEW"] as const) {
+    for (const anchor of ["tl", "mc", "bc", "br"] as TypeAnchor[]) {
+      const state = headlinePage(word, anchor, 100);
+      cell(shapeGrid, `${word}  ${ANCHOR_LABEL[anchor]}  ${cropCaption(state, W45, H45)}`, paintBleed(state, W45, H45));
+    }
+  }
+
+  const twoSpeedPages: [Partial<TypeBlock>, Partial<TypeBlock>][] = [
+    page({ text: mbmById("new").text, composition: "headline", scale: 100, anchor: "tl" }),
+    page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "bc" }),
+  ];
+  const threeSpeedPages: [Partial<TypeBlock>, Partial<TypeBlock>][] = [
+    page({ text: "NEW", composition: "headline", scale: 100, anchor: "tl" }),
+    page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "mc" }),
+    page({ text: "07.09.2026", composition: "headline", scale: 86, anchor: "br" }),
+  ];
+  for (const speed of [0, 50, 100] as const) {
+    const two = book(twoSpeedPages, speed);
+    const three = book(threeSpeedPages, speed);
+    const twoGrid = section(root, `Sequence Speed ${speed} · 2 states`);
+    const threeGrid = section(root, `Sequence Speed ${speed} · 3 states`);
+    for (const p of SPEED_PHASES) {
+      cell(twoGrid, `${p.toFixed(2)}  0${typePageIndexAtPhase(p, 2, speed) + 1}`, paintResolved(two, W45, H45, p));
+      cell(threeGrid, `${p.toFixed(2)}  0${typePageIndexAtPhase(p, 3, speed) + 1}`, paintResolved(three, W45, H45, p));
+    }
+  }
+
+  const orderOrig = book(threeSpeedPages);
+  const orderMoved = clampTypeState({ ...orderOrig, typePageMove: { from: 1, to: 2 } });
+  const origPages = section(root, "Order · authored 01 NEW TL · 02 MADE BY MADELEN Centre · 03 07.09.2026 BR");
+  orderOrig.pages.forEach((_, i) => {
+    cell(origPages, `01/${String(i + 1).padStart(2, "0")} static`, paintPage(orderOrig, i, W45, H45));
+  });
+  strip(root, "Order · playback authored", orderOrig, W45, H45);
+  const movedPages = section(root, "Order · after 02↔03 drag · visible 01 NEW · 02 date BR · 03 MADELEN Centre");
+  orderMoved.pages.forEach((_, i) => {
+    cell(movedPages, `01/${String(i + 1).padStart(2, "0")} static`, paintPage(orderMoved, i, W45, H45));
+  });
+  strip(root, "Order · playback reordered", orderMoved, W45, H45);
+
   const one = book([
     page({ text: mbmById("coming-soon-break").text, composition: "headline", scale: 78, anchor: "tl" }),
   ]);
@@ -244,7 +412,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   let cutEqualsStatic = true;
   for (const state of [sequenceA, sequenceB, sequenceC, free, ss]) {
     for (const p of PHASES) {
-      const i = typePageIndexAtPhase(p, state.pages.length);
+      const i = typePageIndexAtPhase(p, state.pages.length, state.sequenceSpeed);
       const moving = paintResolved(state, W45, H45, p).getContext("2d")!.getImageData(0, 0, W45, H45);
       const frozen = paintPage(state, i, W45, H45).getContext("2d")!.getImageData(0, 0, W45, H45);
       if (pixelDiff(moving, frozen) !== 0) cutEqualsStatic = false;
@@ -279,7 +447,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     renderer.setHoldPhase(p);
     const img = settle(renderer);
     liveHashes[String(p)] = hashPixels(img);
-    cellImage(live, `p${p.toFixed(2)}  0${typePageIndexAtPhase(p, 3) + 1}`, img);
+    cellImage(live, `p${p.toFixed(2)}  0${typePageIndexAtPhase(p, 3, sequenceA.sequenceSpeed) + 1}`, img);
   }
 
   renderer.setHoldPhase(0.5);
@@ -294,16 +462,10 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   renderer.resizeExact(W45, H45);
   const holdExportIdentical = holdFrames.every((h) => h === holdPreview);
 
-  renderer.setClockMode("auto");
-  renderer.seekLoopPhase(0.1);
-  const a10 = hashPixels(settle(renderer));
-  renderer.seekLoopPhase(0.4);
-  const a40 = hashPixels(settle(renderer));
-  renderer.seekLoopPhase(0.8);
-  const a80 = hashPixels(settle(renderer));
-  renderer.seekLoopPhase(0.1);
-  const a10b = hashPixels(settle(renderer));
-  const autoCuts = a10 !== a40 && a40 !== a80 && a10 === a10b;
+  const autoCuts =
+    liveHashes["0.29"] !== liveHashes["0.31"] &&
+    liveHashes["0.57"] !== liveHashes["0.59"] &&
+    liveHashes["0.2"] !== liveHashes["0.8"];
 
   const liveCanvas = host.querySelector("canvas");
   if (liveCanvas instanceof HTMLCanvasElement) {
@@ -337,6 +499,87 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   const threeMs = performance.now() - t3;
   void benchCtx;
 
+  const para = book([page({
+    text: "A seasonal offering of garments made to be worn, not archived.",
+    composition: "paragraph",
+    scale: 42,
+    anchor: "ml",
+    column: "medium",
+  })]);
+  const note = book([page({ text: "07.09.2026", composition: "footnote", scale: 80, anchor: "bl" })]);
+  const centre = headlinePage("MADELEN", "mc", 100);
+  const bc = headlinePage("MADELEN", "bc", 100);
+  const tl = headlinePage("MADELEN", "tl", 100);
+  const br = headlinePage("MADELEN", "br", 100);
+  const ml = headlinePage("MADELEN", "ml", 100);
+  const paragraphSafe = opticalContained(para, W45, H45) && opticalContained(para, W916, H916);
+  const footnoteSafe = opticalContained(note, W45, H45) && opticalContained(note, W916, H916);
+  const centreSafe = opticalContained(centre, W45, H45) && opticalContained(centre, W916, H916);
+  const bcOver = inkOver(bc, W45, H45);
+  const tlOver = inkOver(tl, W45, H45);
+  const brOver = inkOver(br, W45, H45);
+  const mlOver = inkOver(ml, W45, H45);
+  const headlineBleed =
+    obviousCrop(bcOver.b, bcOver.inkH) &&
+    unrelatedEdgesSafe(bc, W45, H45) &&
+    obviousCrop(tlOver.t, tlOver.inkH) &&
+    obviousCrop(tlOver.l, tlOver.inkH) &&
+    unrelatedEdgesSafe(tl, W45, H45) &&
+    obviousCrop(brOver.b, brOver.inkH) &&
+    obviousCrop(brOver.r, brOver.inkH) &&
+    unrelatedEdgesSafe(br, W45, H45) &&
+    obviousCrop(mlOver.l, mlOver.inkH) &&
+    unrelatedEdgesSafe(ml, W45, H45) &&
+    TYPE_ANCHORS.every((anchor) => unrelatedEdgesSafe(headlinePage("MADELEN", anchor, 100), W45, H45)) &&
+    TYPE_ANCHORS.every((anchor) => unrelatedEdgesSafe(headlinePage("MADELEN", anchor, 78), W916, H916));
+
+  const cuts3 = typePageCuts(3, 50);
+  const cuts2 = typePageCuts(2, 50);
+  const speed50MatchesCadence =
+    Math.abs(cuts3[0]! - 0.3) < 0.001 &&
+    Math.abs(cuts3[1]! - 0.58) < 0.001 &&
+    Math.abs(cuts2[0]! - 0.42) < 0.001;
+
+  const speed0at25 = typePageIndexAtPhase(0.25, 3, 0);
+  const speed50at25 = typePageIndexAtPhase(0.25, 3, 50);
+  const speed100at25 = typePageIndexAtPhase(0.25, 3, 100);
+  const geo0 = typeGeometryKey(book(threeSpeedPages, 0), W45, H45);
+  const geo100 = typeGeometryKey(book(threeSpeedPages, 100), W45, H45);
+  const speedMovesCutsOnly =
+    speed0at25 === 0 &&
+    speed50at25 === 0 &&
+    speed100at25 === 1 &&
+    geo0 === geo100 &&
+    typePageIndexAtPhase(0.9, 3, 0) === 2 &&
+    typePageIndexAtPhase(0.9, 3, 100) === 2 &&
+    typePageCuts(3, 0)[1]! <= 0.72 &&
+    typePageCuts(3, 100)[1]! <= 0.4;
+
+  const orderPreservesDocuments =
+    orderMoved.pages[0]![0]!.text === "NEW" &&
+    orderMoved.pages[1]![0]!.text === "07.09.2026" &&
+    orderMoved.pages[2]![0]!.text === mbmById("name-break").text &&
+    orderOrig.pages[1]![0]!.text === mbmById("name-break").text &&
+    typePageIndexAtPhase(0.1, 3, 50) === 0 &&
+    typeStateAtPhase(orderMoved, 0.1).blocks[0]!.text === "NEW" &&
+    typeStateAtPhase(orderMoved, 0.4).blocks[0]!.text === "07.09.2026" &&
+    typeStateAtPhase(orderMoved, 0.8).blocks[0]!.text === mbmById("name-break").text;
+
+  const twoThenAdd = clampTypeState({
+    ...book([
+      page({ text: "NEW", composition: "headline", scale: 100, anchor: "tl" }),
+      page({ text: "07.09.2026", composition: "headline", scale: 80, anchor: "br" }),
+    ]),
+    selected: 0,
+    typePage: "add",
+  });
+  const insertAfterSelected =
+    twoThenAdd.pages.length === 3 &&
+    twoThenAdd.selected === 1 &&
+    twoThenAdd.pages[0]![0]!.text === "NEW" &&
+    twoThenAdd.pages[1]![0]!.text === "NEW" &&
+    twoThenAdd.pages[2]![0]!.text === "07.09.2026";
+
   return {
     onePageBypass,
     cutEqualsStatic,
@@ -344,6 +587,14 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     holdExportIdentical,
     autoCuts,
     geometryStable,
+    headlineBleed,
+    centreSafe,
+    paragraphSafe,
+    footnoteSafe,
+    speed50MatchesCadence,
+    speedMovesCutsOnly,
+    orderPreservesDocuments,
+    insertAfterSelected,
     elapsedMs: performance.now() - t0,
     details: {
       liveHashes,
@@ -352,6 +603,11 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
       cuts: { before, after, twoBefore, twoAfter },
       layoutMs: { one: oneMs, three: threeMs },
       cloneKeepsPages: cloneTypeState(sequenceA).pages.length === 3,
+      bleed: HEADLINE_INK_BLEED,
+      crop: { bc: bcOver, tl: tlOver, br: brOver, ml: mlOver },
+      speedCuts: { slow: typePageCuts(3, 0), mid: typePageCuts(3, 50), fast: typePageCuts(3, 100) },
+      orderTexts: orderMoved.pages.map((p) => p[0]!.text),
+      insertTexts: twoThenAdd.pages.map((p) => p[0]!.text),
     },
   };
 }

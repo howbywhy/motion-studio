@@ -38,6 +38,8 @@ export interface TypeLayout {
   offsetY: number;
   composition: TypeStyle;
   blendMode: TypeBlendMode;
+  /** Headline outer-edge crop. Paint clips to the canvas on true edges, optical otherwise. */
+  edgeBleed: { l: boolean; r: boolean; t: boolean; b: boolean };
 }
 
 const UNIT = 1000;
@@ -45,6 +47,17 @@ const PREVIEW_REF_PX = 500;
 const PREVIEW_MARGIN_PX = 10;
 const FRAME = UNIT * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
 const COLS = 4;
+/** Visible-ink crop past the canvas — 10% of glyph height — on Headline outer Frame Align edges. */
+export const HEADLINE_INK_BLEED = 0.10;
+
+export interface TypeEdgeBleed {
+  l: boolean;
+  r: boolean;
+  t: boolean;
+  b: boolean;
+}
+
+const NO_BLEED: TypeEdgeBleed = { l: false, r: false, t: false, b: false };
 
 const TRAILING_WEAK = new Set(["BY", "X"]);
 
@@ -492,6 +505,51 @@ function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[]): {
   return { l, t, r, b };
 }
 
+/** Headline only. Outer Frame Align may crop on those edges; centre stays contained.
+ * Between ignores vertical Frame Align, so top/bottom bleed is off for Between. */
+export function headlineEdgeBleed(block: TypeBlock): TypeEdgeBleed {
+  if (block.composition !== "headline") return { ...NO_BLEED };
+  const row = block.anchor[0];
+  const col = block.anchor[1];
+  const between = block.distribution === "between" && authoredRows(block.text).length >= 2;
+  return {
+    l: col === "l",
+    r: col === "r",
+    t: !between && row === "t",
+    b: !between && row === "b",
+  };
+}
+
+function containInk(
+  xs: number[],
+  ys: number[],
+  prepared: PreparedLine[],
+  canvasW: number,
+  canvasH: number,
+  optical: number,
+  bleed: TypeEdgeBleed,
+): void {
+  const box = inkBounds(xs, ys, prepared);
+  if (!Number.isFinite(box.l)) return;
+  const inkH = Math.max(1e-6, box.b - box.t);
+  const crop = HEADLINE_INK_BLEED * inkH;
+  let dx = 0;
+  let dy = 0;
+  if (bleed.l) dx += -crop - box.l;
+  else if (box.l < optical) dx += optical - box.l;
+  if (bleed.r) dx += canvasW + crop - (box.r + dx);
+  else if (box.r + dx > canvasW - optical) dx -= box.r + dx - (canvasW - optical);
+  if (bleed.t) dy += -crop - box.t;
+  else if (box.t < optical) dy += optical - box.t;
+  if (bleed.b) dy += canvasH + crop - (box.b + dy);
+  else if (box.b + dy > canvasH - optical) dy -= box.b + dy - (canvasH - optical);
+  if (dx === 0 && dy === 0) return;
+  for (let i = 0; i < xs.length; i++) {
+    xs[i]! += dx;
+    ys[i]! += dy;
+  }
+}
+
 function anchorFractions(anchor: TypeAnchor): { hx: number; hy: number } {
   const row = anchor[0];
   const col = anchor[1];
@@ -598,19 +656,9 @@ function nudgeIntoOptical(
   prepared: PreparedLine[],
   unitW: number,
   unitH: number,
+  bleed: TypeEdgeBleed,
 ): void {
-  const box = inkBounds(xs, ys, prepared);
-  let dx = 0;
-  let dy = 0;
-  if (box.l < FRAME) dx += FRAME - box.l;
-  if (box.r > unitW - FRAME) dx -= box.r - (unitW - FRAME);
-  if (box.t < FRAME) dy += FRAME - box.t;
-  if (box.b > unitH - FRAME) dy -= box.b - (unitH - FRAME);
-  if (dx === 0 && dy === 0) return;
-  for (let i = 0; i < xs.length; i++) {
-    xs[i]! += dx;
-    ys[i]! += dy;
-  }
+  containInk(xs, ys, prepared, unitW, unitH, FRAME, bleed);
 }
 
 function isTypeDocument(input: TypeState | TypeBlock): input is TypeState {
@@ -645,7 +693,8 @@ function layoutBlock(
   }
 
   const pts = placePackedOrBetween(sol, block, pad);
-  nudgeIntoOptical(pts.xs, pts.ys, sol.prepared, unitW, unitH);
+  const bleed = headlineEdgeBleed(block);
+  nudgeIntoOptical(pts.xs, pts.ys, sol.prepared, unitW, unitH, bleed);
   const placed = alignFromAnchor(block.anchor);
   const laid: TypeLine[] = sol.prepared.map((line, i) => ({
     text: line.text,
@@ -673,6 +722,7 @@ function layoutBlock(
     offsetY: 0,
     composition: block.composition,
     blendMode: block.blendMode,
+    edgeBleed: bleed,
   };
   return clampProjected(projectLayout(layout, w, h), w, h, block.weight);
 }
@@ -730,6 +780,7 @@ function projectLayout(unit: TypeLayout, canvasW: number, canvasH: number): Type
     offsetY: 0,
     composition: unit.composition,
     blendMode: unit.blendMode,
+    edgeBleed: unit.edgeBleed,
   };
 }
 
@@ -747,17 +798,18 @@ function clampProjected(
     unit: line.unit,
     m: measureLine(line.text, weight, layout.fontSize, layout.tracking),
   }));
-  const box = inkBounds(xs, ys, pxPrepared);
-  let dx = 0;
-  let dy = 0;
-  if (box.l < frame) dx += frame - box.l;
-  if (box.r + dx > canvasW - frame) dx -= box.r + dx - (canvasW - frame);
-  if (box.t < frame) dy += frame - box.t;
-  if (box.b + dy > canvasH - frame) dy -= box.b + dy - (canvasH - frame);
-  if (dx === 0 && dy === 0) return layout;
+  containInk(xs, ys, pxPrepared, canvasW, canvasH, frame, layout.edgeBleed);
+  let changed = false;
+  for (let i = 0; i < layout.lines.length; i++) {
+    if (xs[i] !== layout.lines[i]!.x || ys[i] !== layout.lines[i]!.y) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return layout;
   return {
     ...layout,
-    lines: layout.lines.map((l) => ({ ...l, x: l.x + dx, y: l.y + dy })),
+    lines: layout.lines.map((l, i) => ({ ...l, x: xs[i]!, y: ys[i]! })),
   };
 }
 

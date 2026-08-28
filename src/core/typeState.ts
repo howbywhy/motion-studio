@@ -1,4 +1,4 @@
-import { cloneTypePage, TYPE_PAGE_MAX, type TypePage } from "./typePages";
+import { cloneTypePage, SEQUENCE_SPEED_DEFAULT, TYPE_PAGE_MAX, type TypePage } from "./typePages";
 
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
@@ -51,6 +51,8 @@ export interface TypeState {
   pages: [TypeBlock, TypeBlock][];
   /** Which page the Type inspector is editing. */
   selected: number;
+  /** Cadence of Type State cuts inside the master loop. 0–100, default 50. */
+  sequenceSpeed: number;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -318,6 +320,7 @@ export function defaultTypeState(): TypeState {
     activeIndex: 0,
     pages: [cloneTypePage(blocks)],
     selected: 0,
+    sequenceSpeed: SEQUENCE_SPEED_DEFAULT,
   };
 }
 
@@ -418,11 +421,39 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   selected = Math.min(pages.length - 1, Math.max(0, selected));
 
   if (rec.typePage === "add" && pages.length < TYPE_PAGE_MAX) {
-    pages = [...pages.map(cloneTypePage), cloneTypePage(pages[selected]!)];
-    selected = pages.length - 1;
+    const copy = cloneTypePage(pages[selected]!);
+    pages = [
+      ...pages.slice(0, selected + 1).map(cloneTypePage),
+      copy,
+      ...pages.slice(selected + 1).map(cloneTypePage),
+    ];
+    selected = selected + 1;
   } else if (rec.typePage === "remove" && pages.length > 1 && selected > 0) {
     pages = pages.filter((_, i) => i !== selected).map(cloneTypePage);
     selected = Math.min(selected, pages.length - 1);
+  }
+
+  const moveRaw = rec.typePageMove as { from?: unknown; to?: unknown } | undefined;
+  if (moveRaw && typeof moveRaw === "object") {
+    const from = Math.round(Number(moveRaw.from));
+    const to = Math.round(Number(moveRaw.to));
+    if (
+      Number.isFinite(from) &&
+      Number.isFinite(to) &&
+      from !== to &&
+      from >= 0 &&
+      to >= 0 &&
+      from < pages.length &&
+      to < pages.length
+    ) {
+      const next = pages.map(cloneTypePage);
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item!);
+      if (selected === from) selected = to;
+      else if (from < selected && to >= selected) selected -= 1;
+      else if (from > selected && to <= selected) selected += 1;
+      pages = next;
+    }
   }
 
   blocks = cloneTypePage(pages[selected]!);
@@ -439,6 +470,9 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     activeIndex,
     pages,
     selected,
+    sequenceSpeed: rec.sequenceSpeed === undefined || rec.sequenceSpeed === null
+      ? SEQUENCE_SPEED_DEFAULT
+      : num(rec.sequenceSpeed, 0, 100, SEQUENCE_SPEED_DEFAULT),
   };
 }
 
@@ -464,6 +498,9 @@ export function cloneTypeState(state: TypeState): TypeState {
     activeIndex: state.activeIndex,
     pages,
     selected,
+    sequenceSpeed: typeof state.sequenceSpeed === "number" && Number.isFinite(state.sequenceSpeed)
+      ? Math.min(100, Math.max(0, state.sequenceSpeed))
+      : SEQUENCE_SPEED_DEFAULT,
     blocks: cloneTypePage(pages[selected]!),
   };
 }

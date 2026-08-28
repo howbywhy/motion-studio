@@ -545,10 +545,16 @@ function buildBlock(
   };
 }
 
+export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
+  blockEnabled?: boolean;
+  typePage?: "add" | "remove";
+  typePageMove?: { from: number; to: number };
+};
+
 export function buildTypePanel(
   container: HTMLElement,
   initial: TypeState,
-  onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean; typePage?: "add" | "remove" }) => void,
+  onChange: (patch: TypePanelPatch) => void,
 ): { sync: (state: TypeState) => void } {
   container.innerHTML = "";
   container.className = "type-panel";
@@ -585,12 +591,17 @@ export function buildTypePanel(
   const statesHost = document.createElement("div");
   statesHost.className = "type-states";
   body.appendChild(statesHost);
+  const tabsHost = document.createElement("div");
+  tabsHost.className = "type-states-tabs";
+  statesHost.appendChild(tabsHost);
+
+  let suppressTabClick = false;
 
   function paintStates(): void {
-    statesHost.innerHTML = "";
+    tabsHost.innerHTML = "";
     const lab = document.createElement("label");
     lab.textContent = "Type States";
-    statesHost.appendChild(lab);
+    tabsHost.appendChild(lab);
     const row = document.createElement("div");
     row.className = "seg-toggle type-seg type-states-row";
     const n = state.pages.length;
@@ -599,29 +610,77 @@ export function buildTypePanel(
       btn.type = "button";
       btn.textContent = String(i + 1).padStart(2, "0");
       if (i === state.selected) btn.classList.add("active");
-      btn.addEventListener("click", () => onChange({ selected: i }));
+      if (n > 1) {
+        btn.draggable = true;
+        btn.title = "Drag to reorder";
+        btn.addEventListener("dragstart", (e) => {
+          suppressTabClick = true;
+          e.dataTransfer?.setData("text/plain", String(i));
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+          btn.classList.add("dragging");
+        });
+        btn.addEventListener("dragend", () => {
+          btn.classList.remove("dragging");
+          for (const b of row.querySelectorAll("button")) b.classList.remove("drag-over");
+          window.setTimeout(() => {
+            suppressTabClick = false;
+          }, 0);
+        });
+        btn.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          btn.classList.add("drag-over");
+        });
+        btn.addEventListener("dragleave", () => btn.classList.remove("drag-over"));
+        btn.addEventListener("drop", (e) => {
+          e.preventDefault();
+          btn.classList.remove("drag-over");
+          const from = Number(e.dataTransfer?.getData("text/plain"));
+          if (!Number.isFinite(from) || from === i) return;
+          onChange({ typePageMove: { from, to: i } });
+        });
+      }
+      btn.addEventListener("click", () => {
+        if (suppressTabClick) return;
+        onChange({ selected: i });
+      });
       row.appendChild(btn);
     }
     if (n < 3) {
       const add = document.createElement("button");
       add.type = "button";
       add.className = "type-state-add";
+      add.draggable = false;
       add.textContent = "+";
       add.title = "Duplicate current state";
       add.addEventListener("click", () => onChange({ typePage: "add" }));
       row.appendChild(add);
     }
-    statesHost.appendChild(row);
+    tabsHost.appendChild(row);
     if (state.selected > 0) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "reset-btn type-state-remove";
       remove.textContent = `Remove ${String(state.selected + 1).padStart(2, "0")}`;
       remove.addEventListener("click", () => onChange({ typePage: "remove" }));
-      statesHost.appendChild(remove);
+      tabsHost.appendChild(remove);
     }
   }
   paintStates();
+
+  const speed = slider(statesHost, "Sequence Speed", 0, 100, 1, state.sequenceSpeed, (v) => {
+    onChange({ sequenceSpeed: v });
+  });
+  speed.row.classList.add("type-sequence-speed");
+  speed.input.title = "Slow — Fast. Cadence of Type State cuts inside the master loop.";
+
+  function paintSpeed(): void {
+    const n = state.pages.length;
+    speed.row.hidden = n <= 1;
+    speed.input.value = String(Math.round(state.sequenceSpeed));
+    speed.valueEl.textContent = String(Math.round(state.sequenceSpeed));
+  }
+  paintSpeed();
 
   const applyExpanded = (): void => {
     block0.setExpanded(expanded === 0);
@@ -649,6 +708,7 @@ export function buildTypePanel(
       toggle.textContent = state.enabled ? "On" : "Off";
       container.classList.toggle("type-disabled", !state.enabled);
       paintStates();
+      paintSpeed();
       block0.sync(state.blocks[0]);
       block1.sync(state.blocks[1]);
     },

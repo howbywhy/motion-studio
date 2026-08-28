@@ -32,16 +32,20 @@ function staticKey(layout: TypeLayout, color: string, opacity: number): string {
     layout.offsetY,
     layout.weight,
     layout.textAlign,
+    layout.edgeBleed.l ? "1" : "0",
+    layout.edgeBleed.r ? "1" : "0",
+    layout.edgeBleed.t ? "1" : "0",
+    layout.edgeBleed.b ? "1" : "0",
     layout.lines.map((l) => `${l.text}:${l.x}:${l.y}:${l.width}`).join("|"),
   ].join("\t");
 }
 
-function clipOptical(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+function clipTypeFrame(ctx: CanvasRenderingContext2D, w: number, h: number, bleed: TypeLayout["edgeBleed"]): void {
   const frame = opticalFramePx(w);
-  const clipL = Math.ceil(frame);
-  const clipT = Math.ceil(frame);
-  const clipR = Math.floor(w - frame);
-  const clipB = Math.floor(h - frame);
+  const clipL = bleed.l ? 0 : Math.ceil(frame);
+  const clipT = bleed.t ? 0 : Math.ceil(frame);
+  const clipR = bleed.r ? w : Math.floor(w - frame);
+  const clipB = bleed.b ? h : Math.floor(h - frame);
   ctx.beginPath();
   ctx.rect(clipL, clipT, Math.max(0, clipR - clipL), Math.max(0, clipB - clipT));
   ctx.clip();
@@ -101,7 +105,7 @@ function ensureOverlay(
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, w, h);
   ctx.save();
-  clipOptical(ctx, w, h);
+  clipTypeFrame(ctx, w, h, layout.edgeBleed);
   ctx.translate(layout.offsetX, layout.offsetY);
   drawLines(ctx, layout, color, opacity);
   ctx.restore();
