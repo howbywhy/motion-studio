@@ -1466,7 +1466,9 @@ export class Renderer {
     const tPrep = mark();
 
     const paintType = (): void => {
+      if (!this.typeState.enabled) return;
       const type = typeStateAtPhase(this.typeState, this.getLoopPhase());
+      if (!type.enabled) return;
       const laid = layoutTypeDocument(type, width, height);
       if (laid.length === 0) return;
       for (const item of laid) {

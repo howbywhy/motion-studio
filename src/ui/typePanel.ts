@@ -799,11 +799,11 @@ export function buildTypePanel(
     onChange({ sequenceSpeed: v });
   });
   speed.row.classList.add("type-sequence-speed");
-  speed.input.title = "Slow — Fast. Progression of Type State cuts inside the sequence window.";
+  speed.input.title = "Slow — Fast. Progression of Type State cuts while typography is present.";
 
   function paintTiming(): void {
     const n = state.pages.length;
-    windowUi.row.hidden = n <= 1;
+    windowUi.row.hidden = false;
     speed.row.hidden = n <= 1;
     windowUi.set(state.sequenceStart, state.sequenceStop);
     speed.input.value = String(Math.round(state.sequenceSpeed));

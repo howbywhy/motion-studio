@@ -3,7 +3,7 @@ import { clampTypeState, cloneTypeState, TYPE_ANCHORS, type TypeAnchor, type Typ
 import { HEADLINE_INK_BLEED, headlineEdgeBleed, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
-import { SEQUENCE_SPEED_DEFAULT, typePageCuts, typePageIndexAtPhase, typePageIndexForState, typeStateAtPhase } from "../core/typePages";
+import { SEQUENCE_SPEED_DEFAULT, typePageCuts, typePageIndexForState, typeStateAtPhase, typeVisibleAtPhase, typeVisibleForState } from "../core/typePages";
 import { bloomBehavior } from "../behaviors/bloom";
 import { Renderer } from "../core/renderer";
 import { placeholderA } from "../core/placeholder";
@@ -14,6 +14,7 @@ import { clampEndBehaviourSettings } from "../core/endBehaviour";
 
 const PHASES = [0, 0.2, 0.29, 0.31, 0.42, 0.5, 0.57, 0.59, 0.8, 0.95];
 const WINDOW_PHASES = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99];
+const PRESENCE_PHASES = [0, 0.1, 0.19, 0.2, 0.21, 0.35, 0.5, 0.69, 0.7, 0.71, 0.9];
 const W45 = 320;
 const H45 = 400;
 const W916 = 270;
@@ -100,8 +101,23 @@ function paintPage(state: TypeState, index: number, w: number, h: number): HTMLC
     blocks: state.pages[index],
     pages: [state.pages[index]!],
     selected: 0,
+    sequenceStart: 0,
+    sequenceStop: 1,
   });
   return paintResolved(isolated, w, h, 0);
+}
+
+function paintGround(w: number, h: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  photoGround(canvas.getContext("2d")!, w, h);
+  return canvas;
+}
+
+function presenceCaption(state: TypeState, phase: number): string {
+  if (!typeVisibleForState(state, phase)) return "TYPE OFF";
+  return `STATE ${String(typePageIndexForState(state, phase) + 1).padStart(2, "0")}`;
 }
 
 function cell(parent: HTMLElement, label: string, canvas: HTMLCanvasElement): void {
@@ -126,8 +142,7 @@ function section(root: HTMLElement, title: string): HTMLElement {
 function strip(root: HTMLElement, title: string, state: TypeState, w: number, h: number): void {
   const grid = section(root, title);
   for (const p of PHASES) {
-    const i = typePageIndexForState(state, p);
-    cell(grid, `${p.toFixed(2)}  0${i + 1}`, paintResolved(state, w, h, p));
+    cell(grid, `${p.toFixed(2)}  ${presenceCaption(state, p)}`, paintResolved(state, w, h, p));
   }
 }
 
@@ -183,7 +198,7 @@ function paintBleed(state: TypeState, w: number, h: number): HTMLCanvasElement {
 }
 
 function headlinePage(text: string, anchor: TypeAnchor, scale: number): TypeState {
-  return book([page({ text, composition: "headline", scale, anchor, distribution: "packed" })]);
+  return book([page({ text, composition: "headline", scale, anchor, distribution: "packed" })], { start: 0, stop: 1 });
 }
 
 function inkOver(state: TypeState, w: number, h: number): { l: number; r: number; t: number; b: number; inkW: number; inkH: number } {
@@ -299,6 +314,8 @@ export interface TypeStatesReport {
   paragraphSafe: boolean;
   footnoteSafe: boolean;
   windowSemantics: boolean;
+  presenceSemantics: boolean;
+  oneStatePresence: boolean;
   speedMovesCutsOnly: boolean;
   oncePerLoop: boolean;
   orderPreservesDocuments: boolean;
@@ -394,8 +411,8 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
       const twoGrid = section(root, `Window ${Math.round(win.start * 100)}–${Math.round(win.stop * 100)} · Speed ${speed} · 2 states`);
       const threeGrid = section(root, `Window ${Math.round(win.start * 100)}–${Math.round(win.stop * 100)} · Speed ${speed} · 3 states`);
       for (const p of WINDOW_PHASES) {
-        cell(twoGrid, `${p.toFixed(2)}  0${typePageIndexForState(two, p) + 1}`, paintResolved(two, W45, H45, p));
-        cell(threeGrid, `${p.toFixed(2)}  0${typePageIndexForState(three, p) + 1}`, paintResolved(three, W45, H45, p));
+        cell(twoGrid, `${p.toFixed(2)}  ${presenceCaption(two, p)}`, paintResolved(two, W45, H45, p));
+        cell(threeGrid, `${p.toFixed(2)}  ${presenceCaption(three, p)}`, paintResolved(three, W45, H45, p));
       }
     }
   }
@@ -411,6 +428,21 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   strip(root, "Creative A  Start 10 / Stop 55 / Speed 75", book(campaignPages, { speed: 75, start: 0.1, stop: 0.55 }), W45, H45);
   strip(root, "Creative B  Start 25 / Stop 70 / Speed 50", book(campaignPages, { speed: 50, start: 0.25, stop: 0.7 }), W45, H45);
   strip(root, "Creative C  Start 45 / Stop 80 / Speed 25", book(campaignPages, { speed: 25, start: 0.45, stop: 0.8 }), W45, H45);
+
+  const presence = book(campaignPages, { speed: 50, start: 0.2, stop: 0.7 });
+  const presenceGrid = section(root, "Presence  Start 20 / Stop 70 / Speed 50");
+  for (const p of PRESENCE_PHASES) {
+    cell(presenceGrid, `${p.toFixed(2)}  ${presenceCaption(presence, p)}`, paintResolved(presence, W45, H45, p));
+  }
+
+  const oneWindow = book(
+    [page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" })],
+    { start: 0.3, stop: 0.6 },
+  );
+  const oneGrid = section(root, "One state  Start 30 / Stop 60  ·  Speed hidden");
+  for (const p of [0, 0.29, 0.3, 0.45, 0.59, 0.6, 0.9]) {
+    cell(oneGrid, `${p.toFixed(2)}  ${presenceCaption(oneWindow, p)}`, paintResolved(oneWindow, W45, H45, p));
+  }
 
   const orderOrig = book(threeSpeedPages);
   const orderMoved = clampTypeState({ ...orderOrig, typePageMove: { from: 1, to: 2 } });
@@ -428,17 +460,30 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   const one = book([
     page({ text: mbmById("coming-soon-break").text, composition: "headline", scale: 78, anchor: "tl" }),
   ]);
-  const oneA = paintResolved(one, W45, H45, 0.2).getContext("2d")!.getImageData(0, 0, W45, H45);
+  const oneA = paintResolved(one, W45, H45, 0.4).getContext("2d")!.getImageData(0, 0, W45, H45);
   const oneB = paintResolved(one, W45, H45, 0.8).getContext("2d")!.getImageData(0, 0, W45, H45);
   const oneStatic = paintPage(one, 0, W45, H45).getContext("2d")!.getImageData(0, 0, W45, H45);
-  const onePageBypass = pixelDiff(oneA, oneB) === 0 && pixelDiff(oneA, oneStatic) === 0
-    && typeStateAtPhase(one, 0.63) === one;
+  const oneOff = paintGround(W45, H45).getContext("2d")!.getImageData(0, 0, W45, H45);
+  const masterOff = clampTypeState({ ...one, enabled: false });
+  const onePageBypass =
+    typeStateAtPhase(one, 0.4) === one &&
+    typeStateAtPhase(masterOff, 0.4) === masterOff &&
+    !typeStateAtPhase(one, 0.1).enabled &&
+    !typeStateAtPhase(one, 0.8).enabled &&
+    pixelDiff(oneA, oneStatic) === 0 &&
+    pixelDiff(oneB, oneOff) === 0;
 
   let cutEqualsStatic = true;
   for (const state of [sequenceA, sequenceB, sequenceC, free, ss]) {
     for (const p of PHASES) {
-      const i = typePageIndexForState(state, p);
       const moving = paintResolved(state, W45, H45, p).getContext("2d")!.getImageData(0, 0, W45, H45);
+      if (!typeVisibleForState(state, p)) {
+        if (pixelDiff(moving, paintGround(W45, H45).getContext("2d")!.getImageData(0, 0, W45, H45)) !== 0) {
+          cutEqualsStatic = false;
+        }
+        continue;
+      }
+      const i = typePageIndexForState(state, p);
       const frozen = paintPage(state, i, W45, H45).getContext("2d")!.getImageData(0, 0, W45, H45);
       if (pixelDiff(moving, frozen) !== 0) cutEqualsStatic = false;
     }
@@ -459,9 +504,16 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     ) > 0;
 
   const geometryStable = sequenceA.pages.every((_, i) => {
-    const isolated = clampTypeState({ enabled: true, blocks: sequenceA.pages[i], pages: [sequenceA.pages[i]!], selected: 0 });
-    const live = typeStateAtPhase(sequenceA, i === 0 ? 0.1 : i === 1 ? 0.4 : 0.8);
-    return typeGeometryKey(isolated, W45, H45) === typeGeometryKey(live, W45, H45);
+    const isolated = clampTypeState({
+      enabled: true,
+      blocks: sequenceA.pages[i],
+      pages: [sequenceA.pages[i]!],
+      selected: 0,
+      sequenceStart: 0,
+      sequenceStop: 1,
+    });
+    const live = typeStateAtPhase(sequenceA, i === 0 ? 0.25 : i === 1 ? 0.42 : 0.6);
+    return live.enabled && typeGeometryKey(isolated, W45, H45) === typeGeometryKey(live, W45, H45);
   });
 
   const host = document.createElement("div");
@@ -476,7 +528,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     renderer.setHoldPhase(p);
     const img = settle(renderer);
     liveHashes[String(p)] = hashPixels(img);
-    cellImage(live, `p${p.toFixed(2)}  0${typePageIndexForState(sequenceA, p) + 1}`, img);
+    cellImage(live, `p${p.toFixed(2)}  ${presenceCaption(sequenceA, p)}`, img);
   }
 
   renderer.setHoldPhase(0.5);
@@ -501,10 +553,30 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     const fig = document.createElement("figure");
     fig.style.maxWidth = "320px";
     const cap = document.createElement("figcaption");
-    cap.textContent = "Live loop — cuts, final page into Flicker, return to 01";
+    cap.textContent = "Live loop — no type, enter, cuts, leave, Flicker, loop";
     fig.appendChild(liveCanvas);
     fig.appendChild(cap);
     live.after(fig);
+  }
+
+  const flickerHost = document.createElement("div");
+  flickerHost.style.display = "none";
+  root.appendChild(flickerHost);
+  const flickerRenderer = makeLiveRenderer(flickerHost);
+  const flickerCases: { label: string; start: number; stop: number }[] = [
+    { label: "A  Start 20 / Stop 65  type leaves before Flicker", start: 0.2, stop: 0.65 },
+    { label: "B  Start 20 / Stop 90  type into Flicker", start: 0.2, stop: 0.9 },
+    { label: "C  Start 0 / Stop 100  type full piece", start: 0, stop: 1 },
+  ];
+  for (const c of flickerCases) {
+    const st = book(campaignPages, { speed: 50, start: c.start, stop: c.stop });
+    flickerRenderer.setTypeState(st);
+    const grid = section(root, `Flicker · ${c.label}`);
+    for (const p of [0.5, 0.8, 0.96]) {
+      flickerRenderer.setClockMode("hold");
+      flickerRenderer.setHoldPhase(p);
+      cellImage(grid, `p${p.toFixed(2)}  ${presenceCaption(st, p)}`, settle(flickerRenderer));
+    }
   }
 
   const bench = document.createElement("canvas");
@@ -563,14 +635,40 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   const slow = book(threeSpeedPages, { speed: 0, start: 0.2, stop: 0.7 });
   const fast = book(threeSpeedPages, { speed: 100, start: 0.2, stop: 0.7 });
   const windowSemantics =
-    typePageIndexForState(mid, 0) === 0 &&
-    typePageIndexForState(mid, 0.19) === 0 &&
+    !typeVisibleForState(mid, 0) &&
+    !typeVisibleForState(mid, 0.19) &&
+    typeVisibleForState(mid, 0.2) &&
     typePageIndexForState(mid, 0.2) === 0 &&
-    typePageIndexForState(mid, 0.7) === 2 &&
-    typePageIndexForState(mid, 0.9) === 2 &&
-    typePageIndexForState(mid, 0.99) === 2 &&
-    typePageIndexAtPhase(0.19, 3, 50, 0.2, 0.7) === 0 &&
-    typePageIndexAtPhase(0.7, 3, 50, 0.2, 0.7) === 2;
+    typeVisibleForState(mid, 0.69) &&
+    typePageIndexForState(mid, 0.69) === 2 &&
+    !typeVisibleForState(mid, 0.7) &&
+    !typeVisibleForState(mid, 0.9) &&
+    !typeVisibleForState(mid, 0.99) &&
+    typeVisibleAtPhase(0.2, 0.2, 0.7) &&
+    !typeVisibleAtPhase(0.7, 0.2, 0.7) &&
+    typeVisibleAtPhase(0, 0, 1) &&
+    typeVisibleAtPhase(0.999, 0, 1);
+
+  const presenceSemantics =
+    !typeStateAtPhase(mid, 0.19).enabled &&
+    typeStateAtPhase(mid, 0.2).enabled &&
+    !typeStateAtPhase(mid, 0.7).enabled &&
+    pixelDiff(
+      paintResolved(mid, W45, H45, 0.19).getContext("2d")!.getImageData(0, 0, W45, H45),
+      paintResolved(mid, W45, H45, 0.2).getContext("2d")!.getImageData(0, 0, W45, H45),
+    ) > 0 &&
+    pixelDiff(
+      paintResolved(mid, W45, H45, 0.69).getContext("2d")!.getImageData(0, 0, W45, H45),
+      paintResolved(mid, W45, H45, 0.7).getContext("2d")!.getImageData(0, 0, W45, H45),
+    ) > 0;
+
+  const oneStatePresence =
+    !typeVisibleForState(oneWindow, 0.299) &&
+    typeVisibleForState(oneWindow, 0.3) &&
+    typeVisibleForState(oneWindow, 0.599) &&
+    !typeVisibleForState(oneWindow, 0.6) &&
+    typeStateAtPhase(oneWindow, 0.45) === oneWindow &&
+    !typeStateAtPhase(oneWindow, 0.1).enabled;
 
   const midCuts = typePageCuts(3, 50, 0.2, 0.7);
   const slowCuts = typePageCuts(3, 0, 0.2, 0.7);
@@ -594,6 +692,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     let prev = -1;
     for (let i = 0; i <= 200; i++) {
       const p = i === 200 ? 0 : i / 200;
+      if (!typeVisibleForState(state, p)) continue;
       const idx = typePageIndexForState(state, p);
       if (idx !== prev) {
         seen.push(idx);
@@ -616,22 +715,26 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   const oncePerLoop = edgeWindows.every(pathOnce);
 
   const holdWindowEdges =
-    typePageIndexForState(mid, 0.2 - 1e-6) === 0 &&
+    !typeVisibleForState(mid, 0.2 - 1e-6) &&
+    typeVisibleForState(mid, 0.2) &&
     typePageIndexForState(mid, 0.2) === 0 &&
     typePageIndexForState(mid, 0.45) === 1 &&
+    typeVisibleForState(mid, 0.7 - 1e-6) &&
     typePageIndexForState(mid, 0.7 - 1e-6) === 2 &&
-    typePageIndexForState(mid, 0.7) === 2 &&
-    typePageIndexForState(mid, 0.7 + 1e-6) === 2;
+    !typeVisibleForState(mid, 0.7) &&
+    !typeVisibleForState(mid, 0.7 + 1e-6);
 
   const orderPreservesDocuments =
     orderMoved.pages[0]![0]!.text === "NEW" &&
     orderMoved.pages[1]![0]!.text === "07.09.2026" &&
     orderMoved.pages[2]![0]!.text === mbmById("name-break").text &&
     orderOrig.pages[1]![0]!.text === mbmById("name-break").text &&
-    typePageIndexForState(orderMoved, 0.1) === 0 &&
-    typeStateAtPhase(orderMoved, 0.1).blocks[0]!.text === "NEW" &&
-    typeStateAtPhase(orderMoved, 0.4).blocks[0]!.text === "07.09.2026" &&
-    typeStateAtPhase(orderMoved, 0.8).blocks[0]!.text === mbmById("name-break").text;
+    typePageIndexForState(orderMoved, 0.25) === 0 &&
+    typeStateAtPhase(orderMoved, 0.25).blocks[0]!.text === "NEW" &&
+    typeStateAtPhase(orderMoved, 0.42).blocks[0]!.text === "07.09.2026" &&
+    typeStateAtPhase(orderMoved, 0.6).blocks[0]!.text === mbmById("name-break").text &&
+    !typeStateAtPhase(orderMoved, 0.1).enabled &&
+    !typeStateAtPhase(orderMoved, 0.8).enabled;
 
   const twoThenAdd = clampTypeState({
     ...book([
@@ -660,6 +763,8 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     paragraphSafe,
     footnoteSafe,
     windowSemantics: windowSemantics && holdWindowEdges,
+    presenceSemantics,
+    oneStatePresence,
     speedMovesCutsOnly,
     oncePerLoop,
     orderPreservesDocuments,
