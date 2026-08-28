@@ -1,5 +1,6 @@
 import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
+import { clampElapsedSeconds, previewClockDelta } from "./playbackClock";
 import { getSeamCandidate, limitedSequenceResolve, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
@@ -182,9 +183,19 @@ export class Renderer {
   private params: ParamValues = {};
   private state: unknown = null;
 
+  /**
+   * Source-video transport only. Independent of Pause All (`frozen`) and
+   * MASTER HOLD (`clockMode`). `playing && frozen` is deliberate: the
+   * composition is frozen while video play-intent is retained for resume.
+   */
   private playing = false;
   private elapsed = 0;
-  private lastTs = 0;
+  /** Last rAF timestamp used for preview dt. Never seeded from performance.now(). */
+  private lastRafTs: number | null = null;
+  private rafId = 0;
+  private rafStarts = 0;
+  /** Next preview frame must not add dt (pause/resume, scrub, hold, export, tab). */
+  private clockNeedsRebase = true;
   private playbackMode: PlaybackMode = "loop";
   private bloomPulse: BloomPulseSettings = { ...DEFAULT_BLOOM_PULSE };
   private diagnostic: DiagnosticMode = "off";
@@ -205,6 +216,7 @@ export class Renderer {
   private clockMode: ClockMode = "auto";
   private holdPhase = 0;
   private profiling = false;
+  /** True after the first play() until the page is torn down. One rAF chain. */
   private loopActive = false;
   private audioEnabled = true;
   /** Set by a user Play / Audio click. Boot autoplay stays muted so the
@@ -623,10 +635,10 @@ export class Renderer {
     if (mode === "hold") {
       this.holdPhase = this.getLoopPhase();
     } else {
-      this.elapsed = this.holdPhase * this.loopSeconds;
-      this.lastTs = performance.now();
+      this.elapsed = clampElapsedSeconds(this.holdPhase * this.loopSeconds);
     }
     this.clockMode = mode;
+    this.noteClockDiscontinuity();
     this.renderFrame();
   }
 
@@ -644,26 +656,33 @@ export class Renderer {
   seekLoopPhase(phase: number): void {
     const p = clampLoopPhase(phase);
     if (this.clockMode === "hold") this.holdPhase = p;
-    else this.elapsed = p * this.loopSeconds;
+    else this.elapsed = clampElapsedSeconds(p * this.loopSeconds);
+    this.noteClockDiscontinuity();
     this.renderFrame();
   }
 
   beginPhaseScrub(): void {
     this.phaseScrubbing = true;
+    this.noteClockDiscontinuity();
   }
 
   endPhaseScrub(): void {
     if (!this.phaseScrubbing) return;
     this.phaseScrubbing = false;
-    this.lastTs = performance.now();
+    this.noteClockDiscontinuity();
   }
 
   restoreClock(mode: ClockMode, holdPhase: number, elapsed: number): void {
     this.clockMode = mode;
     this.holdPhase = clampLoopPhase(holdPhase);
-    this.elapsed = Math.max(0, elapsed);
-    this.lastTs = performance.now();
+    this.elapsed = clampElapsedSeconds(elapsed);
+    this.noteClockDiscontinuity();
     this.renderFrame();
+  }
+
+  /** Drop the next preview dt. Pause, scrub, export, visibility, and load. */
+  noteClockDiscontinuity(): void {
+    this.clockNeedsRebase = true;
   }
 
   getElapsed(): number {
@@ -675,15 +694,16 @@ export class Renderer {
   }
 
   setGraphicElapsed(seconds: number): void {
-    this.graphicElapsed = Math.max(0, seconds);
+    this.graphicElapsed = clampElapsedSeconds(seconds);
   }
 
   setFrozen(on: boolean): void {
     if (this.frozen === on) return;
     this.frozen = on;
-    this.lastTs = performance.now();
+    this.noteClockDiscontinuity();
     this.syncActiveVideos();
     this.syncAudio();
+    this.renderFrame();
   }
 
   isFrozen(): boolean {
@@ -884,7 +904,7 @@ export class Renderer {
     this.graphicElapsed = snap.graphicElapsed;
     this.playing = snap.playing;
     this.frozen = snap.frozen;
-    this.lastTs = performance.now();
+    this.noteClockDiscontinuity();
     for (const v of snap.videos) {
       try {
         v.el.currentTime = v.time;
@@ -1154,26 +1174,66 @@ export class Renderer {
   private startLoop(): void {
     if (this.loopActive) return;
     this.loopActive = true;
-    this.lastTs = performance.now();
-    requestAnimationFrame(this.tick);
+    this.rafStarts += 1;
+    this.noteClockDiscontinuity();
+    this.scheduleTick();
+  }
+
+  private scheduleTick(): void {
+    if (this.rafId !== 0) return;
+    this.rafId = requestAnimationFrame(this.tick);
   }
 
   private tick = (ts: number): void => {
+    this.rafId = 0;
+    this.applyPreviewFrame(ts);
+    if (this.loopActive) this.scheduleTick();
+  };
+
+  /**
+   * One preview clock step at a rAF timestamp.
+   * Eval drives this without starting the live loop.
+   */
+  applyPreviewFrame(ts: number, opts?: { hidden?: boolean }): void {
+    const hidden =
+      opts?.hidden ?? (typeof document !== "undefined" && document.visibilityState === "hidden");
     if (this.exporting) {
-      this.lastTs = ts;
-      if (this.loopActive) requestAnimationFrame(this.tick);
+      this.lastRafTs = Number.isFinite(ts) ? ts : this.lastRafTs;
+      this.clockNeedsRebase = true;
       return;
     }
-    const dt = (ts - this.lastTs) / 1000;
-    this.lastTs = ts;
-    if (!this.frozen) {
-      if (this.clockMode === "auto" && !this.phaseScrubbing) this.elapsed += dt;
-      if (this.hasLiveGraphic()) this.graphicElapsed += dt;
-      this.renderFrame();
-      this.syncAudio();
+
+    const suspend = this.frozen || hidden;
+    const prevTs = this.clockNeedsRebase ? null : this.lastRafTs;
+    const { dt } = previewClockDelta(prevTs, ts);
+    if (Number.isFinite(ts)) this.lastRafTs = ts;
+    this.clockNeedsRebase = suspend;
+
+    if (suspend) return;
+
+    if (this.clockMode === "auto" && !this.phaseScrubbing) {
+      this.elapsed = clampElapsedSeconds(this.elapsed + dt);
     }
-    if (this.loopActive) requestAnimationFrame(this.tick);
-  };
+    if (this.hasLiveGraphic()) {
+      this.graphicElapsed = clampElapsedSeconds(this.graphicElapsed + dt);
+    }
+    this.renderFrame();
+    this.syncAudio();
+  }
+
+  getPreviewClockDiagnostics(): {
+    loopActive: boolean;
+    rafScheduled: boolean;
+    rafStarts: number;
+    needsRebase: boolean;
+  } {
+    return {
+      loopActive: this.loopActive,
+      rafScheduled: this.rafId !== 0,
+      rafStarts: this.rafStarts,
+      needsRebase: this.clockNeedsRebase,
+    };
+  }
 
   private setVideoPaused(paused: boolean): void {
     if (paused) {

@@ -19,9 +19,11 @@ export function clampLoopSeconds(seconds: number): number {
 }
 
 export function loopPhaseFromElapsed(elapsed: number, loopSeconds: number): number {
+  if (!Number.isFinite(elapsed) || !Number.isFinite(loopSeconds)) return 0;
   const period = Math.max(0.001, loopSeconds);
   let t = elapsed % period;
   if (t < 0) t += period;
+  if (t >= period) return 0;
   return t / period;
 }
 

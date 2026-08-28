@@ -85,7 +85,7 @@ app.innerHTML = `
           </div>
           <div id="loop-length"></div>
           <div id="phase-control"></div>
-          <button type="button" class="diagnostic-toggle" id="pause-all" title="Freeze the entire composition exactly where it is. Independent of HOLD and Video Pause.">Pause All</button>
+          <button type="button" class="diagnostic-toggle" id="pause-all" aria-pressed="false" title="Freeze the entire composition exactly where it is. Independent of HOLD and Video Pause.">Pause All</button>
         </div>
         <div class="stage-frame" id="stage-frame">
           <canvas id="canvas"></canvas>
@@ -958,7 +958,9 @@ function captureExploreSnapshot(): ExploreSnapshot {
 }
 
 function syncFreezeButton(): void {
-  pauseAllBtn.classList.toggle("active", renderer.isFrozen());
+  const frozen = renderer.isFrozen();
+  pauseAllBtn.classList.toggle("active", frozen);
+  pauseAllBtn.setAttribute("aria-pressed", frozen ? "true" : "false");
 }
 
 function restoreClockUi(mode: ClockMode, phase: number): void {
@@ -1497,6 +1499,11 @@ applyProductDefault();
 
 window.addEventListener("pagehide", () => {
   renderer.pause();
+  renderer.noteClockDiscontinuity();
+});
+
+document.addEventListener("visibilitychange", () => {
+  renderer.noteClockDiscontinuity();
 });
 
 Object.assign(window, {
@@ -1527,6 +1534,9 @@ Object.assign(window, {
       renderer.setFrozen(on);
       syncFreezeButton();
     },
+    noteClockDiscontinuity: () => renderer.noteClockDiscontinuity(),
+    applyPreviewFrame: (ts: number, opts?: { hidden?: boolean }) => renderer.applyPreviewFrame(ts, opts),
+    getPreviewClockDiagnostics: () => renderer.getPreviewClockDiagnostics(),
     getGraphicElapsed: () => renderer.getGraphicElapsed(),
     getElapsed: () => renderer.getElapsed(),
     getRandomisationSeed: () => randomisationSeed,

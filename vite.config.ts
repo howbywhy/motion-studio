@@ -11,6 +11,7 @@ export default defineConfig({
         main: resolve(root, "index.html"),
         typeStates: resolve(root, "eval/type-states.html"),
         bloomPulse: resolve(root, "eval/bloom-pulse.html"),
+        transport: resolve(root, "eval/transport.html"),
       },
     },
   },
