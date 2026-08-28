@@ -10,13 +10,15 @@ import {
   clampTypeState,
   flattenLegacyFootnoteCopy,
   SUBTITLE_YELLOW,
+  TYPE_ANCHORS,
   type TypeBlock,
   type TypeState,
 } from "../core/typeState";
-import { typePageBeatLocal, typeStateAtPhase } from "../core/typePages";
+import { typePageBeatLocal, typePageCuts, typeStateAtPhase, type TypeBeat } from "../core/typePages";
 import { applySubtitleCues, parseSubtitleCues, subtitleCueIndex } from "../core/typeSubtitle";
 import { generateRandomisation } from "../core/randomise";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
+import { layoutTypography, typeInkBox } from "../core/typeLayout";
 
 const W = 320;
 const H = 400;
@@ -53,7 +55,6 @@ function subtitleBlock(text: string, extra?: Partial<TypeBlock>): Partial<TypeBl
     enabled: true,
     text,
     composition: "subtitle",
-    scale: 40,
     anchor: "bc",
     column: "medium",
     ...extra,
@@ -63,29 +64,29 @@ function subtitleBlock(text: string, extra?: Partial<TypeBlock>): Partial<TypeBl
 function campaign(): TypeState {
   return clampTypeState({
     enabled: true,
-    sequenceStart: 0.2,
+    sequenceStart: 0.15,
     sequenceStop: 0.78,
-    sequenceSpeed: 50,
+    pageBeats: [1, 1, 3, 1],
     pages: [
       [
-        { enabled: true, text: "07.09", composition: "headline", scale: 100, anchor: "tc", color: "#f3efe6" },
+        { enabled: true, text: "MADE BY", composition: "headline", scale: 86, anchor: "mc", color: "#f3efe6" },
         { enabled: false, text: "", composition: "headline" },
-        subtitleBlock("Made by Madelen.\nSpring / Summer 2026."),
+        subtitleBlock("Made in Sydney."),
       ],
       [
-        { enabled: true, text: "MADE BY", composition: "headline", scale: 86, anchor: "ml", color: "#f3efe6" },
-        { enabled: true, text: "MADELEN", composition: "headline", scale: 86, anchor: "mr", color: "#f3efe6" },
-        subtitleBlock("Designed in Sydney.\nMade to move."),
-      ],
-      [
-        { enabled: true, text: "FLAWED", composition: "headline", scale: 86, anchor: "bl", color: "#f3efe6" },
-        { enabled: true, text: "AND FLAWLESS", composition: "headline", scale: 70, anchor: "br", color: "#f3efe6" },
-        subtitleBlock("New season.\nAvailable online."),
-      ],
-      [
-        { enabled: true, text: "2026", composition: "headline", scale: 100, anchor: "mc", color: "#f3efe6" },
+        { enabled: true, text: "MADELEN", composition: "headline", scale: 86, anchor: "mc", color: "#f3efe6" },
         { enabled: false, text: "", composition: "headline" },
-        subtitleBlock("Made by Madelen."),
+        subtitleBlock("Designed for movement."),
+      ],
+      [
+        { enabled: true, text: "FLAWED\nAND FLAWLESS", composition: "headline", scale: 78, anchor: "mc", color: "#f3efe6" },
+        { enabled: false, text: "", composition: "headline" },
+        subtitleBlock("A study in material and form.\nMade to be lived in.\nSpring / Summer 2026."),
+      ],
+      [
+        { enabled: true, text: "07.09", composition: "headline", scale: 100, anchor: "mc", color: "#f3efe6" },
+        { enabled: false, text: "", composition: "headline" },
+        subtitleBlock("Available online."),
       ],
     ],
   });
@@ -149,13 +150,19 @@ export interface SubtitleReport {
   newDefaultsYellow: boolean;
   oneCue: boolean;
   twoCues: boolean;
+  threeCues: boolean;
   fourCues: boolean;
+  sixCues: boolean;
   eightCues: boolean;
   forwardScrub: boolean;
   backwardScrub: boolean;
   holdExportIdentical: boolean;
   perStateRestart: boolean;
-  frameHoldAffectsWindow: boolean;
+  beatAffectsWindow: boolean;
+  cuesDivideByBeat: boolean;
+  defaultScaleUseful: boolean;
+  bottomSafe: boolean;
+  hierarchyBelowHeadline: boolean;
   pulseKeepsCues: boolean;
   flickerInterrupts: boolean;
   randomisePreservesCopy: boolean;
@@ -192,7 +199,12 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
   const legacyKeepsColour = legacy.color === "#ffffff";
 
   const fresh = clampTypeBlock({ enabled: true, composition: "subtitle", text: "Hello." }, true);
-  const newDefaultsYellow = fresh.color === SUBTITLE_YELLOW;
+  const newDefaultsYellow =
+    fresh.color === SUBTITLE_YELLOW &&
+    fresh.weight === 600 &&
+    fresh.scale === 62 &&
+    fresh.tracking === 20 &&
+    fresh.textAlign === "center";
 
   const host = document.createElement("div");
   root.appendChild(host);
@@ -219,7 +231,7 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
   root.appendChild(hCounts);
   root.appendChild(countGrid);
 
-  for (const n of [1, 2, 4, 8]) {
+  for (const n of [1, 2, 3, 4, 6, 8]) {
     const state = onePage(cues(n));
     renderer.setTypeState(state);
     const seen: string[] = [];
@@ -261,7 +273,6 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     enabled: true,
     sequenceStart: 0.2,
     sequenceStop: 0.8,
-    sequenceSpeed: 50,
     pages: [
       [
         { enabled: true, text: "STATE 01", composition: "headline", scale: 70, anchor: "tc", color: "#f3efe6" },
@@ -292,9 +303,7 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     enabled: true,
     sequenceStart: 0.2,
     sequenceStop: 0.8,
-    sequenceSpeed: 50,
-    frameHoldEnabled: [true, false],
-    frameHoldLength: [3, 2],
+    pageBeats: [3, 1],
     pages: [
       [
         { enabled: true, text: "HOLD", composition: "headline", scale: 70, anchor: "tc", color: "#f3efe6" },
@@ -308,8 +317,161 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
       ],
     ],
   });
-  const unheld = clampTypeState({ ...held, frameHoldEnabled: [false, false] });
-  const frameHoldAffectsWindow = typePageBeatLocal(held, 0.35) !== typePageBeatLocal(unheld, 0.35);
+  const unheld = clampTypeState({ ...held, pageBeats: [1, 1] });
+  const beatAffectsWindow = typePageBeatLocal(held, 0.35) !== typePageBeatLocal(unheld, 0.35);
+
+  function beatCueState(nCues: number, beat: TypeBeat): TypeState {
+    return clampTypeState({
+      enabled: true,
+      sequenceStart: 0.2,
+      sequenceStop: 0.8,
+      pageBeats: [beat, 1],
+      pages: [
+        [
+          { enabled: true, text: "PAGE", composition: "headline", scale: 70, anchor: "tc", color: "#f3efe6" },
+          { enabled: false, text: "", composition: "headline" },
+          subtitleBlock(cues(nCues)),
+        ],
+        [
+          { enabled: true, text: "NEXT", composition: "headline", scale: 70, anchor: "tc", color: "#f3efe6" },
+          { enabled: false, text: "", composition: "headline" },
+          subtitleBlock("Next."),
+        ],
+      ],
+    });
+  }
+  function cuesDivideEven(nCues: number, beat: TypeBeat): boolean {
+    const state = beatCueState(nCues, beat);
+    const start = state.sequenceStart;
+    const cut = typePageCuts(2, start, state.sequenceStop, state.pageBeats)[0] ?? state.sequenceStop;
+    const span = cut - start;
+    if (!(span > 0)) return false;
+    for (let i = 0; i < nCues; i++) {
+      const p = start + span * ((i + 0.5) / nCues);
+      if (cueAt(state, p) !== parseSubtitleCues(cues(nCues))[i]) return false;
+    }
+    return true;
+  }
+  const beatGrid = document.createElement("div");
+  beatGrid.className = "grid";
+  const hBeat = document.createElement("h2");
+  hBeat.textContent = "Cues × Beat — even split inside the State";
+  root.appendChild(hBeat);
+  root.appendChild(beatGrid);
+  let cuesDivideByBeat = true;
+  for (const beat of [1, 2, 3] as TypeBeat[]) {
+    for (const n of [1, 2, 3, 6]) {
+      const ok = cuesDivideEven(n, beat);
+      cuesDivideByBeat = cuesDivideByBeat && ok;
+      const state = beatCueState(n, beat);
+      const start = state.sequenceStart;
+      const cut = typePageCuts(2, start, state.sequenceStop, state.pageBeats)[0]!;
+      renderer.setTypeState(state);
+      renderer.setHoldPhase(start + (cut - start) * 0.5);
+      cell(beatGrid, `${n} cues · Beat ${beat}× · ${ok ? "ok" : "FAIL"}`, settle(renderer));
+    }
+  }
+
+  const colonel = "The Colonel and I need to have a few words.";
+  function onlySubtitle(extra?: Partial<TypeBlock>): TypeState {
+    return clampTypeState({
+      enabled: true,
+      sequenceStart: 0,
+      sequenceStop: 1,
+      blocks: [
+        { enabled: true, composition: "subtitle", text: colonel, color: SUBTITLE_YELLOW, ...extra },
+        { enabled: false, text: "", composition: "headline" },
+        { enabled: false, text: "", composition: "headline" },
+      ],
+    });
+  }
+  const W916 = 360;
+  const H916 = 640;
+  const defLay = layoutTypography(onlySubtitle(), W916, H916);
+  const s50 = layoutTypography(onlySubtitle({ scale: 50 }), W916, H916)?.fontSize ?? 0;
+  const sDef = defLay?.fontSize ?? 0;
+  const s100 = layoutTypography(onlySubtitle({ scale: 100 }), W916, H916)?.fontSize ?? 0;
+  const headLay = layoutTypography(clampTypeState({
+    enabled: true,
+    blocks: [{ enabled: true, text: "FLAWED\nAND FLAWLESS", composition: "headline", scale: 78, anchor: "mc", color: "#f3efe6" }],
+  }), W916, H916);
+  const defaultScaleUseful = sDef / H916 >= 0.035 && sDef / H916 <= 0.055 && s50 < sDef && sDef < s100 && s100 / H916 < 0.09;
+  const hierarchyBelowHeadline = (headLay?.fontSize ?? 0) > s100;
+  const bcBox = defLay ? typeInkBox(defLay) : { l: 0, t: 0, r: 0, b: H916 };
+  const bottomGap = (H916 - bcBox.b) / H916;
+  const blLay = layoutTypography(onlySubtitle({ anchor: "bl", textAlign: "left" }), W916, H916);
+  const brLay = layoutTypography(onlySubtitle({ anchor: "br", textAlign: "right" }), W916, H916);
+  const blBox = blLay ? typeInkBox(blLay) : { l: 0, t: 0, r: 0, b: 0 };
+  const brBox = brLay ? typeInkBox(brLay) : { l: 0, t: 0, r: W916, b: 0 };
+  const bottomSafe =
+    bottomGap >= 0.055 &&
+    bottomGap <= 0.12 &&
+    blBox.l / W916 >= 0.04 &&
+    (W916 - brBox.r) / W916 >= 0.04;
+  const sentenceLines = defLay?.lines.length ?? 0;
+  const sentenceReadable = sentenceLines >= 1 && sentenceLines <= 2;
+
+  const alignGrid = document.createElement("div");
+  alignGrid.className = "grid";
+  const hAlign = document.createElement("h2");
+  hAlign.textContent = "Frame Align — 9 positions · 9:16";
+  root.appendChild(hAlign);
+  root.appendChild(alignGrid);
+  const alignRenderer = makeRenderer(host);
+  alignRenderer.resizeExact(W916, H916);
+  for (const anchor of TYPE_ANCHORS) {
+    const st = onlySubtitle({ anchor, textAlign: anchor.endsWith("c") ? "center" : anchor.endsWith("l") ? "left" : "right" });
+    alignRenderer.setTypeState(st);
+    alignRenderer.setHoldPhase(0.5);
+    cell(alignGrid, anchor, settle(alignRenderer));
+  }
+
+  const scaleGrid = document.createElement("div");
+  scaleGrid.className = "grid";
+  const hScale = document.createElement("h2");
+  hScale.textContent = "Scale 50 / default / 100 · 9:16";
+  root.appendChild(hScale);
+  root.appendChild(scaleGrid);
+  for (const [label, st] of [
+    ["50", onlySubtitle({ scale: 50 })],
+    ["default", onlySubtitle()],
+    ["100", onlySubtitle({ scale: 100 })],
+  ] as const) {
+    alignRenderer.setTypeState(st);
+    cell(scaleGrid, `Scale ${label}`, settle(alignRenderer));
+  }
+
+  const hier = clampTypeState({
+    enabled: true,
+    sequenceStart: 0,
+    sequenceStop: 1,
+    blocks: [
+      { enabled: true, text: "FLAWED\nAND FLAWLESS", composition: "headline", scale: 78, anchor: "mc", color: "#f3efe6" },
+      { enabled: false, text: "", composition: "headline" },
+      subtitleBlock("Made in Sydney.\nDesigned for movement.\nAvailable online."),
+    ],
+  });
+  const hierGrid = document.createElement("div");
+  hierGrid.className = "grid";
+  const hHier = document.createElement("h2");
+  hHier.textContent = "Hierarchy — Headline + Subtitle · Registration · Pulse";
+  root.appendChild(hHier);
+  root.appendChild(hierGrid);
+  alignRenderer.setTypeState(hier);
+  alignRenderer.setPlaybackMode("loop");
+  for (const amt of [0, 50, 75] as const) {
+    alignRenderer.setRegistrationEnabled(amt > 0);
+    alignRenderer.setRegistrationAmount(amt);
+    alignRenderer.setHoldPhase(0.5);
+    cell(hierGrid, `Registration ${amt}`, settle(alignRenderer));
+  }
+  alignRenderer.setRegistrationEnabled(true);
+  alignRenderer.setRegistrationAmount(60);
+  alignRenderer.setPlaybackMode("pingpong");
+  alignRenderer.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
+  alignRenderer.setHoldPhase(0.5);
+  cell(hierGrid, "Pulse 42–58 2×", settle(alignRenderer));
+  alignRenderer.setPlaybackMode("loop");
 
   const piece = campaign();
   renderer.setTypeState(piece);
@@ -352,20 +514,22 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     pairCount: 2,
   });
   const randomisePreservesCopy =
-    beforeRand.pages[0]![2]!.text.includes("Made by Madelen") &&
+    beforeRand.pages[0]![2]!.text.includes("Made in Sydney") &&
     beforeRand.pages[2]![2]!.enabled === true &&
     seeded.params.resolveLimit === 50;
 
   const creative = document.createElement("div");
   creative.className = "grid";
   const hC = document.createElement("h2");
-  hC.textContent = "Creative — Expressive Pulse 42–58 2× · Limit 50 · Registration 65";
+  hC.textContent = "Creative — 12s 9:16 · Pulse 42–58 2× · Registration 60 · Start 15 / Stop 78 · Beat 1 / 1 / 3 / 1";
   root.appendChild(hC);
   root.appendChild(creative);
   renderer.setTypeState(piece);
   renderer.setPlaybackMode("pingpong");
   renderer.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
+  renderer.setRegistrationAmount(60);
   renderer.setEndBehaviour(clampEndBehaviourSettings({ mode: "off" }));
+  renderer.resizeExact(360, 640);
   for (const p of [0.12, 0.22, 0.35, 0.48, 0.62, 0.74, 0.9, 0.97]) {
     renderer.setClockMode("hold");
     renderer.setHoldPhase(p);
@@ -395,13 +559,19 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     newDefaultsYellow,
     oneCue: counts[1] === true,
     twoCues: counts[2] === true,
+    threeCues: counts[3] === true,
     fourCues: counts[4] === true,
+    sixCues: counts[6] === true,
     eightCues: counts[8] === true,
     forwardScrub,
     backwardScrub,
     holdExportIdentical,
     perStateRestart,
-    frameHoldAffectsWindow,
+    beatAffectsWindow,
+    cuesDivideByBeat: cuesDivideByBeat && sentenceReadable,
+    defaultScaleUseful,
+    bottomSafe,
+    hierarchyBelowHeadline,
     pulseKeepsCues,
     flickerInterrupts,
     randomisePreservesCopy,
@@ -417,6 +587,9 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
       cueSecond: cueAt(multi, justSecond + 0.005),
       yellow: SUBTITLE_YELLOW,
       flickerApplied,
+      scale: { s50, sDef, s100, ratio: sDef / H916, head: headLay?.fontSize ?? 0 },
+      bottomGap,
+      sentenceLines,
     },
   };
 }

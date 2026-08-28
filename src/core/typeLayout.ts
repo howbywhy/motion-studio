@@ -48,7 +48,7 @@ const PREVIEW_REF_PX = 500;
 const PREVIEW_MARGIN_PX = 10;
 const FRAME = UNIT * (PREVIEW_MARGIN_PX / PREVIEW_REF_PX);
 const COLS = 4;
-/** Visible-ink crop past the canvas — 10% of glyph height — on Headline outer Frame Align edges. */
+/** Visible-ink crop past the canvas — 10% of glyph height — on Headline left / right / bottom outer Frame Align. Top never bleeds. */
 export const HEADLINE_INK_BLEED = 0.10;
 
 export interface TypeEdgeBleed {
@@ -165,13 +165,23 @@ interface PadRect {
   h: number;
 }
 
-function paddedRect(unitW: number, unitH: number, padding: number): PadRect {
+function paddedRect(unitW: number, unitH: number, padding: number, style?: TypeStyle): PadRect {
+  if (style === "subtitle") {
+    const side = FRAME + unitW * 0.04;
+    const vert = unitH * 0.07;
+    return { l: side, t: vert, r: unitW - side, b: unitH - vert, w: unitW - side * 2, h: unitH - vert * 2 };
+  }
   const extra = u01(padding) * Math.min(unitW, unitH) * 0.12;
   const pad = FRAME + extra;
   return { l: pad, t: pad, r: unitW - pad, b: unitH - pad, w: unitW - pad * 2, h: unitH - pad * 2 };
 }
 
-function columnMeasure(column: TypeColumn, innerW: number): number {
+function columnMeasure(column: TypeColumn, innerW: number, style?: TypeStyle): number {
+  if (style === "subtitle") {
+    if (column === "narrow") return innerW * 0.72;
+    if (column === "wide") return innerW * 0.99;
+    return innerW * 0.96;
+  }
   if (column === "narrow") return innerW * 0.35;
   if (column === "wide") return innerW * 0.75;
   return innerW * 0.55;
@@ -180,7 +190,7 @@ function columnMeasure(column: TypeColumn, innerW: number): number {
 function trackingEm(style: TypeStyle, tracking: number): number {
   const s = u01(tracking);
   if (style === "headline") return lerp(-0.05, 0.055, s);
-  if (style === "subtitle") return lerp(0, 0.05, s);
+  if (style === "subtitle") return lerp(-0.012, 0.028, s);
   return lerp(-0.02, 0.04, s);
 }
 
@@ -193,7 +203,14 @@ function headlineRowLead(): number {
 }
 
 function subtitleLead(leading: number): number {
-  return lerp(1.06, 1.28, u01(leading));
+  return lerp(1.00, 1.18, u01(leading));
+}
+
+/** Font size as a fraction of canvas height. 50 = annotation, default ≈ readable, 100 = strong but not headline. */
+function subtitleFontUnit(scale: number): number {
+  const s = u01(scale);
+  if (s <= 0.5) return lerp(0.024, 0.036, s / 0.5);
+  return lerp(0.036, 0.064, (s - 0.5) / 0.5);
 }
 
 function authoredRows(text: string): string[] {
@@ -427,13 +444,13 @@ function composeParagraph(block: TypeBlock, pad: PadRect): Solution {
   };
 }
 
-function composeSubtitle(block: TypeBlock, pad: PadRect): Solution {
+function composeSubtitle(block: TypeBlock, pad: PadRect, unitH: number): Solution {
   const tEm = trackingEm("subtitle", block.tracking);
   const leadRatio = subtitleLead(block.leading);
-  const measure = columnMeasure(block.column, pad.w);
-  const min = pad.w * 0.016;
-  const max = pad.w * 0.030;
-  let fontSize = lerp(min, max, u01(block.scale));
+  const measure = columnMeasure(block.column, pad.w, "subtitle");
+  const min = unitH * 0.018;
+  const max = subtitleFontUnit(block.scale) * unitH;
+  let fontSize = max;
   const wrapAll = (s: number): PreparedLine[] => {
     const tracking = tEm * s;
     const laid: PreparedLine[] = [];
@@ -468,15 +485,15 @@ function composeSubtitle(block: TypeBlock, pad: PadRect): Solution {
   };
 }
 
-function composeType(block: TypeBlock, pad: PadRect): Solution {
+function composeType(block: TypeBlock, pad: PadRect, unitH: number): Solution {
   if (block.composition === "paragraph") return composeParagraph(block, pad);
-  if (block.composition === "subtitle") return composeSubtitle(block, pad);
+  if (block.composition === "subtitle") return composeSubtitle(block, pad, unitH);
   return composeHeadline(block, pad);
 }
 
 function composeKey(block: TypeBlock, aspectKey: number): string {
   return [
-    "v16",
+    "v18",
     aspectKey,
     block.text,
     block.composition,
@@ -509,7 +526,8 @@ function inkBounds(xs: number[], ys: number[], prepared: PreparedLine[]): {
   return { l, t, r, b };
 }
 
-/** Headline only. Outer Frame Align may crop on those edges; centre stays contained.
+/** Headline only. Bottom / left / right outer Frame Align may crop.
+ * Top never bleeds — cap-height stays inside the optical frame.
  * Between ignores vertical Frame Align, so top/bottom bleed is off for Between. */
 export function headlineEdgeBleed(block: TypeBlock): TypeEdgeBleed {
   if (block.composition !== "headline") return { ...NO_BLEED };
@@ -519,7 +537,7 @@ export function headlineEdgeBleed(block: TypeBlock): TypeEdgeBleed {
   return {
     l: col === "l",
     r: col === "r",
-    t: !between && row === "t",
+    t: false,
     b: !between && row === "b",
   };
 }
@@ -683,7 +701,7 @@ function layoutBlock(
   const aspectKey = Math.round((h / w) * 10000);
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
-  const pad = paddedRect(unitW, unitH, block.padding);
+  const pad = paddedRect(unitW, unitH, block.padding, block.composition);
   const key = composeKey(block, aspectKey);
 
   let sol: Solution;
@@ -691,7 +709,7 @@ function layoutBlock(
   if (hit && hit.key === key) {
     sol = hit.solution;
   } else {
-    sol = composeType(block, pad);
+    sol = composeType(block, pad, unitH);
     if (sol.prepared.length === 0) return null;
     caches[slot] = { key, solution: sol };
   }

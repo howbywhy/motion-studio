@@ -56,10 +56,11 @@ export interface SavedState {
   endBehaviourDuration?: number;
   /** Master Registration presence 0–100. Legacy saves omit this and load as 50. */
   registrationAmount?: number;
-  /** Typography may include Type States, page order, Frame Hold / Hold Length, Sequence Speed, and Sequence Window.
-   *  Start/Stop gate Type presence (hard in/out). Speed paces cuts while Type is present.
-   *  Frame Hold Length is a relative beat (1.0×–3.0×, default 2.0×) on non-final frames.
-   *  Legacy boolean frameHolds migrate On → 2.0×. Legacy type saves load as one page. */
+  /** Typography may include Type States, page order, Beat, and Sequence Window.
+   *  Start/Stop gate Type presence (hard in/out). Beat (1× / 2× / 3×) is the
+   *  relative duration of each State inside that window.
+   *  Legacy Frame Hold Off → 1×. Hold On + length ≤ 1.5 → 2×. Hold On + length > 1.5 → 3×.
+   *  Sequence Speed is discarded. Legacy type saves load as one page. */
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;

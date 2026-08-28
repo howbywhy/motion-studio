@@ -419,7 +419,7 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
     subtitle: layoutTypography(block({ text: "NOW AVAILABLE", composition: "subtitle", scale: 100, anchor: "bl" }), 500, 625)?.fontSize ?? 0,
     ordered: false,
   };
-  styleCeilings.ordered = styleCeilings.headline > styleCeilings.paragraph && styleCeilings.paragraph > styleCeilings.subtitle;
+  styleCeilings.ordered = styleCeilings.headline > styleCeilings.paragraph && styleCeilings.headline > styleCeilings.subtitle;
 
   return {
     coupling: {

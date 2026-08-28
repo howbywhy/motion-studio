@@ -253,7 +253,7 @@ void loadSwitzer().then(() => renderer.renderFrame());
 
 const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
   renderer.patchTypeState(patch);
-  if (patch.selected !== undefined || patch.typePage !== undefined || patch.typePageMove !== undefined || patch.frameHold !== undefined || patch.holdLength !== undefined) {
+  if (patch.selected !== undefined || patch.typePage !== undefined || patch.typePageMove !== undefined || patch.beat !== undefined) {
     typeUi.sync(renderer.getTypeState());
   }
 });
