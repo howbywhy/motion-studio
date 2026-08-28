@@ -13,7 +13,7 @@ import type { ParamValues } from "./types";
  *   ~50% 0.18–0.40, 30% 0.40–0.55, 10% 0.12–0.18, 10% 0.55–0.68
  *
  * Does not touch media, sequence, Registration (including Amount), End
- * Behaviour, Typography (including Type States, page order, Frame Hold, Sequence Speed,
+ * Behaviour, Typography (including Type States, page order, Frame Hold, Hold Length, Sequence Speed,
  * Sequence Window), B&W, background, audio, export, or aspect. Does not
  * randomise FIELD or Shift.
  */

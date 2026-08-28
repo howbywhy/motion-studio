@@ -1,7 +1,10 @@
 import {
+  clampHoldLength,
   clampSequenceWindow,
-  cloneFrameHolds,
+  cloneFrameHoldEnabled,
+  cloneFrameHoldLength,
   cloneTypePage,
+  FRAME_HOLD_LENGTH_DEFAULT,
   SEQUENCE_SPEED_DEFAULT,
   SEQUENCE_START_DEFAULT,
   SEQUENCE_STOP_DEFAULT,
@@ -60,8 +63,10 @@ export interface TypeState {
   pages: [TypeBlock, TypeBlock][];
   /** Which frame the Type inspector is editing. */
   selected: number;
-  /** Per-frame extra beat. Final frame is always false. Moves with the frame on reorder. */
-  frameHolds: boolean[];
+  /** Per-frame Hold on/off. Final frame is ignored by the resolver but stored so reorder can restore it. */
+  frameHoldEnabled: boolean[];
+  /** Relative beat length while Hold is On. 1.0–3.0, default 2.0. Irrelevant while Off. */
+  frameHoldLength: number[];
   /** Cadence of Type sequence cuts while typography is present. 0–100, default 50. */
   sequenceSpeed: number;
   /** Master phase where Type appears. */
@@ -335,7 +340,8 @@ export function defaultTypeState(): TypeState {
     activeIndex: 0,
     pages: [cloneTypePage(blocks)],
     selected: 0,
-    frameHolds: [false],
+    frameHoldEnabled: [false],
+    frameHoldLength: [FRAME_HOLD_LENGTH_DEFAULT],
     sequenceSpeed: SEQUENCE_SPEED_DEFAULT,
     sequenceStart: SEQUENCE_START_DEFAULT,
     sequenceStop: SEQUENCE_STOP_DEFAULT,
@@ -438,10 +444,15 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   let selected = typeof rec.selected === "number" && Number.isFinite(rec.selected) ? Math.round(rec.selected) : 0;
   selected = Math.min(pages.length - 1, Math.max(0, selected));
 
-  let frameHolds = cloneFrameHolds(
-    Array.isArray(rec.frameHolds) ? rec.frameHolds.map((h) => h === true) : [],
-    pages.length,
-  );
+  const legacyHolds = Array.isArray(rec.frameHolds) ? rec.frameHolds.map((h) => h === true) : [];
+  const enabledRaw = Array.isArray(rec.frameHoldEnabled)
+    ? rec.frameHoldEnabled.map((h) => h === true)
+    : legacyHolds;
+  let frameHoldEnabled = cloneFrameHoldEnabled(enabledRaw, pages.length);
+  const lengthRaw = Array.isArray(rec.frameHoldLength)
+    ? rec.frameHoldLength
+    : legacyHolds.map((on) => (on ? FRAME_HOLD_LENGTH_DEFAULT : FRAME_HOLD_LENGTH_DEFAULT));
+  let frameHoldLength = cloneFrameHoldLength(lengthRaw, pages.length);
 
   if (rec.typePage === "add" && pages.length < TYPE_PAGE_MAX) {
     const copy = cloneTypePage(pages[selected]!);
@@ -450,11 +461,17 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       copy,
       ...pages.slice(selected + 1).map(cloneTypePage),
     ];
-    frameHolds = [...frameHolds.slice(0, selected + 1), false, ...frameHolds.slice(selected + 1)];
+    frameHoldEnabled = [...frameHoldEnabled.slice(0, selected + 1), false, ...frameHoldEnabled.slice(selected + 1)];
+    frameHoldLength = [
+      ...frameHoldLength.slice(0, selected + 1),
+      FRAME_HOLD_LENGTH_DEFAULT,
+      ...frameHoldLength.slice(selected + 1),
+    ];
     selected = selected + 1;
   } else if (rec.typePage === "remove" && pages.length > 1 && selected > 0) {
     pages = pages.filter((_, i) => i !== selected).map(cloneTypePage);
-    frameHolds = frameHolds.filter((_, i) => i !== selected);
+    frameHoldEnabled = frameHoldEnabled.filter((_, i) => i !== selected);
+    frameHoldLength = frameHoldLength.filter((_, i) => i !== selected);
     selected = Math.min(selected, pages.length - 1);
   }
 
@@ -474,22 +491,31 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       const next = pages.map(cloneTypePage);
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item!);
-      const nextHolds = frameHolds.slice();
-      const [held] = nextHolds.splice(from, 1);
-      nextHolds.splice(to, 0, held === true);
+      const nextOn = frameHoldEnabled.slice();
+      const [on] = nextOn.splice(from, 1);
+      nextOn.splice(to, 0, on === true);
+      const nextLen = frameHoldLength.slice();
+      const [len] = nextLen.splice(from, 1);
+      nextLen.splice(to, 0, clampHoldLength(len));
       if (selected === from) selected = to;
       else if (from < selected && to >= selected) selected -= 1;
       else if (from > selected && to <= selected) selected += 1;
       pages = next;
-      frameHolds = nextHolds;
+      frameHoldEnabled = nextOn;
+      frameHoldLength = nextLen;
     }
   }
 
-  frameHolds = cloneFrameHolds(frameHolds, pages.length);
+  frameHoldEnabled = cloneFrameHoldEnabled(frameHoldEnabled, pages.length);
+  frameHoldLength = cloneFrameHoldLength(frameHoldLength, pages.length);
   if (rec.frameHold === true || rec.frameHold === false) {
-    if (selected < pages.length - 1) frameHolds[selected] = rec.frameHold;
+    if (selected < pages.length - 1) frameHoldEnabled[selected] = rec.frameHold;
   }
-  frameHolds = cloneFrameHolds(frameHolds, pages.length);
+  if (typeof rec.holdLength === "number") {
+    if (selected < pages.length - 1) frameHoldLength[selected] = clampHoldLength(rec.holdLength);
+  }
+  frameHoldEnabled = cloneFrameHoldEnabled(frameHoldEnabled, pages.length);
+  frameHoldLength = cloneFrameHoldLength(frameHoldLength, pages.length);
 
   blocks = cloneTypePage(pages[selected]!);
   const blockPatch = pickBlockPatch(rec);
@@ -506,7 +532,8 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     activeIndex,
     pages,
     selected,
-    frameHolds,
+    frameHoldEnabled,
+    frameHoldLength,
     sequenceSpeed: rec.sequenceSpeed === undefined || rec.sequenceSpeed === null
       ? SEQUENCE_SPEED_DEFAULT
       : num(rec.sequenceSpeed, 0, 100, SEQUENCE_SPEED_DEFAULT),
@@ -538,7 +565,8 @@ export function cloneTypeState(state: TypeState): TypeState {
     activeIndex: state.activeIndex,
     pages,
     selected,
-    frameHolds: cloneFrameHolds(state.frameHolds, pages.length),
+    frameHoldEnabled: cloneFrameHoldEnabled(state.frameHoldEnabled, pages.length),
+    frameHoldLength: cloneFrameHoldLength(state.frameHoldLength, pages.length),
     sequenceSpeed: typeof state.sequenceSpeed === "number" && Number.isFinite(state.sequenceSpeed)
       ? Math.min(100, Math.max(0, state.sequenceSpeed))
       : SEQUENCE_SPEED_DEFAULT,

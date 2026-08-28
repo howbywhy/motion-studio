@@ -3,7 +3,7 @@ import { clampTypeState, cloneTypeState, TYPE_ANCHORS, type TypeAnchor, type Typ
 import { HEADLINE_INK_BLEED, headlineEdgeBleed, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
-import { SEQUENCE_SPEED_DEFAULT, SEQUENCE_MIN_BEAT_LOCAL, TYPE_PAGE_MAX, sequenceLastCutLocal, typePageCuts, typePageIndexForState, typeStateAtPhase, typeVisibleAtPhase, typeVisibleForState } from "../core/typePages";
+import { FRAME_HOLD_LENGTH_DEFAULT, SEQUENCE_SPEED_DEFAULT, SEQUENCE_MIN_BEAT_LOCAL, TYPE_PAGE_MAX, sequenceLastCutLocal, sequencePlan, typePageCuts, typePageIndexForState, typeStateAtPhase, typeVisibleAtPhase, typeVisibleForState } from "../core/typePages";
 import { bloomBehavior } from "../behaviors/bloom";
 import { Renderer } from "../core/renderer";
 import { placeholderA } from "../core/placeholder";
@@ -68,7 +68,7 @@ function page(a: Partial<TypeBlock>, b?: Partial<TypeBlock>): [Partial<TypeBlock
 
 function book(
   pages: [Partial<TypeBlock>, Partial<TypeBlock>][],
-  timing?: number | { speed?: number; start?: number; stop?: number; holds?: boolean[] },
+  timing?: number | { speed?: number; start?: number; stop?: number; holds?: boolean[]; holdLengths?: number[] },
 ): TypeState {
   const t = typeof timing === "number" ? { speed: timing } : (timing ?? {});
   return clampTypeState({
@@ -79,7 +79,8 @@ function book(
     sequenceSpeed: t.speed ?? SEQUENCE_SPEED_DEFAULT,
     sequenceStart: t.start,
     sequenceStop: t.stop,
-    frameHolds: t.holds,
+    frameHoldEnabled: t.holds,
+    frameHoldLength: t.holdLengths,
   });
 }
 
@@ -327,6 +328,9 @@ export interface TypeStatesReport {
   finalHoldIgnored: boolean;
   maxSix: boolean;
   minBeatSafety: boolean;
+  holdLengthScale: boolean;
+  holdSurvivesFinalSlot: boolean;
+  weightClamp: boolean;
   elapsedMs: number;
   details: Record<string, unknown>;
 }
@@ -473,7 +477,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   const holdD = book(lengthPages.slice(0, 6), { speed: 50, start: 0.2, stop: 0.7, holds: [false, false, true, false, false, false] });
   for (const [label, st] of [
     ["Hold A  3 frames  none Held", holdA],
-    ["Hold B  3 frames  02 Held", holdB],
+    ["Hold B  3 frames  02 Held 2.0×", holdB],
     ["Hold C  5 frames  02 + 04 Held", holdC],
     ["Hold D  6 frames  03 Held", holdD],
   ] as const) {
@@ -481,6 +485,66 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     for (const p of WINDOW_PHASES) {
       cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
     }
+  }
+
+  for (const len of [1, 1.5, 2, 2.5, 3] as const) {
+    const st = book(lengthPages.slice(0, 3), {
+      speed: 50,
+      start: 0.2,
+      stop: 0.7,
+      holds: [false, true, false],
+      holdLengths: [2, len, 2],
+    });
+    const grid = section(root, `Hold Length  3 frames  02  ${len.toFixed(1)}×  ·  Start 20 / Stop 70 / Speed 50`);
+    for (const p of WINDOW_PHASES) {
+      cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
+    }
+  }
+
+  const multiLen = book(lengthPages, {
+    speed: 50,
+    start: 0.2,
+    stop: 0.7,
+    holds: [false, true, false, true, false, false],
+    holdLengths: [2, 2, 2, 2.5, 2, 2],
+  });
+  const multiGrid = section(root, "Hold Length  6 frames  02 2.0×  ·  04 2.5×  ·  Start 20 / Stop 70 / Speed 50");
+  for (const p of WINDOW_PHASES) {
+    cell(multiGrid, `${p.toFixed(2)}  ${presenceCaption(multiLen, p)}`, paintResolved(multiLen, W45, H45, p));
+  }
+
+  const stress = book(lengthPages, {
+    speed: 100,
+    start: 0.2,
+    stop: 0.7,
+    holds: [false, true, false, true, false, false],
+    holdLengths: [2, 3, 2, 3, 2, 2],
+  });
+  const stressGrid = section(root, "Stress  6 frames  02 3×  ·  04 3×  ·  Speed 100  ·  Start 20 / Stop 70");
+  for (const p of WINDOW_PHASES) {
+    cell(stressGrid, `${p.toFixed(2)}  ${presenceCaption(stress, p)}`, paintResolved(stress, W45, H45, p));
+  }
+
+  const creative = book(
+    [
+      page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" }),
+      page({ text: mbmById("name-break").text, composition: "headline", scale: 70, anchor: "mc" }),
+      page({ text: "FLAWED", composition: "headline", scale: 86, anchor: "bl" }),
+      page({ text: "AND FLAWLESS", composition: "headline", scale: 64, anchor: "bl" }),
+      page({ text: mbmById("now").text, composition: "headline", scale: 70, anchor: "br" }),
+      page({ text: "2026", composition: "headline", scale: 100, anchor: "br" }),
+    ],
+    {
+      speed: 50,
+      start: 0.2,
+      stop: 0.75,
+      holds: [false, true, false, true, false, false],
+      holdLengths: [2, 2.5, 2, 1.5, 2, 2],
+    },
+  );
+  const creativeGrid = section(root, "Creative  SHORT · LONG 2.5× · SHORT · MEDIUM 1.5× · SHORT · FINAL  ·  Start 20 / Stop 75 / Speed 50");
+  for (const p of WINDOW_PHASES) {
+    cell(creativeGrid, `${p.toFixed(2)}  ${presenceCaption(creative, p)}`, paintResolved(creative, W45, H45, p));
   }
 
   const rhythm = book(lengthPages, {
@@ -773,6 +837,8 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     holdB,
     holdC,
     rhythm,
+    stress,
+    creative,
   ];
   const oncePerLoop = edgeWindows.every(pathOnce);
 
@@ -825,10 +891,10 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
 
   const heldMoved = clampTypeState({ ...holdB, typePageMove: { from: 1, to: 0 } });
   const holdFollowsReorder =
-    holdB.frameHolds[1] === true &&
+    holdB.frameHoldEnabled[1] === true &&
     heldMoved.pages[0]![0]!.text === "MADE" &&
-    heldMoved.frameHolds[0] === true &&
-    heldMoved.frameHolds[2] === false;
+    heldMoved.frameHoldEnabled[0] === true &&
+    heldMoved.frameHoldEnabled[2] === false;
 
   const dupHold = clampTypeState({
     ...book(lengthPages.slice(0, 2), { holds: [true, false] }),
@@ -837,12 +903,21 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   });
   const duplicateClearsHold =
     dupHold.pages.length === 3 &&
-    dupHold.frameHolds[0] === true &&
-    dupHold.frameHolds[1] === false &&
-    dupHold.frameHolds[2] === false;
+    dupHold.frameHoldEnabled[0] === true &&
+    dupHold.frameHoldEnabled[1] === false &&
+    dupHold.frameHoldEnabled[2] === false &&
+    dupHold.frameHoldLength[1] === FRAME_HOLD_LENGTH_DEFAULT;
 
   const lastAttempt = clampTypeState({ ...holdA, selected: 2, frameHold: true });
-  const finalHoldIgnored = lastAttempt.frameHolds[2] === false && lastAttempt.frameHolds[1] === false;
+  const finalHoldIgnored = lastAttempt.frameHoldEnabled[2] === false && lastAttempt.frameHoldEnabled[1] === false;
+
+  const toLast = clampTypeState({ ...holdB, typePageMove: { from: 1, to: 2 } });
+  const fromLast = clampTypeState({ ...toLast, typePageMove: { from: 2, to: 1 } });
+  const holdSurvivesFinalSlot =
+    toLast.frameHoldEnabled[2] === true &&
+    toLast.frameHoldLength[2] === FRAME_HOLD_LENGTH_DEFAULT &&
+    typePageIndexForState(toLast, 0.55) !== undefined &&
+    fromLast.frameHoldEnabled[1] === true;
 
   let grow = book(lengthPages.slice(0, 1));
   for (let i = 0; i < 8; i++) grow = clampTypeState({ ...grow, selected: grow.pages.length - 1, typePage: "add" });
@@ -850,8 +925,29 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
 
   const minBeatSafety =
     sequenceLastCutLocal(6, 100) >= 5 * SEQUENCE_MIN_BEAT_LOCAL - 1e-9 &&
-    sequenceLastCutLocal(6, 50, sixHeld.frameHolds) >= sequenceLastCutLocal(6, 100, sixHeld.frameHolds) &&
+    sequenceLastCutLocal(6, 50, sixHeld.frameHoldEnabled, sixHeld.frameHoldLength)
+      >= sequenceLastCutLocal(6, 100, sixHeld.frameHoldEnabled, sixHeld.frameHoldLength) &&
     sequenceLastCutLocal(3, 50) <= 0.6 + 1e-9;
+
+  const cuts1 = typePageCuts(3, 50, 0.2, 0.7, [false, true, false], [2, 1, 2]);
+  const cuts15 = typePageCuts(3, 50, 0.2, 0.7, [false, true, false], [2, 1.5, 2]);
+  const cuts3 = typePageCuts(3, 50, 0.2, 0.7, [false, true, false], [2, 3, 2]);
+  const span = (cuts: number[]) => cuts[1]! - cuts[0]!;
+  const holdLengthScale = span(cuts1) < span(cuts15) && span(cuts15) < span(cuts3);
+
+  const stressPlan = sequencePlan(6, 100, stress.frameHoldEnabled, stress.frameHoldLength);
+  const minShare = Math.min(...stressPlan.weights.map((w) => w / stressPlan.weights.reduce((a, b) => a + b, 0))) * stressPlan.lastCut;
+  let mask = 0;
+  for (let i = 0; i <= 200; i++) {
+    const p = i / 200;
+    if (!typeVisibleForState(stress, p)) continue;
+    mask |= 1 << typePageIndexForState(stress, p);
+  }
+  const weightClamp =
+    minShare >= SEQUENCE_MIN_BEAT_LOCAL - 1e-6 &&
+    mask === (1 << 6) - 1 &&
+    stressPlan.weights[1]! > stressPlan.weights[0]! &&
+    stressPlan.weights[3]! > stressPlan.weights[2]!;
 
   return {
     onePageBypass,
@@ -877,6 +973,9 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     finalHoldIgnored,
     maxSix,
     minBeatSafety,
+    holdLengthScale,
+    holdSurvivesFinalSlot,
+    weightClamp,
     elapsedMs: performance.now() - t0,
     details: {
       liveHashes,

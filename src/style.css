@@ -717,6 +717,11 @@ body {
   flex: 0 0 auto;
 }
 
+.type-hold-length {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
 .type-sequence-window {
   margin-top: 8px;
   margin-bottom: 0;

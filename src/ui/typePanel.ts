@@ -16,7 +16,15 @@ import {
   type TypeStyle,
   type TypeTextAlign,
 } from "../core/typeState";
-import { SEQUENCE_WINDOW_MIN, TYPE_PAGE_MAX } from "../core/typePages";
+import {
+  clampHoldLength,
+  FRAME_HOLD_LENGTH_DEFAULT,
+  FRAME_HOLD_LENGTH_MAX,
+  FRAME_HOLD_LENGTH_MIN,
+  FRAME_HOLD_LENGTH_STEP,
+  SEQUENCE_WINDOW_MIN,
+  TYPE_PAGE_MAX,
+} from "../core/typePages";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
   normal: "Normal",
@@ -84,7 +92,7 @@ function slider(
   input.value = String(value);
   input.addEventListener("input", () => {
     const v = parseFloat(input.value);
-    valueEl.textContent = String(Number(v.toFixed(step < 1 ? 2 : 0)));
+    valueEl.textContent = `${Number(v.toFixed(step < 1 ? 2 : 0))}${label === "Hold Length" ? "×" : ""}`;
     onInput(v);
   });
   const inputRow = document.createElement("div");
@@ -670,6 +678,7 @@ export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
   typePage?: "add" | "remove";
   typePageMove?: { from: number; to: number };
   frameHold?: boolean;
+  holdLength?: number;
 };
 
 export function buildTypePanel(
@@ -809,6 +818,18 @@ export function buildTypePanel(
   holdOff.addEventListener("click", () => onChange({ frameHold: false }));
   holdOn.addEventListener("click", () => onChange({ frameHold: true }));
 
+  const holdLen = slider(
+    statesHost,
+    "Hold Length",
+    FRAME_HOLD_LENGTH_MIN,
+    FRAME_HOLD_LENGTH_MAX,
+    FRAME_HOLD_LENGTH_STEP,
+    FRAME_HOLD_LENGTH_DEFAULT,
+    (v) => onChange({ holdLength: v }),
+  );
+  holdLen.row.classList.add("type-hold-length");
+  holdLen.input.title = "Relative sequence time for this frame. 1.0× — 3.0×.";
+
   const windowUi = buildSequenceWindow(
     statesHost,
     state.sequenceStart,
@@ -825,10 +846,14 @@ export function buildTypePanel(
   function paintTiming(): void {
     const n = state.pages.length;
     const canHold = n > 1 && state.selected < n - 1;
+    const held = canHold && state.frameHoldEnabled[state.selected] === true;
+    const len = clampHoldLength(state.frameHoldLength[state.selected]);
     holdRow.hidden = !canHold;
-    const held = canHold && state.frameHolds[state.selected] === true;
     holdOff.classList.toggle("active", canHold && !held);
     holdOn.classList.toggle("active", held);
+    holdLen.row.hidden = !held;
+    holdLen.input.value = String(len);
+    holdLen.valueEl.textContent = `${len % 1 === 0 ? len.toFixed(1) : len.toFixed(2)}×`;
     windowUi.row.hidden = false;
     speed.row.hidden = n <= 1;
     windowUi.set(state.sequenceStart, state.sequenceStop);
