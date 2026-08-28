@@ -19,6 +19,7 @@ export default defineConfig({
         subtitle: resolve(root, "eval/subtitle.html"),
         typeSheet: resolve(root, "eval/type-sheet.html"),
         transitionFlicker: resolve(root, "eval/transition-flicker.html"),
+        mark: resolve(root, "eval/mark.html"),
       },
     },
   },

@@ -24,6 +24,9 @@ import {
   emptyTransitionFlickerDiagnostics,
   type TransitionFlickerDiagnostics,
 } from "./transitionFlicker";
+import { clampMarkState, defaultMarkState, type MarkState } from "./markState";
+import { diagnosticsFrom, planMark, type MarkDiagnostics } from "./markPlan";
+import { paintMarkPlan } from "./markPaint";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -212,6 +215,8 @@ export class Renderer {
   lastEndDiagnostics: EndDiagnostics | null = null;
   private transitionFlickerEnabled = false;
   lastTransitionDiagnostics: TransitionFlickerDiagnostics | null = null;
+  private markState: MarkState = defaultMarkState();
+  lastMarkDiagnostics: MarkDiagnostics | null = null;
   /** A/B test only. Product is false: Registration then type (historical). */
   private typeBeforeRegistration = false;
   private bwMode: BwMode = "off";
@@ -607,6 +612,15 @@ export class Renderer {
 
   getTransitionFlickerEnabled(): boolean {
     return this.transitionFlickerEnabled;
+  }
+
+  setMarkState(next: MarkState | Partial<MarkState> | Record<string, unknown>): void {
+    this.markState = clampMarkState({ ...this.markState, ...next });
+    this.renderFrame();
+  }
+
+  getMarkState(): MarkState {
+    return { ...this.markState };
   }
 
   setBWEnabled(on: boolean): void {
@@ -1574,7 +1588,11 @@ export class Renderer {
     const tPrep0 = mark();
     const tPrep = mark();
 
+    const markPlan = planMark(this.markState, this.getLoopPhase(), width, height, this.getLoopSeconds());
+    this.lastMarkDiagnostics = diagnosticsFrom(markPlan);
+
     const paintType = (): void => {
+      if (markPlan.hideType) return;
       if (!this.typeState.enabled) return;
       const type = applySubtitleCues(typeStateAtPhase(this.typeState, this.getLoopPhase()), this.typeState, this.getLoopPhase());
       if (!type.enabled) return;
@@ -1621,8 +1639,10 @@ export class Renderer {
       this.lastTransitionDiagnostics = emptyTransitionFlickerDiagnostics(loopPairCount);
     }
 
+    paintMarkPlan(composedCtx, this.composedLayer, markPlan);
+
     const end = this.endBehaviour;
-    if (end.mode !== "off") {
+    if (end.mode !== "off" && !markPlan.yieldEnd) {
       this.lastEndDiagnostics = applyEndBehaviour(
         composedCtx,
         this.composedLayer,

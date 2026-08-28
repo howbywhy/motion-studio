@@ -58,6 +58,14 @@ export interface SavedState {
   registrationAmount?: number;
   /** Loop-only Bloom source-change punctuation. Legacy omits this and loads Off. */
   transitionFlickerEnabled?: boolean;
+  /** Identity event. Legacy omits these and loads Off. */
+  markEnabled?: boolean;
+  markMode?: "intro" | "interrupt" | "end";
+  markSource?: "stacked" | "horizontal" | "emblem";
+  markStart?: number;
+  markStop?: number;
+  markScale?: number;
+  markAnchor?: string;
   /** Typography may include Type States, page order, Speed, Frame Hold, and Sequence Window.
    *  Start/Stop gate Type presence (hard in/out). Speed paces multi-State cuts.
    *  Frame Hold Length (1.0×–3.0×) emphasises a selected non-final State.

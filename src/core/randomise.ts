@@ -10,10 +10,10 @@ import type { ParamValues } from "./types";
  *   resolveLimit is left unchanged (art-directed terminal coverage).
  *
  * Does not touch media, sequence, Registration (including Amount), End
- * Behaviour, Transition Flicker, Typography (including Type States, Type 03,
- * Subtitle copy / cue order, page order, Speed, Frame Hold, Sequence Window),
- * Bloom Pulse Range / Speed, B&W, background, audio, export, or aspect. Does not
- * randomise FIELD or Shift.
+ * Behaviour, Transition Flicker, MARK identity event, Typography (including Type
+ * States, Type 03, Subtitle copy / cue order, page order, Speed, Frame Hold,
+ * Sequence Window), Bloom Pulse Range / Speed, B&W, background, audio, export, or
+ * aspect. Does not randomise FIELD or Shift.
  */
 
 export interface RandomiseInput {

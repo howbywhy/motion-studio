@@ -15,12 +15,14 @@ import { buildBloomFieldMap } from "./ui/bloomFieldMap";
 import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
 import { mountEndBehaviourPanel } from "./ui/endBehaviourPanel";
+import { mountMarkPanel } from "./ui/markPanel";
 import { mountBloomPulse } from "./ui/bloomPulsePanel";
 import { clampBloomPulse, resolveLimitControlMode } from "./core/bloomPulse";
 import { clampEndBehaviourSettings, END_BEHAVIOUR_OFF } from "./core/endBehaviour";
 import { clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./core/globalRegistration";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, cloneTypeState, defaultTypeState } from "./core/typeState";
+import { clampMarkState, cloneMarkState, defaultMarkState } from "./core/markState";
 import { debugLinePlan, layoutTypeDocument } from "./core/typeLayout";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
@@ -132,6 +134,7 @@ app.innerHTML = `
         <div class="inspector-tabs" id="inspector-tabs">
           <button type="button" data-tab="composition" class="active">Composition</button>
           <button type="button" data-tab="type">Type</button>
+          <button type="button" data-tab="mark">Mark</button>
           <button type="button" data-tab="bloom">Bloom</button>
         </div>
         <div class="tab-page" data-page="composition">
@@ -171,6 +174,9 @@ app.innerHTML = `
         </div>
         <div class="tab-page" data-page="type" hidden>
           <div id="type-panel" class="type-panel"></div>
+        </div>
+        <div class="tab-page" data-page="mark" hidden>
+          <div id="mark-panel" class="mark-panel"></div>
         </div>
         <div class="tab-page" data-page="bloom" hidden>
           <div class="graphic-panel" id="graphic-panel" hidden></div>
@@ -228,6 +234,7 @@ const imageAwareBtn = document.querySelector<HTMLButtonElement>("#image-aware")!
 const compositionControlsEl = document.querySelector<HTMLDivElement>("#composition-controls")!;
 const compositionResetBtn = document.querySelector<HTMLButtonElement>("#composition-reset")!;
 const typePanelEl = document.querySelector<HTMLDivElement>("#type-panel")!;
+const markPanelEl = document.querySelector<HTMLDivElement>("#mark-panel")!;
 const endBehaviourPanelEl = document.querySelector<HTMLDivElement>("#end-behaviour-panel")!;
 const bgColourInput = document.querySelector<HTMLInputElement>("#bg-colour")!;
 const bgColourResetBtn = document.querySelector<HTMLButtonElement>("#bg-colour-reset")!;
@@ -263,6 +270,12 @@ const endUi = mountEndBehaviourPanel(
   () => renderer.getEndBehaviour(),
   (next) => renderer.setEndBehaviour(next),
   () => renderer.getPlaybackMode(),
+);
+
+const markUi = mountMarkPanel(
+  markPanelEl,
+  () => renderer.getMarkState(),
+  (next) => renderer.setMarkState(next),
 );
 
 const inspectorTabs = document.querySelector<HTMLDivElement>("#inspector-tabs")!;
@@ -1218,6 +1231,13 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     playing: renderer.isPlaying(),
     randomisationSeed,
     type: cloneTypeState(renderer.getTypeState()),
+    markEnabled: renderer.getMarkState().enabled,
+    markMode: renderer.getMarkState().mode,
+    markSource: renderer.getMarkState().source,
+    markStart: renderer.getMarkState().sequenceStart,
+    markStop: renderer.getMarkState().sequenceStop,
+    markScale: renderer.getMarkState().scale,
+    markAnchor: renderer.getMarkState().anchor,
     endBehaviourMode: renderer.getEndBehaviour().mode,
     endBehaviourAmount: renderer.getEndBehaviour().amount,
     endBehaviourHold: renderer.getEndBehaviour().hold,
@@ -1242,6 +1262,16 @@ function loadSavedState(state: SavedState): void {
   syncRegistrationAmountUi();
   renderer.setTypeState(clampTypeState(state.type));
   typeUi.sync(renderer.getTypeState());
+  renderer.setMarkState(clampMarkState({
+    enabled: state.markEnabled,
+    mode: state.markMode,
+    source: state.markSource,
+    sequenceStart: state.markStart,
+    sequenceStop: state.markStop,
+    scale: state.markScale,
+    anchor: state.markAnchor,
+  }));
+  markUi.sync();
   renderer.setEndBehaviour(clampEndBehaviourSettings({
     mode: state.endBehaviourMode,
     amount: state.endBehaviourAmount,
@@ -1549,6 +1579,8 @@ function applyProductDefault(): void {
   syncAudioButton();
   renderer.setTypeState(defaultTypeState());
   typeUi.sync(renderer.getTypeState());
+  renderer.setMarkState(defaultMarkState());
+  markUi.sync();
   renderer.setEndBehaviour({ ...END_BEHAVIOUR_OFF });
   endUi.sync();
 }
@@ -1653,6 +1685,12 @@ Object.assign(window, {
       renderer.patchTypeState(clampTypeState({ ...renderer.getTypeState(), ...patch }));
       typeUi.sync(renderer.getTypeState());
     },
+    getMarkState: () => cloneMarkState(renderer.getMarkState()),
+    setMarkState: (patch: Record<string, unknown>) => {
+      renderer.setMarkState(clampMarkState({ ...renderer.getMarkState(), ...patch }));
+      markUi.sync();
+    },
+    lastMarkDiagnostics: () => renderer.lastMarkDiagnostics,
     getEndBehaviour: () => renderer.getEndBehaviour(),
     setEndBehaviour: (patch: Record<string, unknown>) => {
       renderer.setEndBehaviour(clampEndBehaviourSettings({ ...renderer.getEndBehaviour(), ...patch }));

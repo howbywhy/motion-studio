@@ -510,7 +510,7 @@ body {
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 12px 4px 10px;
+  padding: 12px 2px 10px;
   cursor: pointer;
 }
 
@@ -521,6 +521,12 @@ body {
 
 .tab-page[hidden] {
   display: none;
+}
+
+.mark-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .behavior-meta h2 {
