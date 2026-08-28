@@ -18,6 +18,7 @@ export default defineConfig({
         registrationRebase: resolve(root, "eval/registration-rebase.html"),
         subtitle: resolve(root, "eval/subtitle.html"),
         typeSheet: resolve(root, "eval/type-sheet.html"),
+        transitionFlicker: resolve(root, "eval/transition-flicker.html"),
       },
     },
   },

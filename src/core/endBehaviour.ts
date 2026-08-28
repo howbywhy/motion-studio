@@ -436,6 +436,59 @@ function paintBand(dest: CanvasRenderingContext2D, src: HTMLCanvasElement, band:
   }
 }
 
+export function flickerPeakMetrics(width: number, height: number): { maxDisp: number; rgb: number } {
+  return {
+    maxDisp: maxDisplacementPx(100, width, height),
+    rgb: rgbPxFor(100),
+  };
+}
+
+export function planFlickerBands(
+  state: FlickerState,
+  seed: number,
+  width: number,
+  height: number,
+  envelopeAmt: number,
+  maxDisp: number,
+  rgbBase: number,
+): EndBand[] {
+  return flickerBands(state, seed, width, height, envelopeAmt, maxDisp, rgbBase);
+}
+
+export function paintFlickerGrammar(
+  dest: CanvasRenderingContext2D,
+  layer: HTMLCanvasElement,
+  bands: EndBand[],
+  scratchKey = "end",
+): void {
+  const width = layer.width;
+  const height = layer.height;
+  const src = scratch(`${scratchKey}-src`, width, height);
+  const sctx = src.getContext("2d")!;
+  sctx.imageSmoothingEnabled = false;
+  sctx.globalCompositeOperation = "copy";
+  sctx.drawImage(layer, 0, 0);
+
+  dest.save();
+  dest.imageSmoothingEnabled = false;
+  dest.globalCompositeOperation = "source-over";
+  dest.globalAlpha = 1;
+
+  if (bands.length === 1 && bands[0]!.w === width && bands[0]!.h === height) {
+    const band = bands[0]!;
+    drawShiftedFull(dest, src, width, height, band.dx, band.dy);
+    if (band.rgb >= RGB_SKIP) {
+      paintRgbPlate(dest, src, { ...band, dx: 0, dy: 0, x: 0, y: 0 }, "#ff2020", band.dx + band.rgb);
+      paintRgbPlate(dest, src, { ...band, dx: 0, dy: 0, x: 0, y: 0 }, "#00d5d8", band.dx - band.rgb);
+    }
+  } else {
+    dest.drawImage(src, 0, 0);
+    for (const band of bands) paintBand(dest, src, band);
+  }
+
+  dest.restore();
+}
+
 export function applyEndBehaviour(
   dest: CanvasRenderingContext2D,
   layer: HTMLCanvasElement,
@@ -448,31 +501,7 @@ export function applyEndBehaviour(
   const t0 = typeof performance !== "undefined" ? performance.now() : 0;
   const plan = planEndBehaviour(phase, settings, width, height, playbackMode);
   if (!plan.active) return diagnosticsFrom(plan, settings.mode, false, 0);
-
-  const src = scratch("end-src", width, height);
-  const sctx = src.getContext("2d")!;
-  sctx.imageSmoothingEnabled = false;
-  sctx.globalCompositeOperation = "copy";
-  sctx.drawImage(layer, 0, 0);
-
-  dest.save();
-  dest.imageSmoothingEnabled = false;
-  dest.globalCompositeOperation = "source-over";
-  dest.globalAlpha = 1;
-
-  if (plan.kind === "flicker" && plan.bands.length === 1 && plan.bands[0]!.w === width && plan.bands[0]!.h === height) {
-    const band = plan.bands[0]!;
-    drawShiftedFull(dest, src, width, height, band.dx, band.dy);
-    if (band.rgb >= RGB_SKIP) {
-      paintRgbPlate(dest, src, { ...band, dx: 0, dy: 0, x: 0, y: 0 }, "#ff2020", band.dx + band.rgb);
-      paintRgbPlate(dest, src, { ...band, dx: 0, dy: 0, x: 0, y: 0 }, "#00d5d8", band.dx - band.rgb);
-    }
-  } else {
-    dest.drawImage(src, 0, 0);
-    for (const band of plan.bands) paintBand(dest, src, band);
-  }
-
-  dest.restore();
+  paintFlickerGrammar(dest, layer, plan.bands, "end");
   const paintMs = typeof performance !== "undefined" ? performance.now() - t0 : 0;
   return diagnosticsFrom(plan, settings.mode, true, paintMs);
 }

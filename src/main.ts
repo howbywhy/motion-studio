@@ -253,7 +253,7 @@ void loadSwitzer().then(() => renderer.renderFrame());
 
 const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
   renderer.patchTypeState(patch);
-  if (patch.selected !== undefined || patch.typePage !== undefined || patch.typePageMove !== undefined || patch.beat !== undefined) {
+  if (patch.selected !== undefined || patch.typePage !== undefined || patch.typePageMove !== undefined || patch.frameHold !== undefined || patch.holdLength !== undefined) {
     typeUi.sync(renderer.getTypeState());
   }
 });
@@ -651,6 +651,38 @@ function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: Par
         syncResolveLimitAvailability();
       },
     );
+    const transition = appendFamily(container, "Transition");
+    (transition.parentElement as HTMLElement).hidden = renderer.getPlaybackMode() !== "loop";
+    const transRow = document.createElement("div");
+    transRow.className = "control-row bloom-transition";
+    const transLab = document.createElement("label");
+    transLab.textContent = "Transition";
+    transRow.appendChild(transLab);
+    const transSeg = document.createElement("div");
+    transSeg.className = "seg-toggle";
+    const transOff = document.createElement("button");
+    transOff.type = "button";
+    transOff.textContent = "Off";
+    const transFlicker = document.createElement("button");
+    transFlicker.type = "button";
+    transFlicker.textContent = "Flicker";
+    const transOn = renderer.getTransitionFlickerEnabled();
+    transOff.classList.toggle("active", !transOn);
+    transFlicker.classList.toggle("active", transOn);
+    transOff.addEventListener("click", () => {
+      renderer.setTransitionFlickerEnabled(false);
+      transOff.classList.add("active");
+      transFlicker.classList.remove("active");
+    });
+    transFlicker.addEventListener("click", () => {
+      renderer.setTransitionFlickerEnabled(true);
+      transFlicker.classList.add("active");
+      transOff.classList.remove("active");
+    });
+    transSeg.appendChild(transOff);
+    transSeg.appendChild(transFlicker);
+    transRow.appendChild(transSeg);
+    transition.appendChild(transRow);
     const fields = document.createElement("div");
     container.appendChild(fields);
     buildControls(fields, fieldDefs, values, onChange);
@@ -1190,6 +1222,7 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     endBehaviourAmount: renderer.getEndBehaviour().amount,
     endBehaviourHold: renderer.getEndBehaviour().hold,
     endBehaviourDuration: renderer.getEndBehaviour().duration,
+    transitionFlickerEnabled: renderer.getTransitionFlickerEnabled(),
     sources: renderer.getSequence().map((item) => ({
       id: item.id,
       asset: item.asset,
@@ -1216,6 +1249,7 @@ function loadSavedState(state: SavedState): void {
     duration: state.endBehaviourDuration,
   }));
   endUi.sync();
+  renderer.setTransitionFlickerEnabled(state.transitionFlickerEnabled === true);
   renderer.setBwMode(resolveSavedBwMode(state));
   syncBwToggle();
   if (state.placeholderBg) {
@@ -1485,6 +1519,7 @@ const BLOOM_OPENING: ParamValues = {
 };
 
 function applyProductDefault(): void {
+  renderer.setTransitionFlickerEnabled(false);
   const bloom = BEHAVIORS.find((b) => b.id === "bloom")!;
   selectBehavior("bloom", { ...defaultParamValues(bloom.params), ...BLOOM_OPENING });
   const mediaA = makePlaceholder("01");
@@ -1624,6 +1659,12 @@ Object.assign(window, {
       endUi.sync();
     },
     lastEndDiagnostics: () => renderer.lastEndDiagnostics,
+    setTransitionFlickerEnabled: (on: boolean) => {
+      renderer.setTransitionFlickerEnabled(on);
+      rebuildControlsPanel();
+    },
+    getTransitionFlickerEnabled: () => renderer.getTransitionFlickerEnabled(),
+    lastTransitionDiagnostics: () => renderer.lastTransitionDiagnostics,
     debugTypeLayout: (w?: number, h?: number) => {
       const size = renderer.getCanvasSize();
       const cw = w ?? size.width;

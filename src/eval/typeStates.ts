@@ -3,7 +3,7 @@ import { clampTypeState, cloneTypeState, TYPE_ANCHORS, type TypeAnchor, type Typ
 import { HEADLINE_INK_BLEED, headlineEdgeBleed, layoutTypeDocument, opticalFramePx, typeGeometryKey, typeInkBox } from "../core/typeLayout";
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
-import { TYPE_PAGE_MAX, type TypeBeat, typePageCuts, typePageIndexForState, typeStateAtPhase, typeVisibleAtPhase, typeVisibleForState } from "../core/typePages";
+import { FRAME_HOLD_LENGTH_DEFAULT, SEQUENCE_SPEED_DEFAULT, SEQUENCE_MIN_BEAT_LOCAL, TYPE_PAGE_MAX, sequenceLastCutLocal, sequencePlan, typePageCuts, typePageIndexForState, typeStateAtPhase, typeVisibleAtPhase, typeVisibleForState } from "../core/typePages";
 import { applySubtitleCues } from "../core/typeSubtitle";
 import { bloomBehavior } from "../behaviors/bloom";
 import { Renderer } from "../core/renderer";
@@ -74,53 +74,20 @@ function page(
 
 function book(
   pages: Partial<TypeBlock>[][],
-  timing?: { start?: number; stop?: number; beats?: TypeBeat[] },
+  timing?: number | { speed?: number; start?: number; stop?: number; holds?: boolean[]; holdLengths?: number[] },
 ): TypeState {
-  const t = timing ?? {};
+  const t = typeof timing === "number" ? { speed: timing } : (timing ?? {});
   return clampTypeState({
     enabled: true,
     blocks: pages[0],
     pages,
     selected: 0,
+    sequenceSpeed: t.speed ?? SEQUENCE_SPEED_DEFAULT,
     sequenceStart: t.start,
     sequenceStop: t.stop,
-    pageBeats: t.beats,
+    frameHoldEnabled: t.holds,
+    frameHoldLength: t.holdLengths,
   });
-}
-
-function everyIndexAppears(state: TypeState): boolean {
-  const n = state.pages.length;
-  let mask = 0;
-  for (let i = 0; i <= 400; i++) {
-    const p = i / 400;
-    if (!typeVisibleForState(state, p)) continue;
-    mask |= 1 << typePageIndexForState(state, p);
-  }
-  return mask === (1 << n) - 1;
-}
-
-function durationShares(state: TypeState): number[] {
-  const n = state.pages.length;
-  const counts = Array.from({ length: n }, () => 0);
-  let vis = 0;
-  for (let i = 0; i <= 2000; i++) {
-    const p = i / 2000;
-    if (!typeVisibleForState(state, p)) continue;
-    counts[typePageIndexForState(state, p)] += 1;
-    vis += 1;
-  }
-  if (!(vis > 0)) return counts;
-  return counts.map((c) => c / vis);
-}
-
-function relativeOk(state: TypeState, beats: number[], eps = 0.045): boolean {
-  const W = beats.reduce((a, b) => a + b, 0);
-  const shares = durationShares(state);
-  return beats.every((b, i) => Math.abs(shares[i]! - b / W) < eps);
-}
-
-function near(a: number, b: number, eps = 1e-6): boolean {
-  return Math.abs(a - b) < eps;
 }
 
 function paintResolved(state: TypeState, w: number, h: number, phase: number): HTMLCanvasElement {
@@ -357,20 +324,22 @@ export interface TypeStatesReport {
   windowSemantics: boolean;
   presenceSemantics: boolean;
   oneStatePresence: boolean;
-  beatWeights: boolean;
-  beatScale: boolean;
-  beatFollowsReorder: boolean;
-  duplicateResetsBeat: boolean;
-  lastStateHasBeat: boolean;
+  speedMovesCutsOnly: boolean;
   oncePerLoop: boolean;
   orderPreservesDocuments: boolean;
   insertAfterSelected: boolean;
+  frameHoldWeights: boolean;
+  holdFollowsReorder: boolean;
+  duplicateClearsHold: boolean;
+  finalHoldIgnored: boolean;
   maxSix: boolean;
-  allStatesAppear: boolean;
-  relativeDurations: boolean;
-  migrateHold: boolean;
+  minBeatSafety: boolean;
+  holdLengthScale: boolean;
+  holdSurvivesFinalSlot: boolean;
+  weightClamp: boolean;
   topCapitalsProtected: boolean;
   bottomDescendersBleed: boolean;
+  migrateBeat: boolean;
   type03Simultaneous: boolean;
   type03Duplicate: boolean;
   type03Reorder: boolean;
@@ -460,13 +429,15 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     { start: 0.4, stop: 0.8 },
   ];
   for (const win of windows) {
-    const two = book(twoSpeedPages, { start: win.start, stop: win.stop });
-    const three = book(threeSpeedPages, { start: win.start, stop: win.stop });
-    const twoGrid = section(root, `Window ${Math.round(win.start * 100)}–${Math.round(win.stop * 100)} · Beat 1× · 2 states`);
-    const threeGrid = section(root, `Window ${Math.round(win.start * 100)}–${Math.round(win.stop * 100)} · Beat 1× · 3 states`);
-    for (const p of WINDOW_PHASES) {
-      cell(twoGrid, `${p.toFixed(2)}  ${presenceCaption(two, p)}`, paintResolved(two, W45, H45, p));
-      cell(threeGrid, `${p.toFixed(2)}  ${presenceCaption(three, p)}`, paintResolved(three, W45, H45, p));
+    for (const speed of [0, 50, 100] as const) {
+      const two = book(twoSpeedPages, { speed, start: win.start, stop: win.stop });
+      const three = book(threeSpeedPages, { speed, start: win.start, stop: win.stop });
+      const twoGrid = section(root, `Window ${Math.round(win.start * 100)}–${Math.round(win.stop * 100)} · Speed ${speed} · 2 states`);
+      const threeGrid = section(root, `Window ${Math.round(win.start * 100)}–${Math.round(win.stop * 100)} · Speed ${speed} · 3 states`);
+      for (const p of WINDOW_PHASES) {
+        cell(twoGrid, `${p.toFixed(2)}  ${presenceCaption(two, p)}`, paintResolved(two, W45, H45, p));
+        cell(threeGrid, `${p.toFixed(2)}  ${presenceCaption(three, p)}`, paintResolved(three, W45, H45, p));
+      }
     }
   }
 
@@ -478,12 +449,12 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
       { text: mbmById("now").text, composition: "subtitle", scale: 70, anchor: "br" },
     ),
   ];
-  strip(root, "Creative A  Start 10 / Stop 55", book(campaignPages, { start: 0.1, stop: 0.55 }), W45, H45);
-  strip(root, "Creative B  Start 25 / Stop 70", book(campaignPages, { start: 0.25, stop: 0.7 }), W45, H45);
-  strip(root, "Creative C  Start 45 / Stop 80", book(campaignPages, { start: 0.45, stop: 0.8 }), W45, H45);
+  strip(root, "Creative A  Start 10 / Stop 55 / Speed 75", book(campaignPages, { speed: 75, start: 0.1, stop: 0.55 }), W45, H45);
+  strip(root, "Creative B  Start 25 / Stop 70 / Speed 50", book(campaignPages, { speed: 50, start: 0.25, stop: 0.7 }), W45, H45);
+  strip(root, "Creative C  Start 45 / Stop 80 / Speed 25", book(campaignPages, { speed: 25, start: 0.45, stop: 0.8 }), W45, H45);
 
-  const presence = book(campaignPages, { start: 0.2, stop: 0.7 });
-  const presenceGrid = section(root, "Presence  Start 20 / Stop 70");
+  const presence = book(campaignPages, { speed: 50, start: 0.2, stop: 0.7 });
+  const presenceGrid = section(root, "Presence  Start 20 / Stop 70 / Speed 50");
   for (const p of PRESENCE_PHASES) {
     cell(presenceGrid, `${p.toFixed(2)}  ${presenceCaption(presence, p)}`, paintResolved(presence, W45, H45, p));
   }
@@ -492,7 +463,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     [page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" })],
     { start: 0.3, stop: 0.6 },
   );
-  const oneGrid = section(root, "One state  Start 30 / Stop 60  ·  Beat hidden");
+  const oneGrid = section(root, "One state  Start 30 / Stop 60  ·  Speed hidden");
   for (const p of [0, 0.29, 0.3, 0.45, 0.59, 0.6, 0.9]) {
     cell(oneGrid, `${p.toFixed(2)}  ${presenceCaption(oneWindow, p)}`, paintResolved(oneWindow, W45, H45, p));
   }
@@ -505,33 +476,68 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     page({ text: "AND FLAWLESS", composition: "headline", scale: 64, anchor: "bl" }),
     page({ text: "2026", composition: "headline", scale: 100, anchor: "br" }),
   ];
-  for (const n of [1, 2, 4, 6] as const) {
-    const st = book(lengthPages.slice(0, n), { start: 0.2, stop: 0.7 });
-    const grid = section(root, `Sequence length  ${n} states  ·  Start 20 / Stop 70 · Beat 1×`);
+  for (const n of [2, 3, 4, 5, 6] as const) {
+    const st = book(lengthPages.slice(0, n), { speed: 50, start: 0.2, stop: 0.7 });
+    const grid = section(root, `Sequence length  ${n} frames  ·  Start 20 / Stop 70 / Speed 50`);
     for (const p of WINDOW_PHASES) {
       cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
     }
   }
 
-  const beatPatterns: { label: string; n: number; beats: TypeBeat[] }[] = [
-    { label: "Beat  2 states  1 / 1", n: 2, beats: [1, 1] },
-    { label: "Beat  2 states  1 / 2", n: 2, beats: [1, 2] },
-    { label: "Beat  2 states  1 / 3", n: 2, beats: [1, 3] },
-    { label: "Beat  4 states  1 / 1 / 3 / 1", n: 4, beats: [1, 1, 3, 1] },
-    { label: "Beat  6 states  3 / 1 / 1 / 2 / 1 / 3", n: 6, beats: [3, 1, 1, 2, 1, 3] },
-  ];
-  for (const pat of beatPatterns) {
-    const st = book(lengthPages.slice(0, pat.n), { start: 0.2, stop: 0.8, beats: pat.beats });
-    const grid = section(root, `${pat.label}  ·  Start 20 / Stop 80`);
+  const holdA = book(lengthPages.slice(0, 3), { speed: 50, start: 0.2, stop: 0.7 });
+  const holdB = book(lengthPages.slice(0, 3), { speed: 50, start: 0.2, stop: 0.7, holds: [false, true, false] });
+  const holdC = book(lengthPages.slice(0, 5), { speed: 50, start: 0.2, stop: 0.7, holds: [false, true, false, true, false] });
+  const holdD = book(lengthPages.slice(0, 6), { speed: 50, start: 0.2, stop: 0.7, holds: [false, false, true, false, false, false] });
+  for (const [label, st] of [
+    ["Hold A  3 frames  none Held", holdA],
+    ["Hold B  3 frames  02 Held 2.0×", holdB],
+    ["Hold C  5 frames  02 + 04 Held", holdC],
+    ["Hold D  6 frames  03 Held", holdD],
+  ] as const) {
+    const grid = section(root, label);
     for (const p of WINDOW_PHASES) {
       cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
     }
   }
 
-  const holdA = book(lengthPages.slice(0, 3), { start: 0.2, stop: 0.7 });
-  const holdB = book(lengthPages.slice(0, 3), { start: 0.2, stop: 0.7, beats: [1, 2, 1] });
-  const holdC = book(lengthPages.slice(0, 5), { start: 0.2, stop: 0.7, beats: [1, 2, 1, 2, 1] });
-  const stress = book(lengthPages, { start: 0.2, stop: 0.7, beats: [3, 1, 1, 2, 1, 3] });
+  for (const len of [1, 1.5, 2, 2.5, 3] as const) {
+    const st = book(lengthPages.slice(0, 3), {
+      speed: 50,
+      start: 0.2,
+      stop: 0.7,
+      holds: [false, true, false],
+      holdLengths: [2, len, 2],
+    });
+    const grid = section(root, `Hold Length  3 frames  02  ${len.toFixed(1)}×  ·  Start 20 / Stop 70 / Speed 50`);
+    for (const p of WINDOW_PHASES) {
+      cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
+    }
+  }
+
+  const multiLen = book(lengthPages, {
+    speed: 50,
+    start: 0.2,
+    stop: 0.7,
+    holds: [false, true, false, true, false, false],
+    holdLengths: [2, 2, 2, 2.5, 2, 2],
+  });
+  const multiGrid = section(root, "Hold Length  6 frames  02 2.0×  ·  04 2.5×  ·  Start 20 / Stop 70 / Speed 50");
+  for (const p of WINDOW_PHASES) {
+    cell(multiGrid, `${p.toFixed(2)}  ${presenceCaption(multiLen, p)}`, paintResolved(multiLen, W45, H45, p));
+  }
+
+  const stress = book(lengthPages, {
+    speed: 100,
+    start: 0.2,
+    stop: 0.7,
+    holds: [false, true, false, true, false, false],
+    holdLengths: [2, 3, 2, 3, 2, 2],
+  });
+  const stressGrid = section(root, "Stress  6 frames  02 3×  ·  04 3×  ·  Speed 100  ·  Start 20 / Stop 70");
+  for (const p of WINDOW_PHASES) {
+    cell(stressGrid, `${p.toFixed(2)}  ${presenceCaption(stress, p)}`, paintResolved(stress, W45, H45, p));
+  }
+
   const creative = book(
     [
       page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" }),
@@ -541,21 +547,49 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
       page({ text: mbmById("now").text, composition: "headline", scale: 70, anchor: "br" }),
       page({ text: "2026", composition: "headline", scale: 100, anchor: "br" }),
     ],
-    { start: 0.2, stop: 0.75, beats: [1, 3, 1, 2, 1, 1] },
+    {
+      speed: 50,
+      start: 0.2,
+      stop: 0.75,
+      holds: [false, true, false, true, false, false],
+      holdLengths: [2, 2.5, 2, 1.5, 2, 2],
+    },
   );
-  const rhythm = book(lengthPages, { start: 0.2, stop: 0.75, beats: [1, 1, 3, 1, 3, 1] });
-  for (const [label, st] of [
-    ["Beat  3 states  1 / 1 / 1", holdA],
-    ["Beat  3 states  1 / 2 / 1", holdB],
-    ["Beat  5 states  1 / 2 / 1 / 2 / 1", holdC],
-    ["Beat  6 states  3 / 1 / 1 / 2 / 1 / 3", stress],
-    ["Creative  1 / 3 / 1 / 2 / 1 / 1  ·  Start 20 / Stop 75", creative],
-    ["Rhythm  1 / 1 / 3 / 1 / 3 / 1  ·  Start 20 / Stop 75", rhythm],
-  ] as const) {
-    const grid = section(root, label);
-    for (const p of WINDOW_PHASES) {
-      cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
-    }
+  const creativeGrid = section(root, "Creative  SHORT · LONG 2.5× · SHORT · MEDIUM 1.5× · SHORT · FINAL  ·  Start 20 / Stop 75 / Speed 50");
+  for (const p of WINDOW_PHASES) {
+    cell(creativeGrid, `${p.toFixed(2)}  ${presenceCaption(creative, p)}`, paintResolved(creative, W45, H45, p));
+  }
+
+  const rhythm = book(lengthPages, {
+    speed: 50,
+    start: 0.2,
+    stop: 0.75,
+    holds: [false, false, true, false, true, false],
+  });
+  const rhythmGrid = section(root, "Rhythm  01 07.09 · 02 MADE · 03 BY MADELEN HOLD · 04 FLAWED · 05 AND FLAWLESS HOLD · 06 2026  ·  Start 20 / Stop 75 / Speed 50");
+  for (const p of WINDOW_PHASES) {
+    cell(rhythmGrid, `${p.toFixed(2)}  ${presenceCaption(rhythm, p)}`, paintResolved(rhythm, W45, H45, p));
+  }
+
+  const repetition = book(
+    [
+      page({ text: "MADE BY MADELEN", composition: "headline", scale: 62, anchor: "bl" }),
+      page({ text: "MADE BY MADELEN", composition: "headline", scale: 62, anchor: "bc" }),
+      page({ text: "MADE BY MADELEN", composition: "headline", scale: 90, anchor: "mc" }),
+      page({ text: "MADE BY MADELEN", composition: "headline", scale: 70, anchor: "mr" }),
+      page({ text: "MADE BY MADELEN", composition: "headline", scale: 62, anchor: "bl" }),
+    ],
+    {
+      speed: 48,
+      start: 0.15,
+      stop: 0.72,
+      holds: [false, true, false, false, false],
+      holdLengths: [2, 2, 2, 2, 2],
+    },
+  );
+  const repetitionGrid = section(root, "Repetition  MADE BY MADELEN × 5  ·  Start 15 / Stop 72 / Speed 48  ·  02 Held 2.0×");
+  for (const p of WINDOW_PHASES) {
+    cell(repetitionGrid, `${p.toFixed(2)}  ${presenceCaption(repetition, p)}`, paintResolved(repetition, W45, H45, p));
   }
 
   const capGrid = section(root, "Optical edge · capitals  MADE / FLAWED / MADELEN  ·  top must not clip");
@@ -570,6 +604,15 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     for (const anchor of ["bl", "bc", "br"] as TypeAnchor[]) {
       const state = headlinePage(word, anchor, 100);
       cell(descGrid, `${word}  ${ANCHOR_LABEL[anchor]}  ${cropCaption(state, W45, H45)}`, paintBleed(state, W45, H45));
+    }
+  }
+
+  const sixHeld = book(lengthPages, { start: 0.2, stop: 0.7, holds: [false, false, true, false, false, false] });
+  for (const speed of [0, 25, 50, 75, 100] as const) {
+    const st = book(lengthPages, { speed, start: 0.2, stop: 0.7, holds: [false, false, true, false, false, false] });
+    const grid = section(root, `Six frames + 03 Held  ·  Speed ${speed}`);
+    for (const p of WINDOW_PHASES) {
+      cell(grid, `${p.toFixed(2)}  ${presenceCaption(st, p)}`, paintResolved(st, W45, H45, p));
     }
   }
 
@@ -618,8 +661,8 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     }
   }
 
-  const cutsA = typePageCuts(3, sequenceA.sequenceStart, sequenceA.sequenceStop);
-  const cutsTwo = typePageCuts(2, free.sequenceStart, free.sequenceStop);
+  const cutsA = typePageCuts(3, sequenceA.sequenceSpeed, sequenceA.sequenceStart, sequenceA.sequenceStop);
+  const cutsTwo = typePageCuts(2, free.sequenceSpeed, free.sequenceStart, free.sequenceStop);
   const cutA = cutsA[0]!;
   const cutTwo = cutsTwo[0]!;
   const before = typePageIndexForState(sequenceA, cutA - 0.001);
@@ -698,7 +741,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     { label: "C  Start 0 / Stop 100  type full piece", start: 0, stop: 1 },
   ];
   for (const c of flickerCases) {
-    const st = book(campaignPages, { start: c.start, stop: c.stop });
+    const st = book(campaignPages, { speed: 50, start: c.start, stop: c.stop });
     flickerRenderer.setTypeState(st);
     const grid = section(root, `Flicker · ${c.label}`);
     for (const p of [0.5, 0.8, 0.96]) {
@@ -770,7 +813,9 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     TYPE_ANCHORS.every((anchor) => unrelatedEdgesSafe(headlinePage("MADELEN", anchor, 100), W45, H45)) &&
     TYPE_ANCHORS.every((anchor) => unrelatedEdgesSafe(headlinePage("MADELEN", anchor, 78), W916, H916));
 
-  const mid = book(threeSpeedPages, { start: 0.2, stop: 0.7 });
+  const mid = book(threeSpeedPages, { speed: 50, start: 0.2, stop: 0.7 });
+  const slow = book(threeSpeedPages, { speed: 0, start: 0.2, stop: 0.7 });
+  const fast = book(threeSpeedPages, { speed: 100, start: 0.2, stop: 0.7 });
   const windowSemantics =
     !typeVisibleForState(mid, 0) &&
     !typeVisibleForState(mid, 0.19) &&
@@ -807,25 +852,21 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     typeStateAtPhase(oneWindow, 0.45) === oneWindow &&
     !typeStateAtPhase(oneWindow, 0.1).enabled;
 
-  const evenCuts = typePageCuts(3, 0.2, 0.7, [1, 1, 1]);
-  const longMidCuts = typePageCuts(3, 0.2, 0.7, [1, 3, 1]);
-  const exampleCuts = typePageCuts(4, 0.2, 0.8, [1, 1, 3, 1]);
-  const beatWeights =
-    near(evenCuts[0]!, 0.2 + 0.5 / 3) &&
-    near(evenCuts[1]!, 0.2 + (2 * 0.5) / 3) &&
-    near(longMidCuts[0]!, 0.3) &&
-    near(longMidCuts[1]!, 0.6) &&
-    near(exampleCuts[0]!, 0.3) &&
-    near(exampleCuts[1]!, 0.4) &&
-    near(exampleCuts[2]!, 0.7) &&
-    typePageIndexForState(holdA, 0.55) === 2 &&
-    typePageIndexForState(holdB, 0.55) === 1;
-
-  const cuts1 = typePageCuts(3, 0.2, 0.7, [1, 1, 1]);
-  const cuts2 = typePageCuts(3, 0.2, 0.7, [1, 2, 1]);
-  const cuts3 = typePageCuts(3, 0.2, 0.7, [1, 3, 1]);
-  const span = (cuts: number[]) => cuts[1]! - cuts[0]!;
-  const beatScale = span(cuts1) < span(cuts2) && span(cuts2) < span(cuts3);
+  const midCuts = typePageCuts(3, 50, 0.2, 0.7);
+  const slowCuts = typePageCuts(3, 0, 0.2, 0.7);
+  const fastCuts = typePageCuts(3, 100, 0.2, 0.7);
+  const geo0 = typeGeometryKey(slow, W45, H45);
+  const geo100 = typeGeometryKey(fast, W45, H45);
+  const speedMovesCutsOnly =
+    geo0 === geo100 &&
+    fastCuts[0]! < midCuts[0]! &&
+    midCuts[0]! < slowCuts[0]! &&
+    fastCuts[1]! < midCuts[1]! &&
+    midCuts[1]! < slowCuts[1]! &&
+    fastCuts[1]! < 0.7 &&
+    slowCuts[1]! <= 0.7 + 1e-9 &&
+    typePageIndexForState(fast, 0.4) === 2 &&
+    typePageIndexForState(slow, 0.4) === 0;
 
   function pathOnce(state: TypeState): boolean {
     const n = state.pages.length;
@@ -846,11 +887,12 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     return true;
   }
   const edgeWindows = [
-    book(threeSpeedPages, { start: 0, stop: 1 }),
-    book(threeSpeedPages, { start: 0, stop: 0.2 }),
-    book(threeSpeedPages, { start: 0.8, stop: 1 }),
-    book(threeSpeedPages, { start: 0.2, stop: 0.7 }),
-    book(twoSpeedPages, { start: 0.2, stop: 0.7 }),
+    book(threeSpeedPages, { speed: 0, start: 0, stop: 1 }),
+    book(threeSpeedPages, { speed: 100, start: 0, stop: 0.2 }),
+    book(threeSpeedPages, { speed: 50, start: 0.8, stop: 1 }),
+    book(threeSpeedPages, { speed: 50, start: 0.2, stop: 0.7 }),
+    book(twoSpeedPages, { speed: 0, start: 0.2, stop: 0.7 }),
+    book(twoSpeedPages, { speed: 100, start: 0.2, stop: 0.7 }),
     holdB,
     holdC,
     rhythm,
@@ -896,73 +938,75 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     twoThenAdd.pages[1]![0]!.text === "NEW" &&
     twoThenAdd.pages[2]![0]!.text === "07.09.2026";
 
-  const heldMoved = clampTypeState({ ...holdB, typePageMove: { from: 1, to: 0 } });
-  const beatFollowsReorder =
-    holdB.pageBeats[1] === 2 &&
-    heldMoved.pages[0]![0]!.text === "MADE" &&
-    heldMoved.pageBeats[0] === 2 &&
-    heldMoved.pageBeats[1] === 1;
+  const noneCuts = typePageCuts(3, 50, 0.2, 0.7);
+  const heldCuts = typePageCuts(3, 50, 0.2, 0.7, [false, true, false]);
+  const twoHeldCuts = typePageCuts(2, 50, 0.2, 0.7, [true, false]);
+  const twoPlainCuts = typePageCuts(2, 50, 0.2, 0.7);
+  const frameHoldWeights =
+    heldCuts[1]! - heldCuts[0]! > noneCuts[1]! - noneCuts[0]! &&
+    twoHeldCuts[0]! > twoPlainCuts[0]! &&
+    typePageIndexForState(holdA, 0.55) === 2 &&
+    typePageIndexForState(holdB, 0.55) === 1;
 
-  const dupBeat = clampTypeState({
-    ...book(lengthPages.slice(0, 2), { beats: [3, 1] }),
+  const heldMoved = clampTypeState({ ...holdB, typePageMove: { from: 1, to: 0 } });
+  const holdFollowsReorder =
+    holdB.frameHoldEnabled[1] === true &&
+    heldMoved.pages[0]![0]!.text === "MADE" &&
+    heldMoved.frameHoldEnabled[0] === true &&
+    heldMoved.frameHoldEnabled[2] === false;
+
+  const dupHold = clampTypeState({
+    ...book(lengthPages.slice(0, 2), { holds: [true, false] }),
     selected: 0,
     typePage: "add",
   });
-  const duplicateResetsBeat =
-    dupBeat.pages.length === 3 &&
-    dupBeat.pageBeats[0] === 3 &&
-    dupBeat.pageBeats[1] === 1 &&
-    dupBeat.pageBeats[2] === 1;
+  const duplicateClearsHold =
+    dupHold.pages.length === 3 &&
+    dupHold.frameHoldEnabled[0] === true &&
+    dupHold.frameHoldEnabled[1] === false &&
+    dupHold.frameHoldEnabled[2] === false &&
+    dupHold.frameHoldLength[1] === FRAME_HOLD_LENGTH_DEFAULT;
 
-  const lastBeat = clampTypeState({ ...holdA, selected: 2, beat: 3 });
-  const lastStateHasBeat = lastBeat.pageBeats[2] === 3 && lastBeat.pageBeats[0] === 1;
+  const lastAttempt = clampTypeState({ ...holdA, selected: 2, frameHold: true });
+  const finalHoldIgnored = lastAttempt.frameHoldEnabled[2] === false && lastAttempt.frameHoldEnabled[1] === false;
+
+  const toLast = clampTypeState({ ...holdB, typePageMove: { from: 1, to: 2 } });
+  const fromLast = clampTypeState({ ...toLast, typePageMove: { from: 2, to: 1 } });
+  const holdSurvivesFinalSlot =
+    toLast.frameHoldEnabled[2] === true &&
+    toLast.frameHoldLength[2] === FRAME_HOLD_LENGTH_DEFAULT &&
+    typePageIndexForState(toLast, 0.55) !== undefined &&
+    fromLast.frameHoldEnabled[1] === true;
 
   let grow = book(lengthPages.slice(0, 1));
   for (let i = 0; i < 8; i++) grow = clampTypeState({ ...grow, selected: grow.pages.length - 1, typePage: "add" });
   const maxSix = grow.pages.length === TYPE_PAGE_MAX && TYPE_PAGE_MAX === 6;
 
-  const oneState = book(lengthPages.slice(0, 1), { start: 0.2, stop: 0.8 });
-  const two11 = book(lengthPages.slice(0, 2), { start: 0.2, stop: 0.8, beats: [1, 1] });
-  const two12 = book(lengthPages.slice(0, 2), { start: 0.2, stop: 0.8, beats: [1, 2] });
-  const two13 = book(lengthPages.slice(0, 2), { start: 0.2, stop: 0.8, beats: [1, 3] });
-  const four1131 = book(lengthPages.slice(0, 4), { start: 0.2, stop: 0.8, beats: [1, 1, 3, 1] });
-  const six311213 = book(lengthPages, { start: 0.2, stop: 0.8, beats: [3, 1, 1, 2, 1, 3] });
-  const allStatesAppear =
-    everyIndexAppears(oneState) &&
-    everyIndexAppears(two11) &&
-    everyIndexAppears(two12) &&
-    everyIndexAppears(two13) &&
-    everyIndexAppears(four1131) &&
-    everyIndexAppears(six311213) &&
-    everyIndexAppears(stress);
-  const relativeDurations =
-    relativeOk(two11, [1, 1]) &&
-    relativeOk(two12, [1, 2]) &&
-    relativeOk(two13, [1, 3]) &&
-    relativeOk(four1131, [1, 1, 3, 1]) &&
-    relativeOk(six311213, [3, 1, 1, 2, 1, 3]);
+  const minBeatSafety =
+    sequenceLastCutLocal(6, 100) >= 5 * SEQUENCE_MIN_BEAT_LOCAL - 1e-9 &&
+    sequenceLastCutLocal(6, 50, sixHeld.frameHoldEnabled, sixHeld.frameHoldLength)
+      >= sequenceLastCutLocal(6, 100, sixHeld.frameHoldEnabled, sixHeld.frameHoldLength) &&
+    sequenceLastCutLocal(3, 50) <= 0.6 + 1e-9;
 
-  const migrateOff = clampTypeState({
-    enabled: true,
-    pages: lengthPages.slice(0, 2),
-    frameHoldEnabled: [false, false],
-  } as Record<string, unknown>);
-  const migrateShort = clampTypeState({
-    enabled: true,
-    pages: lengthPages.slice(0, 2),
-    frameHoldEnabled: [true, false],
-    frameHoldLength: [1.25, 2],
-  } as Record<string, unknown>);
-  const migrateLong = clampTypeState({
-    enabled: true,
-    pages: lengthPages.slice(0, 2),
-    frameHoldEnabled: [true, false],
-    frameHoldLength: [2.2, 2],
-  } as Record<string, unknown>);
-  const migrateHold =
-    migrateOff.pageBeats[0] === 1 &&
-    migrateShort.pageBeats[0] === 2 &&
-    migrateLong.pageBeats[0] === 3;
+  const cuts1 = typePageCuts(3, 50, 0.2, 0.7, [false, true, false], [2, 1, 2]);
+  const cuts15 = typePageCuts(3, 50, 0.2, 0.7, [false, true, false], [2, 1.5, 2]);
+  const cuts3 = typePageCuts(3, 50, 0.2, 0.7, [false, true, false], [2, 3, 2]);
+  const span = (cuts: number[]) => cuts[1]! - cuts[0]!;
+  const holdLengthScale = span(cuts1) < span(cuts15) && span(cuts15) < span(cuts3);
+
+  const stressPlan = sequencePlan(6, 100, stress.frameHoldEnabled, stress.frameHoldLength);
+  const minShare = Math.min(...stressPlan.weights.map((w) => w / stressPlan.weights.reduce((a, b) => a + b, 0))) * stressPlan.lastCut;
+  let mask = 0;
+  for (let i = 0; i <= 200; i++) {
+    const p = i / 200;
+    if (!typeVisibleForState(stress, p)) continue;
+    mask |= 1 << typePageIndexForState(stress, p);
+  }
+  const weightClamp =
+    minShare >= SEQUENCE_MIN_BEAT_LOCAL - 1e-6 &&
+    mask === (1 << 6) - 1 &&
+    stressPlan.weights[1]! > stressPlan.weights[0]! &&
+    stressPlan.weights[3]! > stressPlan.weights[2]!;
 
   const triple = clampTypeState({
     enabled: true,
@@ -1015,6 +1059,34 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
   });
   const type03LegacyOff = legacyOff.blocks[2]!.enabled === false;
 
+  const migratedBeat = clampTypeState({
+    enabled: true,
+    pages: [
+      page({ text: "A", composition: "headline", scale: 70, anchor: "bl" }),
+      page({ text: "B", composition: "headline", scale: 70, anchor: "mc" }),
+      page({ text: "C", composition: "headline", scale: 70, anchor: "tr" }),
+    ],
+    pageBeats: [1, 2, 3],
+  });
+  const nativeWins = clampTypeState({
+    enabled: true,
+    pages: migratedBeat.pages,
+    pageBeats: [3, 3, 3],
+    frameHoldEnabled: [false, true, false],
+    frameHoldLength: [2, 2.5, 2],
+    sequenceSpeed: 40,
+  });
+  const migrateBeat =
+    migratedBeat.frameHoldEnabled[0] === false &&
+    migratedBeat.frameHoldEnabled[1] === true &&
+    migratedBeat.frameHoldLength[1] === 2 &&
+    migratedBeat.frameHoldEnabled[2] === true &&
+    migratedBeat.frameHoldLength[2] === 3 &&
+    migratedBeat.sequenceSpeed === SEQUENCE_SPEED_DEFAULT &&
+    nativeWins.frameHoldEnabled[1] === true &&
+    nativeWins.frameHoldLength[1] === 2.5 &&
+    nativeWins.sequenceSpeed === 40;
+
   return {
     onePageBypass,
     cutEqualsStatic,
@@ -1029,20 +1101,22 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     windowSemantics: windowSemantics && holdWindowEdges,
     presenceSemantics,
     oneStatePresence,
-    beatWeights,
-    beatScale,
-    beatFollowsReorder,
-    duplicateResetsBeat,
-    lastStateHasBeat,
+    speedMovesCutsOnly,
     oncePerLoop,
     orderPreservesDocuments,
     insertAfterSelected,
+    frameHoldWeights,
+    holdFollowsReorder,
+    duplicateClearsHold,
+    finalHoldIgnored,
     maxSix,
-    allStatesAppear,
-    relativeDurations,
-    migrateHold,
+    minBeatSafety,
+    holdLengthScale,
+    holdSurvivesFinalSlot,
+    weightClamp,
     topCapitalsProtected,
     bottomDescendersBleed,
+    migrateBeat,
     type03Simultaneous: type03Simultaneous && type03LegacyOff,
     type03Duplicate: type03DuplicateOk,
     type03Reorder,
@@ -1052,7 +1126,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
       liveHashes,
       holdPreview,
       holdFrames,
-      cuts: { before, after, twoBefore, twoAfter, evenCuts, longMidCuts, exampleCuts },
+      cuts: { before, after, twoBefore, twoAfter, midCuts, slowCuts, fastCuts, noneCuts, heldCuts, twoHeldCuts },
       layoutMs: { one: oneMs, three: threeMs },
       cloneKeepsPages: cloneTypeState(sequenceA).pages.length === 3,
       bleed: HEADLINE_INK_BLEED,
@@ -1060,11 +1134,6 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
       window: { start: mid.sequenceStart, stop: mid.sequenceStop },
       orderTexts: orderMoved.pages.map((p) => p[0]!.text),
       insertTexts: twoThenAdd.pages.map((p) => p[0]!.text),
-      shares: {
-        two11: durationShares(two11),
-        four: durationShares(four1131),
-        six: durationShares(six311213),
-      },
     },
   };
 }

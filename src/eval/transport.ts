@@ -39,7 +39,9 @@ function campaignType(): TypeState {
     enabled: true,
     sequenceStart: 0.2,
     sequenceStop: 0.75,
-    pageBeats: [1, 2, 1, 1, 1, 1],
+    sequenceSpeed: 50,
+    frameHoldEnabled: [false, true, false, false, false, false],
+    frameHoldLength: [2, 2.25, 2, 2, 2, 2],
     pages: [
       page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" }),
       page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "mc" }),

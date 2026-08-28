@@ -10,9 +10,9 @@ import type { ParamValues } from "./types";
  *   resolveLimit is left unchanged (art-directed terminal coverage).
  *
  * Does not touch media, sequence, Registration (including Amount), End
- * Behaviour, Typography (including Type States, Type 03, Subtitle copy / cue order,
- * page order, Beat, Sequence Window), Bloom Pulse
- * Range / Speed, B&W, background, audio, export, or aspect. Does not
+ * Behaviour, Transition Flicker, Typography (including Type States, Type 03,
+ * Subtitle copy / cue order, page order, Speed, Frame Hold, Sequence Window),
+ * Bloom Pulse Range / Speed, B&W, background, audio, export, or aspect. Does not
  * randomise FIELD or Shift.
  */
 

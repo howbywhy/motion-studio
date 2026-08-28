@@ -20,6 +20,11 @@ import {
   type EndDiagnostics,
 } from "./endBehaviour";
 import {
+  applyTransitionFlicker,
+  emptyTransitionFlickerDiagnostics,
+  type TransitionFlickerDiagnostics,
+} from "./transitionFlicker";
+import {
   applyFieldInk,
   deriveFieldInk,
   lastFieldInk,
@@ -205,6 +210,8 @@ export class Renderer {
   private typeState: TypeState = defaultTypeState();
   private endBehaviour: EndBehaviourSettings = { ...END_BEHAVIOUR_OFF };
   lastEndDiagnostics: EndDiagnostics | null = null;
+  private transitionFlickerEnabled = false;
+  lastTransitionDiagnostics: TransitionFlickerDiagnostics | null = null;
   /** A/B test only. Product is false: Registration then type (historical). */
   private typeBeforeRegistration = false;
   private bwMode: BwMode = "off";
@@ -589,6 +596,17 @@ export class Renderer {
 
   getEndBehaviour(): EndBehaviourSettings {
     return { ...this.endBehaviour };
+  }
+
+  setTransitionFlickerEnabled(on: boolean): void {
+    const next = on === true;
+    if (this.transitionFlickerEnabled === next) return;
+    this.transitionFlickerEnabled = next;
+    this.renderFrame();
+  }
+
+  getTransitionFlickerEnabled(): boolean {
+    return this.transitionFlickerEnabled;
   }
 
   setBWEnabled(on: boolean): void {
@@ -1586,6 +1604,21 @@ export class Renderer {
 
     if (!this.typeBeforeRegistration) paintType();
     const tType = mark();
+
+    const loopPairCount = this.items.length >= 2 ? this.items.length : 0;
+    if (this.behavior?.id === "bloom") {
+      this.lastTransitionDiagnostics = applyTransitionFlicker(
+        composedCtx,
+        this.composedLayer,
+        this.getLoopPhase(),
+        loopPairCount,
+        this.playbackMode,
+        this.transitionFlickerEnabled,
+        this.endBehaviour,
+      );
+    } else {
+      this.lastTransitionDiagnostics = emptyTransitionFlickerDiagnostics(loopPairCount);
+    }
 
     const end = this.endBehaviour;
     if (end.mode !== "off") {

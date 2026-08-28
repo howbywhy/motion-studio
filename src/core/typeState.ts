@@ -1,14 +1,14 @@
 import {
-  clampBeat,
+  clampHoldLength,
   clampSequenceWindow,
-  clonePageBeats,
+  cloneFrameHoldEnabled,
+  cloneFrameHoldLength,
   cloneTypePage,
-  migrateLegacyBeat,
+  FRAME_HOLD_LENGTH_DEFAULT,
+  SEQUENCE_SPEED_DEFAULT,
   SEQUENCE_START_DEFAULT,
   SEQUENCE_STOP_DEFAULT,
-  TYPE_BEAT_DEFAULT,
   TYPE_PAGE_MAX,
-  type TypeBeat,
   type TypePage,
 } from "./typePages";
 
@@ -64,8 +64,12 @@ export interface TypeState {
   pages: TypePage[];
   /** Which frame the Type inspector is editing. */
   selected: number;
-  /** Relative duration of each State inside Start→Stop. 1× / 2× / 3×. */
-  pageBeats: TypeBeat[];
+  /** Per-frame Hold on/off. Final frame is ignored by the resolver but stored so reorder can restore it. */
+  frameHoldEnabled: boolean[];
+  /** Relative beat length while Hold is On. 1.0–3.0, default 2.0. Irrelevant while Off. */
+  frameHoldLength: number[];
+  /** Cadence of Type sequence cuts while typography is present. 0–100, default 50. */
+  sequenceSpeed: number;
   /** Master phase where Type appears. */
   sequenceStart: number;
   /** Master phase where Type disappears. */
@@ -378,7 +382,9 @@ export function defaultTypeState(): TypeState {
     activeIndex: 0,
     pages: [cloneTypePage(blocks)],
     selected: 0,
-    pageBeats: [TYPE_BEAT_DEFAULT],
+    frameHoldEnabled: [false],
+    frameHoldLength: [FRAME_HOLD_LENGTH_DEFAULT],
+    sequenceSpeed: SEQUENCE_SPEED_DEFAULT,
     sequenceStart: SEQUENCE_START_DEFAULT,
     sequenceStop: SEQUENCE_STOP_DEFAULT,
   };
@@ -482,7 +488,20 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   let selected = typeof rec.selected === "number" && Number.isFinite(rec.selected) ? Math.round(rec.selected) : 0;
   selected = Math.min(pages.length - 1, Math.max(0, selected));
 
-  let pageBeats = migratePageBeats(rec, pages.length);
+  const fromBeats = migrateHoldsFromBeats(rec, pages.length);
+  const legacyHolds = Array.isArray(rec.frameHolds) ? rec.frameHolds.map((h) => h === true) : [];
+  const enabledRaw = Array.isArray(rec.frameHoldEnabled)
+    ? rec.frameHoldEnabled.map((h) => h === true)
+    : fromBeats
+      ? fromBeats.enabled
+      : legacyHolds;
+  let frameHoldEnabled = cloneFrameHoldEnabled(enabledRaw, pages.length);
+  const lengthRaw = Array.isArray(rec.frameHoldLength)
+    ? rec.frameHoldLength
+    : fromBeats
+      ? fromBeats.length
+      : legacyHolds.map(() => FRAME_HOLD_LENGTH_DEFAULT);
+  let frameHoldLength = cloneFrameHoldLength(lengthRaw, pages.length);
 
   if (rec.typePage === "add" && pages.length < TYPE_PAGE_MAX) {
     const copy = cloneTypePage(pages[selected]!);
@@ -491,11 +510,17 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       copy,
       ...pages.slice(selected + 1).map(cloneTypePage),
     ];
-    pageBeats = [...pageBeats.slice(0, selected + 1), TYPE_BEAT_DEFAULT, ...pageBeats.slice(selected + 1)];
+    frameHoldEnabled = [...frameHoldEnabled.slice(0, selected + 1), false, ...frameHoldEnabled.slice(selected + 1)];
+    frameHoldLength = [
+      ...frameHoldLength.slice(0, selected + 1),
+      FRAME_HOLD_LENGTH_DEFAULT,
+      ...frameHoldLength.slice(selected + 1),
+    ];
     selected = selected + 1;
   } else if (rec.typePage === "remove" && pages.length > 1 && selected > 0) {
     pages = pages.filter((_, i) => i !== selected).map(cloneTypePage);
-    pageBeats = pageBeats.filter((_, i) => i !== selected);
+    frameHoldEnabled = frameHoldEnabled.filter((_, i) => i !== selected);
+    frameHoldLength = frameHoldLength.filter((_, i) => i !== selected);
     selected = Math.min(selected, pages.length - 1);
   }
 
@@ -515,22 +540,31 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       const next = pages.map(cloneTypePage);
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item!);
-      const nextBeats = pageBeats.slice();
-      const [movedBeat] = nextBeats.splice(from, 1);
-      nextBeats.splice(to, 0, clampBeat(movedBeat));
+      const nextOn = frameHoldEnabled.slice();
+      const [on] = nextOn.splice(from, 1);
+      nextOn.splice(to, 0, on === true);
+      const nextLen = frameHoldLength.slice();
+      const [len] = nextLen.splice(from, 1);
+      nextLen.splice(to, 0, clampHoldLength(len));
       if (selected === from) selected = to;
       else if (from < selected && to >= selected) selected -= 1;
       else if (from > selected && to <= selected) selected += 1;
       pages = next;
-      pageBeats = nextBeats;
+      frameHoldEnabled = nextOn;
+      frameHoldLength = nextLen;
     }
   }
 
-  pageBeats = clonePageBeats(pageBeats, pages.length);
-  if (rec.beat !== undefined && rec.beat !== null && pages.length > 1) {
-    pageBeats[selected] = clampBeat(rec.beat);
+  frameHoldEnabled = cloneFrameHoldEnabled(frameHoldEnabled, pages.length);
+  frameHoldLength = cloneFrameHoldLength(frameHoldLength, pages.length);
+  if (rec.frameHold === true || rec.frameHold === false) {
+    if (selected < pages.length - 1) frameHoldEnabled[selected] = rec.frameHold;
   }
-  pageBeats = clonePageBeats(pageBeats, pages.length);
+  if (typeof rec.holdLength === "number") {
+    if (selected < pages.length - 1) frameHoldLength[selected] = clampHoldLength(rec.holdLength);
+  }
+  frameHoldEnabled = cloneFrameHoldEnabled(frameHoldEnabled, pages.length);
+  frameHoldLength = cloneFrameHoldLength(frameHoldLength, pages.length);
 
   blocks = cloneTypePage(pages[selected]!);
   const blockPatch = pickBlockPatch(rec);
@@ -547,26 +581,39 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     activeIndex,
     pages,
     selected,
-    pageBeats,
+    frameHoldEnabled,
+    frameHoldLength,
+    sequenceSpeed: rec.sequenceSpeed === undefined || rec.sequenceSpeed === null
+      ? SEQUENCE_SPEED_DEFAULT
+      : num(rec.sequenceSpeed, 0, 100, SEQUENCE_SPEED_DEFAULT),
     sequenceStart: win.start,
     sequenceStop: win.stop,
   };
 }
 
-function migratePageBeats(rec: Record<string, unknown>, count: number): TypeBeat[] {
-  if (Array.isArray(rec.pageBeats) && rec.pageBeats.length > 0) {
-    return clonePageBeats(rec.pageBeats, count);
-  }
-  const legacyHolds = Array.isArray(rec.frameHolds) ? rec.frameHolds.map((h) => h === true) : [];
-  const enabledRaw = Array.isArray(rec.frameHoldEnabled)
-    ? rec.frameHoldEnabled.map((h) => h === true)
-    : legacyHolds;
-  const lengthRaw = Array.isArray(rec.frameHoldLength) ? rec.frameHoldLength : [];
-  const out: TypeBeat[] = [];
+/** Review-branch Beat → Hold. 1× Off, 2× On/2.0, 3× On/3.0. */
+function migrateHoldsFromBeats(
+  rec: Record<string, unknown>,
+  count: number,
+): { enabled: boolean[]; length: number[] } | null {
+  if (Array.isArray(rec.frameHoldEnabled) || Array.isArray(rec.frameHolds)) return null;
+  if (!Array.isArray(rec.pageBeats) || rec.pageBeats.length === 0) return null;
+  const enabled: boolean[] = [];
+  const length: number[] = [];
   for (let i = 0; i < count; i++) {
-    out.push(migrateLegacyBeat(enabledRaw[i], lengthRaw[i]));
+    const n = Math.round(Number(rec.pageBeats[i]));
+    if (n === 3) {
+      enabled.push(true);
+      length.push(3);
+    } else if (n === 2) {
+      enabled.push(true);
+      length.push(2);
+    } else {
+      enabled.push(false);
+      length.push(FRAME_HOLD_LENGTH_DEFAULT);
+    }
   }
-  return out;
+  return { enabled, length };
 }
 
 export function activeTypeBlocks(state: TypeState): { index: TypeSlot; block: TypeBlock }[] {
@@ -594,7 +641,11 @@ export function cloneTypeState(state: TypeState): TypeState {
     activeIndex: state.activeIndex === 2 ? 2 : state.activeIndex === 1 ? 1 : 0,
     pages,
     selected,
-    pageBeats: clonePageBeats(state.pageBeats, pages.length),
+    frameHoldEnabled: cloneFrameHoldEnabled(state.frameHoldEnabled, pages.length),
+    frameHoldLength: cloneFrameHoldLength(state.frameHoldLength, pages.length),
+    sequenceSpeed: typeof state.sequenceSpeed === "number" && Number.isFinite(state.sequenceSpeed)
+      ? Math.min(100, Math.max(0, state.sequenceSpeed))
+      : SEQUENCE_SPEED_DEFAULT,
     sequenceStart: win.start,
     sequenceStop: win.stop,
     blocks: cloneTypePage(pages[selected]!),

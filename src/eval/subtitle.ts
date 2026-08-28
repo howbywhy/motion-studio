@@ -14,7 +14,7 @@ import {
   type TypeBlock,
   type TypeState,
 } from "../core/typeState";
-import { typePageBeatLocal, typePageCuts, typeStateAtPhase, type TypeBeat } from "../core/typePages";
+import { typePageBeatLocal, typePageCuts, typeStateAtPhase } from "../core/typePages";
 import { applySubtitleCues, parseSubtitleCues, subtitleCueIndex } from "../core/typeSubtitle";
 import { generateRandomisation } from "../core/randomise";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
@@ -66,7 +66,9 @@ function campaign(): TypeState {
     enabled: true,
     sequenceStart: 0.15,
     sequenceStop: 0.78,
-    pageBeats: [1, 1, 3, 1],
+    sequenceSpeed: 50,
+    frameHoldEnabled: [false, false, true, false],
+    frameHoldLength: [2, 2, 3, 2],
     pages: [
       [
         { enabled: true, text: "MADE BY", composition: "headline", scale: 86, anchor: "mc", color: "#f3efe6" },
@@ -158,8 +160,8 @@ export interface SubtitleReport {
   backwardScrub: boolean;
   holdExportIdentical: boolean;
   perStateRestart: boolean;
-  beatAffectsWindow: boolean;
-  cuesDivideByBeat: boolean;
+  frameHoldAffectsWindow: boolean;
+  cuesDivideByHold: boolean;
   defaultScaleUseful: boolean;
   bottomSafe: boolean;
   hierarchyBelowHeadline: boolean;
@@ -303,7 +305,9 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     enabled: true,
     sequenceStart: 0.2,
     sequenceStop: 0.8,
-    pageBeats: [3, 1],
+    sequenceSpeed: 50,
+    frameHoldEnabled: [true, false],
+    frameHoldLength: [3, 2],
     pages: [
       [
         { enabled: true, text: "HOLD", composition: "headline", scale: 70, anchor: "tc", color: "#f3efe6" },
@@ -317,15 +321,17 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
       ],
     ],
   });
-  const unheld = clampTypeState({ ...held, pageBeats: [1, 1] });
-  const beatAffectsWindow = typePageBeatLocal(held, 0.35) !== typePageBeatLocal(unheld, 0.35);
+  const unheld = clampTypeState({ ...held, frameHoldEnabled: [false, false] });
+  const frameHoldAffectsWindow = typePageBeatLocal(held, 0.35) !== typePageBeatLocal(unheld, 0.35);
 
-  function beatCueState(nCues: number, beat: TypeBeat): TypeState {
+  function holdCueState(nCues: number, holdOn: boolean, holdLength: number): TypeState {
     return clampTypeState({
       enabled: true,
       sequenceStart: 0.2,
       sequenceStop: 0.8,
-      pageBeats: [beat, 1],
+      sequenceSpeed: 50,
+      frameHoldEnabled: [holdOn, false],
+      frameHoldLength: [holdLength, 2],
       pages: [
         [
           { enabled: true, text: "PAGE", composition: "headline", scale: 70, anchor: "tc", color: "#f3efe6" },
@@ -340,10 +346,17 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
       ],
     });
   }
-  function cuesDivideEven(nCues: number, beat: TypeBeat): boolean {
-    const state = beatCueState(nCues, beat);
+  function cuesDivideEven(nCues: number, holdOn: boolean, holdLength: number): boolean {
+    const state = holdCueState(nCues, holdOn, holdLength);
     const start = state.sequenceStart;
-    const cut = typePageCuts(2, start, state.sequenceStop, state.pageBeats)[0] ?? state.sequenceStop;
+    const cut = typePageCuts(
+      2,
+      state.sequenceSpeed,
+      start,
+      state.sequenceStop,
+      state.frameHoldEnabled,
+      state.frameHoldLength,
+    )[0] ?? state.sequenceStop;
     const span = cut - start;
     if (!(span > 0)) return false;
     for (let i = 0; i < nCues; i++) {
@@ -352,23 +365,36 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     }
     return true;
   }
-  const beatGrid = document.createElement("div");
-  beatGrid.className = "grid";
-  const hBeat = document.createElement("h2");
-  hBeat.textContent = "Cues × Beat — even split inside the State";
-  root.appendChild(hBeat);
-  root.appendChild(beatGrid);
-  let cuesDivideByBeat = true;
-  for (const beat of [1, 2, 3] as TypeBeat[]) {
+  const holdGrid = document.createElement("div");
+  holdGrid.className = "grid";
+  const hHold = document.createElement("h2");
+  hHold.textContent = "Cues × Hold — even split inside the State";
+  root.appendChild(hHold);
+  root.appendChild(holdGrid);
+  let cuesDivideByHold = true;
+  const holdCases: { on: boolean; len: number; label: string }[] = [
+    { on: false, len: 2, label: "Off" },
+    { on: true, len: 2, label: "2.0×" },
+    { on: true, len: 3, label: "3.0×" },
+  ];
+  for (const hold of holdCases) {
     for (const n of [1, 2, 3, 6]) {
-      const ok = cuesDivideEven(n, beat);
-      cuesDivideByBeat = cuesDivideByBeat && ok;
-      const state = beatCueState(n, beat);
+      const ok = cuesDivideEven(n, hold.on, hold.len);
+      cuesDivideByHold = cuesDivideByHold && ok;
+      const state = holdCueState(n, hold.on, hold.len);
       const start = state.sequenceStart;
-      const cut = typePageCuts(2, start, state.sequenceStop, state.pageBeats)[0]!;
+      const cut = typePageCuts(
+        2,
+        state.sequenceSpeed,
+        start,
+        state.sequenceStop,
+        state.frameHoldEnabled,
+        state.frameHoldLength,
+      )[0]!;
       renderer.setTypeState(state);
+      renderer.setClockMode("hold");
       renderer.setHoldPhase(start + (cut - start) * 0.5);
-      cell(beatGrid, `${n} cues · Beat ${beat}× · ${ok ? "ok" : "FAIL"}`, settle(renderer));
+      cell(holdGrid, `${n} cues · Hold ${hold.label} · ${ok ? "ok" : "FAIL"}`, settle(renderer));
     }
   }
 
@@ -521,7 +547,7 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
   const creative = document.createElement("div");
   creative.className = "grid";
   const hC = document.createElement("h2");
-  hC.textContent = "Creative — 12s 9:16 · Pulse 42–58 2× · Registration 60 · Start 15 / Stop 78 · Beat 1 / 1 / 3 / 1";
+  hC.textContent = "Creative — 12s 9:16 · Pulse 42–58 2× · Registration 60 · Start 15 / Stop 78 · Hold 03 3.0×";
   root.appendChild(hC);
   root.appendChild(creative);
   renderer.setTypeState(piece);
@@ -567,8 +593,8 @@ export async function runSubtitleSheet(root: HTMLElement): Promise<SubtitleRepor
     backwardScrub,
     holdExportIdentical,
     perStateRestart,
-    beatAffectsWindow,
-    cuesDivideByBeat: cuesDivideByBeat && sentenceReadable,
+    frameHoldAffectsWindow,
+    cuesDivideByHold: cuesDivideByHold && sentenceReadable,
     defaultScaleUseful,
     bottomSafe,
     hierarchyBelowHeadline,

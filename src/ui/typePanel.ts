@@ -19,9 +19,13 @@ import {
 } from "../core/typeState";
 import { TYPE_SLOT_LABELS } from "../core/typeSubtitle";
 import {
+  clampHoldLength,
+  FRAME_HOLD_LENGTH_DEFAULT,
+  FRAME_HOLD_LENGTH_MAX,
+  FRAME_HOLD_LENGTH_MIN,
+  FRAME_HOLD_LENGTH_STEP,
   SEQUENCE_WINDOW_MIN,
   TYPE_PAGE_MAX,
-  type TypeBeat,
 } from "../core/typePages";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
@@ -90,7 +94,7 @@ function slider(
   input.value = String(value);
   input.addEventListener("input", () => {
     const v = parseFloat(input.value);
-    valueEl.textContent = `${Number(v.toFixed(step < 1 ? 2 : 0))}`;
+    valueEl.textContent = `${Number(v.toFixed(step < 1 ? 2 : 0))}${label === "Hold Length" ? "×" : ""}`;
     onInput(v);
   });
   const inputRow = document.createElement("div");
@@ -682,7 +686,8 @@ export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
   blockEnabled?: boolean;
   typePage?: "add" | "remove";
   typePageMove?: { from: number; to: number };
-  beat?: TypeBeat;
+  frameHold?: boolean;
+  holdLength?: number;
 };
 
 export function buildTypePanel(
@@ -802,24 +807,37 @@ export function buildTypePanel(
   }
   paintStates();
 
-  const beatRow = document.createElement("div");
-  beatRow.className = "control-row type-beat";
-  const beatLab = document.createElement("label");
-  beatLab.textContent = "Beat";
-  beatRow.appendChild(beatLab);
-  const beatSeg = document.createElement("div");
-  beatSeg.className = "seg-toggle";
-  const beatBtns: { value: TypeBeat; el: HTMLButtonElement }[] = [];
-  for (const value of [1, 2, 3] as const) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = `${value}×`;
-    btn.addEventListener("click", () => onChange({ beat: value }));
-    beatSeg.appendChild(btn);
-    beatBtns.push({ value, el: btn });
-  }
-  beatRow.appendChild(beatSeg);
-  statesHost.appendChild(beatRow);
+  const holdRow = document.createElement("div");
+  holdRow.className = "control-row type-frame-hold";
+  const holdLab = document.createElement("label");
+  holdLab.textContent = "Frame Hold";
+  holdRow.appendChild(holdLab);
+  const holdSeg = document.createElement("div");
+  holdSeg.className = "seg-toggle";
+  const holdOff = document.createElement("button");
+  holdOff.type = "button";
+  holdOff.textContent = "Off";
+  const holdOn = document.createElement("button");
+  holdOn.type = "button";
+  holdOn.textContent = "On";
+  holdSeg.appendChild(holdOff);
+  holdSeg.appendChild(holdOn);
+  holdRow.appendChild(holdSeg);
+  statesHost.appendChild(holdRow);
+  holdOff.addEventListener("click", () => onChange({ frameHold: false }));
+  holdOn.addEventListener("click", () => onChange({ frameHold: true }));
+
+  const holdLen = slider(
+    statesHost,
+    "Hold Length",
+    FRAME_HOLD_LENGTH_MIN,
+    FRAME_HOLD_LENGTH_MAX,
+    FRAME_HOLD_LENGTH_STEP,
+    FRAME_HOLD_LENGTH_DEFAULT,
+    (v) => onChange({ holdLength: v }),
+  );
+  holdLen.row.classList.add("type-hold-length");
+  holdLen.input.title = "Relative sequence time for this frame. 1.0× — 3.0×.";
 
   const windowUi = buildSequenceWindow(
     statesHost,
@@ -828,13 +846,28 @@ export function buildTypePanel(
     (start, stop) => onChange({ sequenceStart: start, sequenceStop: stop }),
   );
 
+  const speed = slider(statesHost, "Speed", 0, 100, 1, state.sequenceSpeed, (v) => {
+    onChange({ sequenceSpeed: v });
+  });
+  speed.row.classList.add("type-sequence-speed");
+  speed.input.title = "Slow — Fast. Progression of Type sequence cuts while typography is present.";
+
   function paintTiming(): void {
     const n = state.pages.length;
-    beatRow.hidden = n <= 1;
-    const current = n <= 1 ? 1 : (state.pageBeats[state.selected] ?? 1);
-    for (const btn of beatBtns) btn.el.classList.toggle("active", btn.value === current);
+    const canHold = n > 1 && state.selected < n - 1;
+    const held = canHold && state.frameHoldEnabled[state.selected] === true;
+    const len = clampHoldLength(state.frameHoldLength[state.selected]);
+    holdRow.hidden = !canHold;
+    holdOff.classList.toggle("active", canHold && !held);
+    holdOn.classList.toggle("active", held);
+    holdLen.row.hidden = !held;
+    holdLen.input.value = String(len);
+    holdLen.valueEl.textContent = `${len % 1 === 0 ? len.toFixed(1) : len.toFixed(2)}×`;
     windowUi.row.hidden = false;
+    speed.row.hidden = n <= 1;
     windowUi.set(state.sequenceStart, state.sequenceStop);
+    speed.input.value = String(Math.round(state.sequenceSpeed));
+    speed.valueEl.textContent = String(Math.round(state.sequenceSpeed));
   }
   paintTiming();
 
