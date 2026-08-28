@@ -16,6 +16,7 @@ import {
   type TypeStyle,
   type TypeTextAlign,
 } from "../core/typeState";
+import { SEQUENCE_WINDOW_MIN } from "../core/typePages";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
   normal: "Normal",
@@ -93,6 +94,125 @@ function slider(
   row.appendChild(inputRow);
   parent.appendChild(row);
   return { row, input, valueEl };
+}
+
+function pct(v: number): string {
+  return String(Math.round(v * 100));
+}
+
+function buildSequenceWindow(
+  parent: HTMLElement,
+  start: number,
+  stop: number,
+  onChange: (start: number, stop: number) => void,
+): { row: HTMLDivElement; set: (start: number, stop: number) => void } {
+  const row = document.createElement("div");
+  row.className = "control-row type-sequence-window";
+  const lab = document.createElement("label");
+  lab.textContent = "Sequence";
+  row.appendChild(lab);
+
+  const legend = document.createElement("div");
+  legend.className = "type-seq-legend";
+  const startLab = document.createElement("span");
+  const stopLab = document.createElement("span");
+  legend.appendChild(startLab);
+  legend.appendChild(stopLab);
+  row.appendChild(legend);
+
+  const rail = document.createElement("div");
+  rail.className = "type-seq-rail";
+  rail.setAttribute("role", "group");
+  rail.setAttribute("aria-label", "Sequence window");
+  const track = document.createElement("div");
+  track.className = "type-seq-track";
+  const span = document.createElement("div");
+  span.className = "type-seq-span";
+  const startHandle = document.createElement("button");
+  startHandle.type = "button";
+  startHandle.className = "type-seq-handle";
+  startHandle.setAttribute("aria-label", "Start");
+  const stopHandle = document.createElement("button");
+  stopHandle.type = "button";
+  stopHandle.className = "type-seq-handle";
+  stopHandle.setAttribute("aria-label", "Stop");
+  rail.appendChild(track);
+  rail.appendChild(span);
+  rail.appendChild(startHandle);
+  rail.appendChild(stopHandle);
+  row.appendChild(rail);
+  parent.appendChild(row);
+
+  let curStart = start;
+  let curStop = stop;
+
+  function paint(): void {
+    startLab.textContent = `Start ${pct(curStart)}`;
+    stopLab.textContent = `Stop ${pct(curStop)}`;
+    span.style.left = `${curStart * 100}%`;
+    span.style.width = `${(curStop - curStart) * 100}%`;
+    startHandle.style.left = `${curStart * 100}%`;
+    stopHandle.style.left = `${curStop * 100}%`;
+  }
+  paint();
+
+  function fracFromX(clientX: number): number {
+    const r = rail.getBoundingClientRect();
+    const w = Math.max(1, r.width);
+    return Math.min(1, Math.max(0, (clientX - r.left) / w));
+  }
+
+  function apply(nextStart: number, nextStop: number, emit: boolean): void {
+    const min = SEQUENCE_WINDOW_MIN;
+    curStart = Math.min(1 - min, Math.max(0, nextStart));
+    curStop = Math.min(1, Math.max(curStart + min, nextStop));
+    if (curStop > 1) {
+      curStop = 1;
+      curStart = Math.min(curStart, 1 - min);
+    }
+    paint();
+    if (emit) onChange(curStart, curStop);
+  }
+
+  function attachDrag(handle: HTMLButtonElement, which: "start" | "stop"): void {
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const move = (ev: PointerEvent) => {
+        const f = fracFromX(ev.clientX);
+        if (which === "start") apply(Math.min(f, curStop - SEQUENCE_WINDOW_MIN), curStop, true);
+        else apply(curStart, Math.max(f, curStart + SEQUENCE_WINDOW_MIN), true);
+      };
+      const up = (ev: PointerEvent) => {
+        handle.releasePointerCapture(ev.pointerId);
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+        handle.removeEventListener("pointercancel", up);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+      handle.addEventListener("pointercancel", up);
+      move(e);
+    });
+  }
+  attachDrag(startHandle, "start");
+  attachDrag(stopHandle, "stop");
+
+  rail.addEventListener("pointerdown", (e) => {
+    if (e.target !== rail && e.target !== track && e.target !== span) return;
+    const f = fracFromX(e.clientX);
+    const toStart = Math.abs(f - curStart);
+    const toStop = Math.abs(f - curStop);
+    if (toStart <= toStop) apply(Math.min(f, curStop - SEQUENCE_WINDOW_MIN), curStop, true);
+    else apply(curStart, Math.max(f, curStart + SEQUENCE_WINDOW_MIN), true);
+  });
+
+  return {
+    row,
+    set(nextStart: number, nextStop: number) {
+      apply(nextStart, nextStop, false);
+    },
+  };
 }
 
 function nearestAnchor(nx: number, ny: number): TypeAnchor {
@@ -668,19 +788,28 @@ export function buildTypePanel(
   }
   paintStates();
 
-  const speed = slider(statesHost, "Sequence Speed", 0, 100, 1, state.sequenceSpeed, (v) => {
+  const windowUi = buildSequenceWindow(
+    statesHost,
+    state.sequenceStart,
+    state.sequenceStop,
+    (start, stop) => onChange({ sequenceStart: start, sequenceStop: stop }),
+  );
+
+  const speed = slider(statesHost, "Speed", 0, 100, 1, state.sequenceSpeed, (v) => {
     onChange({ sequenceSpeed: v });
   });
   speed.row.classList.add("type-sequence-speed");
-  speed.input.title = "Slow — Fast. Cadence of Type State cuts inside the master loop.";
+  speed.input.title = "Slow — Fast. Progression of Type State cuts inside the sequence window.";
 
-  function paintSpeed(): void {
+  function paintTiming(): void {
     const n = state.pages.length;
+    windowUi.row.hidden = n <= 1;
     speed.row.hidden = n <= 1;
+    windowUi.set(state.sequenceStart, state.sequenceStop);
     speed.input.value = String(Math.round(state.sequenceSpeed));
     speed.valueEl.textContent = String(Math.round(state.sequenceSpeed));
   }
-  paintSpeed();
+  paintTiming();
 
   const applyExpanded = (): void => {
     block0.setExpanded(expanded === 0);
@@ -708,7 +837,7 @@ export function buildTypePanel(
       toggle.textContent = state.enabled ? "On" : "Off";
       container.classList.toggle("type-disabled", !state.enabled);
       paintStates();
-      paintSpeed();
+      paintTiming();
       block0.sync(state.blocks[0]);
       block1.sync(state.blocks[1]);
     },

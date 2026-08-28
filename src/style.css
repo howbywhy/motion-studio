@@ -688,8 +688,68 @@ body {
 }
 
 .type-sequence-speed {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.type-sequence-window {
   margin-top: 8px;
   margin-bottom: 0;
+}
+
+.type-seq-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.type-seq-rail {
+  position: relative;
+  height: 22px;
+  margin: 0 7px;
+  cursor: pointer;
+}
+
+.type-seq-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: var(--panel-border);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.type-seq-span {
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  background: var(--text);
+  opacity: 0.45;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.type-seq-handle {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--text);
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+  z-index: 1;
+}
+
+.type-seq-handle[aria-label="Stop"] {
+  z-index: 2;
 }
 
 .type-panel .type-seg button {

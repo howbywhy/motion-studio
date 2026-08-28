@@ -1,4 +1,12 @@
-import { cloneTypePage, SEQUENCE_SPEED_DEFAULT, TYPE_PAGE_MAX, type TypePage } from "./typePages";
+import {
+  clampSequenceWindow,
+  cloneTypePage,
+  SEQUENCE_SPEED_DEFAULT,
+  SEQUENCE_START_DEFAULT,
+  SEQUENCE_STOP_DEFAULT,
+  TYPE_PAGE_MAX,
+  type TypePage,
+} from "./typePages";
 
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
@@ -51,8 +59,12 @@ export interface TypeState {
   pages: [TypeBlock, TypeBlock][];
   /** Which page the Type inspector is editing. */
   selected: number;
-  /** Cadence of Type State cuts inside the master loop. 0–100, default 50. */
+  /** Cadence of Type State cuts inside the sequence window. 0–100, default 50. */
   sequenceSpeed: number;
+  /** Master phase where the Type sequence begins. Before this, page 01 holds. */
+  sequenceStart: number;
+  /** Master phase where the Type sequence completes. After this, the final page holds. */
+  sequenceStop: number;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -321,6 +333,8 @@ export function defaultTypeState(): TypeState {
     pages: [cloneTypePage(blocks)],
     selected: 0,
     sequenceSpeed: SEQUENCE_SPEED_DEFAULT,
+    sequenceStart: SEQUENCE_START_DEFAULT,
+    sequenceStop: SEQUENCE_STOP_DEFAULT,
   };
 }
 
@@ -464,6 +478,7 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     pages[selected] = cloneTypePage(blocks);
   }
 
+  const win = clampSequenceWindow(rec.sequenceStart, rec.sequenceStop);
   return {
     enabled: rec.enabled === true,
     blocks,
@@ -473,6 +488,8 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     sequenceSpeed: rec.sequenceSpeed === undefined || rec.sequenceSpeed === null
       ? SEQUENCE_SPEED_DEFAULT
       : num(rec.sequenceSpeed, 0, 100, SEQUENCE_SPEED_DEFAULT),
+    sequenceStart: win.start,
+    sequenceStop: win.stop,
   };
 }
 
@@ -493,6 +510,7 @@ export function patchTypeState(current: TypeState, patch: Partial<TypeState> & P
 export function cloneTypeState(state: TypeState): TypeState {
   const pages = (state.pages ?? [state.blocks]).map(cloneTypePage);
   const selected = Math.min(pages.length - 1, Math.max(0, state.selected ?? 0));
+  const win = clampSequenceWindow(state.sequenceStart, state.sequenceStop);
   return {
     enabled: state.enabled,
     activeIndex: state.activeIndex,
@@ -501,6 +519,8 @@ export function cloneTypeState(state: TypeState): TypeState {
     sequenceSpeed: typeof state.sequenceSpeed === "number" && Number.isFinite(state.sequenceSpeed)
       ? Math.min(100, Math.max(0, state.sequenceSpeed))
       : SEQUENCE_SPEED_DEFAULT,
+    sequenceStart: win.start,
+    sequenceStop: win.stop,
     blocks: cloneTypePage(pages[selected]!),
   };
 }
