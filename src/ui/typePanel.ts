@@ -16,7 +16,7 @@ import {
   type TypeStyle,
   type TypeTextAlign,
 } from "../core/typeState";
-import { SEQUENCE_WINDOW_MIN } from "../core/typePages";
+import { SEQUENCE_WINDOW_MIN, TYPE_PAGE_MAX } from "../core/typePages";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
   normal: "Normal",
@@ -669,6 +669,7 @@ export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
   blockEnabled?: boolean;
   typePage?: "add" | "remove";
   typePageMove?: { from: number; to: number };
+  frameHold?: boolean;
 };
 
 export function buildTypePanel(
@@ -766,13 +767,13 @@ export function buildTypePanel(
       });
       row.appendChild(btn);
     }
-    if (n < 3) {
+    if (n < TYPE_PAGE_MAX) {
       const add = document.createElement("button");
       add.type = "button";
       add.className = "type-state-add";
       add.draggable = false;
       add.textContent = "+";
-      add.title = "Duplicate current state";
+      add.title = "Duplicate current frame";
       add.addEventListener("click", () => onChange({ typePage: "add" }));
       row.appendChild(add);
     }
@@ -788,6 +789,26 @@ export function buildTypePanel(
   }
   paintStates();
 
+  const holdRow = document.createElement("div");
+  holdRow.className = "control-row type-frame-hold";
+  const holdLab = document.createElement("label");
+  holdLab.textContent = "Frame Hold";
+  holdRow.appendChild(holdLab);
+  const holdSeg = document.createElement("div");
+  holdSeg.className = "seg-toggle";
+  const holdOff = document.createElement("button");
+  holdOff.type = "button";
+  holdOff.textContent = "Off";
+  const holdOn = document.createElement("button");
+  holdOn.type = "button";
+  holdOn.textContent = "On";
+  holdSeg.appendChild(holdOff);
+  holdSeg.appendChild(holdOn);
+  holdRow.appendChild(holdSeg);
+  statesHost.appendChild(holdRow);
+  holdOff.addEventListener("click", () => onChange({ frameHold: false }));
+  holdOn.addEventListener("click", () => onChange({ frameHold: true }));
+
   const windowUi = buildSequenceWindow(
     statesHost,
     state.sequenceStart,
@@ -799,10 +820,15 @@ export function buildTypePanel(
     onChange({ sequenceSpeed: v });
   });
   speed.row.classList.add("type-sequence-speed");
-  speed.input.title = "Slow — Fast. Progression of Type State cuts while typography is present.";
+  speed.input.title = "Slow — Fast. Progression of Type sequence cuts while typography is present.";
 
   function paintTiming(): void {
     const n = state.pages.length;
+    const canHold = n > 1 && state.selected < n - 1;
+    holdRow.hidden = !canHold;
+    const held = canHold && state.frameHolds[state.selected] === true;
+    holdOff.classList.toggle("active", canHold && !held);
+    holdOn.classList.toggle("active", held);
     windowUi.row.hidden = false;
     speed.row.hidden = n <= 1;
     windowUi.set(state.sequenceStart, state.sequenceStop);

@@ -1,11 +1,15 @@
 import type { TypeBlock, TypeState } from "./typeState";
 
-export const TYPE_PAGE_MAX = 3;
+export const TYPE_PAGE_MAX = 6;
 export const SEQUENCE_SPEED_DEFAULT = 50;
 /** Default Type presence occupies 20–70 of the master phase. */
 export const SEQUENCE_START_DEFAULT = 0.2;
 export const SEQUENCE_STOP_DEFAULT = 0.7;
 export const SEQUENCE_WINDOW_MIN = 0.1;
+/** Minimum local share of the presence window for one beat. Not exposed. */
+export const SEQUENCE_MIN_BEAT_LOCAL = 0.10;
+/** Minimum local remainder for the final frame before Stop. */
+export const SEQUENCE_MIN_FINAL_LOCAL = 0.08;
 
 export type TypePage = [TypeBlock, TypeBlock];
 
@@ -16,6 +20,13 @@ export function cloneTypePage(page: TypePage): TypePage {
 export function typePageCount(state: TypeState): number {
   const n = Array.isArray(state.pages) ? state.pages.length : 1;
   return Math.min(TYPE_PAGE_MAX, Math.max(1, n));
+}
+
+export function cloneFrameHolds(holds: boolean[] | undefined, count: number): boolean[] {
+  const n = Math.min(TYPE_PAGE_MAX, Math.max(1, count));
+  const out: boolean[] = [];
+  for (let i = 0; i < n; i++) out.push(i < n - 1 && Array.isArray(holds) ? holds[i] === true : false);
+  return out;
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -103,6 +114,38 @@ function sequenceDone(speed: number): number {
   return mapSequenceSpeed(speed, 0.9, 0.6, 0.3);
 }
 
+/** Beat weights for pre-final frames. Final frame is always 1 and is not in this list. */
+export function preFinalBeatWeights(count: number, holds?: boolean[]): number[] {
+  const n = Math.min(TYPE_PAGE_MAX, Math.max(1, Math.round(count)));
+  if (n <= 1) return [];
+  const w: number[] = [];
+  for (let i = 0; i < n - 1; i++) w.push(holds?.[i] === true ? 2 : 1);
+  return w;
+}
+
+/**
+ * Local phase at which the final frame is reached.
+ * Extra Frame Hold beats extend into the residual after Speed's `done`.
+ * A hidden floor keeps six-frame sequences from flashing.
+ */
+export function sequenceLastCutLocal(
+  count: number,
+  speed: number = SEQUENCE_SPEED_DEFAULT,
+  holds?: boolean[],
+): number {
+  const n = Math.min(TYPE_PAGE_MAX, Math.max(1, Math.round(count)));
+  if (n <= 1) return 1;
+  const weights = preFinalBeatWeights(n, holds);
+  const nPre = weights.length;
+  let W = 0;
+  for (const b of weights) W += b;
+  const extra = W - nPre;
+  const base = sequenceDone(speed);
+  let last = base + (1 - base) * (extra / (extra + 1));
+  last = Math.max(last, W * SEQUENCE_MIN_BEAT_LOCAL);
+  return Math.min(1 - SEQUENCE_MIN_FINAL_LOCAL, Math.max(SEQUENCE_MIN_BEAT_LOCAL, last));
+}
+
 /**
  * Absolute master-phase cuts inside the presence window.
  * Last cut is when the final page is reached — at or before Stop.
@@ -112,34 +155,45 @@ export function typePageCuts(
   speed: number = SEQUENCE_SPEED_DEFAULT,
   start: number = SEQUENCE_START_DEFAULT,
   stop: number = SEQUENCE_STOP_DEFAULT,
+  holds?: boolean[],
 ): number[] {
   const n = Math.min(TYPE_PAGE_MAX, Math.max(1, Math.round(count)));
   if (n <= 1) return [];
   const win = clampSequenceWindow(start, stop);
   const span = win.stop - win.start;
-  const done = sequenceDone(speed);
+  const weights = preFinalBeatWeights(n, holds);
+  let W = 0;
+  for (const b of weights) W += b;
+  const last = sequenceLastCutLocal(n, speed, holds);
   const cuts: number[] = [];
-  for (let i = 1; i <= n - 1; i++) {
-    const local = done * (i / (n - 1));
-    cuts.push(win.start + span * local);
+  let cum = 0;
+  for (const b of weights) {
+    cum += b;
+    cuts.push(win.start + span * last * (cum / W));
   }
   return cuts;
 }
 
-/** Hard cuts from local phase + Speed. Meaningful while Type is present. */
+/** Hard cuts from local phase + Speed + Frame Hold. Meaningful while Type is present. */
 export function typePageIndexAtPhase(
   phase: number,
   count: number,
   speed: number = SEQUENCE_SPEED_DEFAULT,
   start: number = SEQUENCE_START_DEFAULT,
   stop: number = SEQUENCE_STOP_DEFAULT,
+  holds?: boolean[],
 ): number {
   const n = Math.min(TYPE_PAGE_MAX, Math.max(1, Math.round(count)));
   if (n <= 1) return 0;
   const local = typeLocalPhase(phase, start, stop);
-  const done = sequenceDone(speed);
-  for (let i = 1; i <= n - 1; i++) {
-    if (local < done * (i / (n - 1))) return i - 1;
+  const weights = preFinalBeatWeights(n, holds);
+  let W = 0;
+  for (const b of weights) W += b;
+  const last = sequenceLastCutLocal(n, speed, holds);
+  let cum = 0;
+  for (let i = 0; i < weights.length; i++) {
+    cum += weights[i]!;
+    if (local < last * (cum / W)) return i;
   }
   return n - 1;
 }
@@ -151,6 +205,7 @@ export function typePageIndexForState(state: TypeState, phase: number): number {
     state.sequenceSpeed,
     state.sequenceStart,
     state.sequenceStop,
+    state.frameHolds,
   );
 }
 

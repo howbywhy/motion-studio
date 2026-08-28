@@ -53,9 +53,10 @@ export interface SavedState {
   endBehaviourDuration?: number;
   /** Master Registration presence 0–100. Legacy saves omit this and load as 50. */
   registrationAmount?: number;
-  /** Typography may include Type States, page order, Sequence Speed, and Sequence Window.
+  /** Typography may include Type States, page order, Frame Hold, Sequence Speed, and Sequence Window.
    *  Start/Stop gate Type presence (hard in/out). Speed paces cuts while Type is present.
-   *  Legacy type saves load as one page. Review saves without a window load Start 20 / Stop 70. */
+   *  Frame Hold gives a non-final frame an extra beat. Legacy type saves load as one page.
+   *  Review saves without a window load Start 20 / Stop 70. Holds default Off. */
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;
