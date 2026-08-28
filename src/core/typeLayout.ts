@@ -5,6 +5,7 @@ import type {
   TypeBlendMode,
   TypeBlock,
   TypeColumn,
+  TypeSlot,
   TypeState,
   TypeStyle,
   TypeTextAlign,
@@ -88,7 +89,7 @@ interface CacheEntry {
   solution: Solution;
 }
 
-const caches: [CacheEntry | null, CacheEntry | null] = [null, null];
+const caches: [CacheEntry | null, CacheEntry | null, CacheEntry | null] = [null, null, null];
 let measureCtx: CanvasRenderingContext2D | null = null;
 
 function measureContext(): CanvasRenderingContext2D {
@@ -179,7 +180,7 @@ function columnMeasure(column: TypeColumn, innerW: number): number {
 function trackingEm(style: TypeStyle, tracking: number): number {
   const s = u01(tracking);
   if (style === "headline") return lerp(-0.05, 0.055, s);
-  if (style === "footnote") return lerp(0.03, 0.12, s);
+  if (style === "subtitle") return lerp(0, 0.05, s);
   return lerp(-0.02, 0.04, s);
 }
 
@@ -191,8 +192,8 @@ function headlineRowLead(): number {
   return 0.88;
 }
 
-function footnoteLead(): number {
-  return 1.12;
+function subtitleLead(leading: number): number {
+  return lerp(1.06, 1.28, u01(leading));
 }
 
 function authoredRows(text: string): string[] {
@@ -426,47 +427,50 @@ function composeParagraph(block: TypeBlock, pad: PadRect): Solution {
   };
 }
 
-function composeFootnote(block: TypeBlock, pad: PadRect): Solution {
-  const tEm = trackingEm("footnote", block.tracking);
-  const min = pad.w * 0.014;
-  const max = pad.w * 0.028;
+function composeSubtitle(block: TypeBlock, pad: PadRect): Solution {
+  const tEm = trackingEm("subtitle", block.tracking);
+  const leadRatio = subtitleLead(block.leading);
+  const measure = columnMeasure(block.column, pad.w);
+  const min = pad.w * 0.016;
+  const max = pad.w * 0.030;
   let fontSize = lerp(min, max, u01(block.scale));
-  const rows = authoredRows(block.text);
   const wrapAll = (s: number): PreparedLine[] => {
     const tracking = tEm * s;
     const laid: PreparedLine[] = [];
+    const rows = authoredRows(block.text);
     for (let u = 0; u < rows.length; u++) {
-      const wrapped = wrapRow(rows[u]!, block.weight, s, tracking, pad.w);
+      const wrapped = wrapRow(rows[u]!, block.weight, s, tracking, measure);
       for (const text of wrapped) laid.push({ text, unit: u, m: measureLine(text, block.weight, s, tracking) });
     }
     return laid;
   };
   let prepared = wrapAll(fontSize);
-  const lead = fontSize * footnoteLead();
-  if (flowHeight(prepared, lead) > pad.h + 0.25) {
+  let leading = fontSize * leadRatio;
+  if (flowHeight(prepared, leading) > pad.h + 0.25) {
     let lo = min;
     let hi = fontSize;
     for (let i = 0; i < 12; i++) {
       const mid = (lo + hi) / 2;
       const trial = wrapAll(mid);
-      if (flowHeight(trial, mid * footnoteLead()) <= pad.h + 0.25) lo = mid;
+      if (flowHeight(trial, mid * leadRatio) <= pad.h + 0.25) lo = mid;
       else hi = mid;
     }
     fontSize = lo;
     prepared = wrapAll(fontSize);
+    leading = fontSize * leadRatio;
   }
   return {
     prepared,
     fontSize,
     tracking: tEm * fontSize,
-    leading: fontSize * footnoteLead(),
+    leading,
     wordGaps: prepared.map(() => 0),
   };
 }
 
 function composeType(block: TypeBlock, pad: PadRect): Solution {
   if (block.composition === "paragraph") return composeParagraph(block, pad);
-  if (block.composition === "footnote") return composeFootnote(block, pad);
+  if (block.composition === "subtitle") return composeSubtitle(block, pad);
   return composeHeadline(block, pad);
 }
 
@@ -669,7 +673,7 @@ function layoutBlock(
   block: TypeBlock,
   canvasW: number,
   canvasH: number,
-  slot: 0 | 1,
+  slot: TypeSlot,
 ): TypeLayout | null {
   if (!block.enabled) return null;
   const text = block.text.replace(/\s+$/g, "");
@@ -731,7 +735,7 @@ export function layoutTypography(
   input: TypeState | TypeBlock,
   canvasW: number,
   canvasH: number,
-  slot: 0 | 1 = 0,
+  slot: TypeSlot = 0,
 ): TypeLayout | null {
   if (isTypeDocument(input)) {
     if (!input.enabled) return null;
@@ -744,9 +748,9 @@ export function layoutTypeDocument(
   state: TypeState,
   canvasW: number,
   canvasH: number,
-): { index: 0 | 1; layout: TypeLayout }[] {
+): { index: TypeSlot; layout: TypeLayout }[] {
   const active = activeTypeBlocks(state);
-  const out: { index: 0 | 1; layout: TypeLayout }[] = [];
+  const out: { index: TypeSlot; layout: TypeLayout }[] = [];
   for (const item of active) {
     const layout = layoutBlock(item.block, canvasW, canvasH, item.index);
     if (layout) out.push({ index: item.index, layout });

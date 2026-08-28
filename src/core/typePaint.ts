@@ -1,10 +1,10 @@
 import { switzerFont, switzerReady } from "./typeFont";
 import { opticalFramePx, type TypeLayout } from "./typeLayout";
-import { canvasBlendOp } from "./typeState";
+import { canvasBlendOp, type TypeSlot } from "./typeState";
 
-const overlays: [HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null];
-const overlayCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null];
-const overlayKeys: [string, string] = ["", ""];
+const overlays: [HTMLCanvasElement | null, HTMLCanvasElement | null, HTMLCanvasElement | null] = [null, null, null];
+const overlayCtxs: [CanvasRenderingContext2D | null, CanvasRenderingContext2D | null, CanvasRenderingContext2D | null] = [null, null, null];
+const overlayKeys: [string, string, string] = ["", "", ""];
 
 function layer(existing: HTMLCanvasElement | null, w: number, h: number): HTMLCanvasElement {
   const c = existing ?? document.createElement("canvas");
@@ -89,7 +89,7 @@ function ensureOverlay(
   layout: TypeLayout,
   color: string,
   opacity: number,
-  slot: 0 | 1,
+  slot: TypeSlot,
   w: number,
   h: number,
 ): HTMLCanvasElement {
@@ -122,7 +122,7 @@ export function paintTypeLayer(
   color: string,
   opacity: number,
   _unused?: unknown,
-  slot: 0 | 1 = 0,
+  slot: TypeSlot = 0,
 ): void {
   if (layout.lines.length === 0) return;
   if (!switzerReady()) return;
@@ -136,7 +136,8 @@ export function paintTypeLayer(
 export function disposeTypeScratch(): void {
   overlayKeys[0] = "";
   overlayKeys[1] = "";
-  for (const slot of [0, 1] as const) {
+  overlayKeys[2] = "";
+  for (const slot of [0, 1, 2] as const) {
     if (overlays[slot]) {
       overlays[slot]!.width = 1;
       overlays[slot]!.height = 1;

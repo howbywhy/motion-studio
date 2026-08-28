@@ -15,10 +15,10 @@ export const FRAME_HOLD_LENGTH_MAX = 3;
 export const FRAME_HOLD_LENGTH_DEFAULT = 2;
 export const FRAME_HOLD_LENGTH_STEP = 0.25;
 
-export type TypePage = [TypeBlock, TypeBlock];
+export type TypePage = [TypeBlock, TypeBlock, TypeBlock];
 
 export function cloneTypePage(page: TypePage): TypePage {
-  return [{ ...page[0] }, { ...page[1] }];
+  return [{ ...page[0] }, { ...page[1] }, { ...page[2] }];
 }
 
 export function typePageCount(state: TypeState): number {
@@ -268,6 +268,43 @@ export function typePageIndexForState(state: TypeState, phase: number): number {
     state.frameHoldEnabled,
     state.frameHoldLength,
   );
+}
+
+/**
+ * Local 0–1 inside the currently active Type State's allocated duration.
+ * Used by Subtitle cue sequencing. One-page documents use the full
+ * Type Start→Stop window.
+ */
+export function typePageBeatLocal(state: TypeState, phase: number): number {
+  const local = typeLocalPhase(phase, state.sequenceStart, state.sequenceStop);
+  if (local < 0 || local >= 1) return 0;
+  const n = typePageCount(state);
+  if (n <= 1) return local;
+  const { weights, lastCut } = sequencePlan(
+    n,
+    state.sequenceSpeed,
+    state.frameHoldEnabled,
+    state.frameHoldLength,
+  );
+  const i = typePageIndexForState(state, phase);
+  const W = sum(weights);
+  let startL = 0;
+  let endL = 1;
+  if (W > 0 && i < n - 1) {
+    let cum = 0;
+    for (let k = 0; k < i; k++) cum += weights[k]!;
+    startL = lastCut * (cum / W);
+    endL = lastCut * ((cum + weights[i]!) / W);
+  } else if (W > 0) {
+    startL = lastCut;
+    endL = 1;
+  }
+  const span = endL - startL;
+  if (!(span > 0)) return 0;
+  const t = (local - startL) / span;
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  return t;
 }
 
 /**

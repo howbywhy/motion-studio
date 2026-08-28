@@ -4,6 +4,7 @@ import { HEADLINE_INK_BLEED, headlineEdgeBleed, layoutTypeDocument, opticalFrame
 import { paintTypeLayer } from "../core/typePaint";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 import { FRAME_HOLD_LENGTH_DEFAULT, SEQUENCE_SPEED_DEFAULT, SEQUENCE_MIN_BEAT_LOCAL, TYPE_PAGE_MAX, sequenceLastCutLocal, sequencePlan, typePageCuts, typePageIndexForState, typeStateAtPhase, typeVisibleAtPhase, typeVisibleForState } from "../core/typePages";
+import { applySubtitleCues } from "../core/typeSubtitle";
 import { bloomBehavior } from "../behaviors/bloom";
 import { Renderer } from "../core/renderer";
 import { placeholderA } from "../core/placeholder";
@@ -59,15 +60,20 @@ function pixelDiff(a: ImageData, b: ImageData): number {
   return n;
 }
 
-function page(a: Partial<TypeBlock>, b?: Partial<TypeBlock>): [Partial<TypeBlock>, Partial<TypeBlock>] {
+function page(
+  a: Partial<TypeBlock>,
+  b?: Partial<TypeBlock>,
+  c?: Partial<TypeBlock>,
+): [Partial<TypeBlock>, Partial<TypeBlock>, Partial<TypeBlock>] {
   return [
     { enabled: true, color: "#f3efe6", ...a },
-    b ? { enabled: true, color: "#f3efe6", ...b } : { enabled: false, text: "", composition: "footnote" },
+    b ? { enabled: true, color: "#f3efe6", ...b } : { enabled: false, text: "", composition: "headline" },
+    c ? { enabled: true, color: "#f3efe6", ...c } : { enabled: false, text: "", composition: "headline" },
   ];
 }
 
 function book(
-  pages: [Partial<TypeBlock>, Partial<TypeBlock>][],
+  pages: Partial<TypeBlock>[][],
   timing?: number | { speed?: number; start?: number; stop?: number; holds?: boolean[]; holdLengths?: number[] },
 ): TypeState {
   const t = typeof timing === "number" ? { speed: timing } : (timing ?? {});
@@ -90,8 +96,8 @@ function paintResolved(state: TypeState, w: number, h: number, phase: number): H
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
   photoGround(ctx, w, h);
-  const resolved = typeStateAtPhase(state, phase);
-  for (const item of layoutTypeDocument(resolved, w, h)) {
+      const type = applySubtitleCues(typeStateAtPhase(state, phase), state, phase);
+  for (const item of layoutTypeDocument(type, w, h)) {
     paintTypeLayer(ctx, item.layout, item.layout.color, item.layout.opacity, undefined, item.index);
   }
   return canvas;
@@ -331,6 +337,10 @@ export interface TypeStatesReport {
   holdLengthScale: boolean;
   holdSurvivesFinalSlot: boolean;
   weightClamp: boolean;
+  type03Simultaneous: boolean;
+  type03Duplicate: boolean;
+  type03Reorder: boolean;
+  type03Restore: boolean;
   elapsedMs: number;
   details: Record<string, unknown>;
 }
@@ -346,7 +356,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     page({ text: mbmById("coming-soon-break").text, composition: "headline", scale: 78, anchor: "bl" }),
     page(
       { text: mbmById("coming-soon-break").text, composition: "headline", scale: 70, anchor: "mc" },
-      { text: mbmById("date").text, composition: "footnote", scale: 80, anchor: "br" },
+      { text: mbmById("date").text, composition: "subtitle", scale: 80, anchor: "br" },
     ),
   ]);
   const sequenceB = book([
@@ -354,18 +364,18 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "tl" }),
     page(
       { text: mbmById("now").text, composition: "headline", scale: 64, anchor: "tl" },
-      { text: mbmById("date").text, composition: "footnote", scale: 70, anchor: "br" },
+      { text: mbmById("date").text, composition: "subtitle", scale: 70, anchor: "br" },
     ),
   ]);
   const sequenceC = book([
     page({ text: mbmById("redy-break").text, composition: "headline", scale: 86, anchor: "tl" }),
     page(
       { text: mbmById("redy-break").text, composition: "headline", scale: 78, anchor: "tl" },
-      { text: mbmById("worn").text, composition: "footnote", scale: 70, anchor: "br" },
+      { text: mbmById("worn").text, composition: "subtitle", scale: 70, anchor: "br" },
     ),
     page(
       { text: mbmById("flawed-break").text, composition: "headline", scale: 64, anchor: "bl" },
-      { text: mbmById("date").text, composition: "footnote", scale: 70, anchor: "tr" },
+      { text: mbmById("date").text, composition: "subtitle", scale: 70, anchor: "tr" },
     ),
   ]);
   const free = book([
@@ -376,7 +386,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     page({ text: "SPRING\nSUMMER\n2026", composition: "headline", scale: 78, anchor: "tl" }),
     page(
       { text: mbmById("ss26-short").text, composition: "headline", scale: 100, anchor: "mc" },
-      { text: mbmById("now").text, composition: "footnote", scale: 64, anchor: "bl" },
+      { text: mbmById("now").text, composition: "subtitle", scale: 64, anchor: "bl" },
     ),
   ]);
 
@@ -401,11 +411,11 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     }
   }
 
-  const twoSpeedPages: [Partial<TypeBlock>, Partial<TypeBlock>][] = [
+  const twoSpeedPages: Partial<TypeBlock>[][] = [
     page({ text: mbmById("new").text, composition: "headline", scale: 100, anchor: "tl" }),
     page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "bc" }),
   ];
-  const threeSpeedPages: [Partial<TypeBlock>, Partial<TypeBlock>][] = [
+  const threeSpeedPages: Partial<TypeBlock>[][] = [
     page({ text: "NEW", composition: "headline", scale: 100, anchor: "tl" }),
     page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "mc" }),
     page({ text: "07.09.2026", composition: "headline", scale: 86, anchor: "br" }),
@@ -428,12 +438,12 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     }
   }
 
-  const campaignPages: [Partial<TypeBlock>, Partial<TypeBlock>][] = [
+  const campaignPages: Partial<TypeBlock>[][] = [
     page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" }),
     page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "mc" }),
     page(
       { text: "2026", composition: "headline", scale: 90, anchor: "bl" },
-      { text: mbmById("now").text, composition: "footnote", scale: 70, anchor: "br" },
+      { text: mbmById("now").text, composition: "subtitle", scale: 70, anchor: "br" },
     ),
   ];
   strip(root, "Creative A  Start 10 / Stop 55 / Speed 75", book(campaignPages, { speed: 75, start: 0.1, stop: 0.55 }), W45, H45);
@@ -727,7 +737,7 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     anchor: "ml",
     column: "medium",
   })]);
-  const note = book([page({ text: "07.09.2026", composition: "footnote", scale: 80, anchor: "bl" })]);
+  const note = book([page({ text: "07.09.2026", composition: "subtitle", scale: 80, anchor: "bl" })]);
   const centre = headlinePage("MADELEN", "mc", 100);
   const bc = headlinePage("MADELEN", "bc", 100);
   const tl = headlinePage("MADELEN", "tl", 100);
@@ -949,6 +959,57 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     stressPlan.weights[1]! > stressPlan.weights[0]! &&
     stressPlan.weights[3]! > stressPlan.weights[2]!;
 
+  const triple = clampTypeState({
+    enabled: true,
+    blocks: [
+      { enabled: true, text: "MADE BY MADELEN", composition: "headline", scale: 80, anchor: "mc", color: "#f3efe6" },
+      { enabled: true, text: "A study in movement.", composition: "paragraph", scale: 40, anchor: "bl", color: "#f3efe6" },
+      { enabled: true, text: "Made in Sydney.", composition: "subtitle", scale: 40, anchor: "br" },
+    ],
+  });
+  const type03Simultaneous =
+    triple.blocks[0].enabled &&
+    triple.blocks[1].enabled &&
+    triple.blocks[2].enabled &&
+    triple.blocks[2].composition === "subtitle" &&
+    layoutTypeDocument(triple, W45, H45).length === 3;
+
+  const type03Duplicate = clampTypeState({ ...triple, selected: 0, typePage: "add" });
+  const type03DuplicateOk =
+    type03Duplicate.pages.length === 2 &&
+    type03Duplicate.pages[1]![2]!.text === "Made in Sydney." &&
+    type03Duplicate.pages[1]![2]!.enabled === true &&
+    type03Duplicate.pages[1]![2]!.composition === "subtitle";
+
+  const type03Order = clampTypeState({
+    enabled: true,
+    pages: [
+      page({ text: "A" }, undefined, { text: "cue-a", composition: "subtitle" }),
+      page({ text: "B" }, undefined, { text: "cue-b", composition: "subtitle" }),
+    ],
+    typePageMove: { from: 0, to: 1 },
+  });
+  const type03Reorder =
+    type03Order.pages[0]![0]!.text === "B" &&
+    type03Order.pages[0]![2]!.text === "cue-b" &&
+    type03Order.pages[1]![0]!.text === "A" &&
+    type03Order.pages[1]![2]!.text === "cue-a";
+
+  const type03Restore = clampTypeState(JSON.parse(JSON.stringify(triple)) as Record<string, unknown>);
+  const type03RestoreOk =
+    type03Restore.blocks[2]!.text === "Made in Sydney." &&
+    type03Restore.blocks[2]!.enabled &&
+    type03Restore.pages[0]![2]!.text === "Made in Sydney.";
+
+  const legacyOff = clampTypeState({
+    enabled: true,
+    blocks: [
+      { enabled: true, text: "HEAD", composition: "headline" },
+      { enabled: true, text: "PARA", composition: "paragraph" },
+    ],
+  });
+  const type03LegacyOff = legacyOff.blocks[2]!.enabled === false;
+
   return {
     onePageBypass,
     cutEqualsStatic,
@@ -976,6 +1037,10 @@ export async function runTypeStatesSheet(root: HTMLElement): Promise<TypeStatesR
     holdLengthScale,
     holdSurvivesFinalSlot,
     weightClamp,
+    type03Simultaneous: type03Simultaneous && type03LegacyOff,
+    type03Duplicate: type03DuplicateOk,
+    type03Reorder,
+    type03Restore: type03RestoreOk,
     elapsedMs: performance.now() - t0,
     details: {
       liveHashes,

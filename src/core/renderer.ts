@@ -1,7 +1,7 @@
 import { drawTransformedCoverFit } from "./coverFit";
 import { timeFromPhase, type ClockMode } from "./phaseClock";
 import { clampElapsedSeconds, previewClockDelta } from "./playbackClock";
-import { getSeamCandidate, limitedSequenceResolve, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
+import { getSeamCandidate, limitedPairProgress, sequenceEnvelope, setSeamCandidate, type SeamCandidate } from "./sequencePhase";
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { paintGoldenMasterRegistration, clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./globalRegistration";
@@ -10,6 +10,7 @@ import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypeDocument } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
 import { typeStateAtPhase } from "./typePages";
+import { applySubtitleCues } from "./typeSubtitle";
 import {
   applyEndBehaviour,
   clampEndBehaviourSettings,
@@ -1004,7 +1005,7 @@ export class Renderer {
     const env = sequenceEnvelope(
       this.behavior?.id,
       this.params.treatment as string | undefined,
-      mapping.localPhase,
+      this.limitedLocalPhase(mapping.localPhase),
     );
     return {
       swapped: false,
@@ -1245,6 +1246,11 @@ export class Renderer {
     this.syncActiveVideos();
   }
 
+  private limitedLocalPhase(localPhase: number): number {
+    const resolveLimit = this.behavior?.id === "bloom" ? this.params.resolveLimit : 100;
+    return limitedPairProgress(localPhase, resolveLimit);
+  }
+
   /** Pair progress 0→1 is remapped onto the behaviour's native phase so a
    * pair ends at peak B (not the native return to A). Next pair's A is this
    * pair's B — dominant source continues. */
@@ -1252,7 +1258,7 @@ export class Renderer {
     const env = sequenceEnvelope(
       this.behavior?.id,
       this.params.treatment as string | undefined,
-      this.pairMapping().localPhase,
+      this.limitedLocalPhase(this.pairMapping().localPhase),
     );
     return timeFromPhase(this.behavior?.id, env.behaviorPhase, this.params);
   }
@@ -1466,10 +1472,9 @@ export class Renderer {
     const env = sequenceEnvelope(
       this.behavior?.id,
       this.params.treatment as string | undefined,
-      mapping.localPhase,
+      this.limitedLocalPhase(mapping.localPhase),
     );
-    const resolveLimit = this.behavior?.id === "bloom" ? this.params.resolveLimit : 100;
-    this.applySequenceResolve(composedCtx, limitedSequenceResolve(env.resolve, resolveLimit));
+    this.applySequenceResolve(composedCtx, env.resolve);
     const tResolve = mark();
     this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tMask, tComposite, tResolve);
   }
@@ -1553,7 +1558,7 @@ export class Renderer {
 
     const paintType = (): void => {
       if (!this.typeState.enabled) return;
-      const type = typeStateAtPhase(this.typeState, this.getLoopPhase());
+      const type = applySubtitleCues(typeStateAtPhase(this.typeState, this.getLoopPhase()), this.typeState, this.getLoopPhase());
       if (!type.enabled) return;
       const laid = layoutTypeDocument(type, width, height);
       if (laid.length === 0) return;

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Resolve Limit</title>
+    <title>Subtitle</title>
     <style>
       body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
       h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -11,23 +11,24 @@
       figure { margin: 0; }
       canvas { width: 100%; height: auto; background: #000; display: block; }
       figcaption { margin-top: 6px; color: #888; font-size: 10px; }
+      pre { color: #bbb; font-size: 11px; white-space: pre-wrap; }
     </style>
   </head>
   <body>
-    <h1>Resolve Limit</h1>
-    <p>Terminal Bloom coverage. Limit 100 must match approved Bloom. Lower limits must remain field-shaped, not a dissolve.</p>
+    <h1>Subtitle</h1>
+    <p>Yellow editorial cues. One non-empty line = one cue. Per-state sequencing. Hard cuts. Flicker scans the disrupt window.</p>
     <div id="root">Running…</div>
     <pre id="out"></pre>
     <script type="module">
-      import { runResolveLimitSheet } from "/src/eval/resolveLimit.ts";
+      import { runSubtitleSheet } from "/src/eval/subtitle.ts";
       const root = document.getElementById("root");
       const out = document.getElementById("out");
       void (async () => {
         try {
-          const report = await runResolveLimitSheet(root);
-          window.__RESOLVE_LIMIT__ = report;
-          const { details, ...summary } = report;
-          out.textContent = JSON.stringify({ summary, details }, null, 2);
+          const report = await runSubtitleSheet(root);
+          window.__SUBTITLE__ = report;
+          const { details, elapsedMs, ...flags } = report;
+          out.textContent = JSON.stringify({ summary: { ...flags, elapsedMs }, details }, null, 2);
         } catch (e) {
           const err = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ""}` : String(e);
           root.textContent = err;

@@ -27,10 +27,10 @@ function bloomParams(): ParamValues {
   };
 }
 
-function page(a: Partial<TypeBlock>, b?: Partial<TypeBlock>): [Partial<TypeBlock>, Partial<TypeBlock>] {
+function page(a: Partial<TypeBlock>, b?: Partial<TypeBlock>): Partial<TypeBlock>[] {
   return [
     { enabled: true, color: "#f3efe6", ...a },
-    b ? { enabled: true, color: "#f3efe6", ...b } : { enabled: false, text: "", composition: "footnote" },
+    b ? { enabled: true, color: "#f3efe6", ...b } : { enabled: false, text: "", composition: "subtitle" },
   ];
 }
 

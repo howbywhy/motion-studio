@@ -15,7 +15,9 @@ import {
   type TypeState,
   type TypeStyle,
   type TypeTextAlign,
+  type TypeSlot,
 } from "../core/typeState";
+import { TYPE_SLOT_LABELS } from "../core/typeSubtitle";
 import {
   clampHoldLength,
   FRAME_HOLD_LENGTH_DEFAULT,
@@ -349,12 +351,13 @@ function markSeg(el: HTMLDivElement, value: string): void {
 
 function fitTextarea(el: HTMLTextAreaElement): void {
   el.style.height = "auto";
-  el.style.height = `${Math.min(96, Math.max(48, el.scrollHeight))}px`;
+  const cap = el.placeholder.includes("cue") ? 140 : 96;
+  el.style.height = `${Math.min(cap, Math.max(48, el.scrollHeight))}px`;
 }
 
 function styleLabel(style: TypeStyle): string {
   if (style === "paragraph") return "Paragraph";
-  if (style === "footnote") return "Footnote";
+  if (style === "subtitle") return "Subtitle";
   return "Headline";
 }
 
@@ -363,7 +366,7 @@ function blockSummary(block: TypeBlock): string {
   if (block.composition === "headline" && authoredLineCount(block.text) >= 2 && block.distribution === "between") {
     parts.push("Between");
   }
-  if (block.composition === "paragraph") {
+  if (block.composition === "paragraph" || block.composition === "subtitle") {
     parts.push(block.column === "narrow" ? "Narrow" : block.column === "wide" ? "Wide" : "Medium");
   }
   parts.push(block.anchor.toUpperCase());
@@ -372,11 +375,11 @@ function blockSummary(block: TypeBlock): string {
 
 function buildBlock(
   parent: HTMLElement,
-  index: 0 | 1,
+  index: TypeSlot,
   initial: TypeBlock,
   expanded: boolean,
   onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean }) => void,
-  onExpand: (next: 0 | 1 | null) => void,
+  onExpand: (next: TypeSlot | null) => void,
   onEnabled: (on: boolean) => void,
 ): {
   root: HTMLElement;
@@ -398,7 +401,7 @@ function buildBlock(
   titles.className = "type-block-titles";
   const title = document.createElement("span");
   title.className = "type-block-title";
-  title.textContent = index === 0 ? "Type 01" : "Type 02";
+  title.textContent = TYPE_SLOT_LABELS[index];
   titles.appendChild(title);
   const summary = document.createElement("span");
   summary.className = "type-block-summary";
@@ -449,11 +452,12 @@ function buildBlock(
   const textRow = document.createElement("div");
   textRow.className = "control-row";
   const textLab = document.createElement("label");
-  textLab.textContent = "Copy";
+  textLab.textContent = initial.composition === "subtitle" ? "Cues" : "Copy";
   textRow.appendChild(textLab);
   const textarea = document.createElement("textarea");
   textarea.className = "type-text";
-  textarea.rows = 2;
+  textarea.rows = initial.composition === "subtitle" ? 4 : 2;
+  textarea.placeholder = initial.composition === "subtitle" ? "One line = one cue" : "";
   textarea.value = initial.text;
   textarea.addEventListener("input", () => {
     fitTextarea(textarea);
@@ -472,7 +476,7 @@ function buildBlock(
   const styleSeg = seg(body, "Style", [
     { value: "headline", label: "Headline" },
     { value: "paragraph", label: "Paragraph" },
-    { value: "footnote", label: "Footnote" },
+    { value: "subtitle", label: "Subtitle" },
   ], initial.composition, (v) => {
     const style = v as TypeStyle;
     const patch = applyStyleChange({ composition: currentStyle, anchor: currentAnchor }, style);
@@ -604,6 +608,7 @@ function buildBlock(
       pos.set(patch.anchor);
     }
     if (patch.blendMode) blend.value = patch.blendMode;
+    if (patch.color) color.value = patch.color;
   }
 
   function paintContext(): void {
@@ -611,12 +616,16 @@ function buildBlock(
     const rows = authoredLineCount(textarea.value);
     const showDist = style === "headline" && rows >= 2;
     trackingH.row.hidden = style !== "headline";
-    leading.row.hidden = style !== "paragraph";
+    leading.row.hidden = style !== "paragraph" && style !== "subtitle";
     trackingP.row.hidden = style !== "paragraph";
-    trackingF.row.hidden = style !== "footnote";
+    trackingF.row.hidden = style !== "subtitle";
     distSeg.parentElement!.hidden = !showDist;
     gap.row.hidden = !showDist || currentDist === "between";
-    widthSeg.parentElement!.hidden = style !== "paragraph";
+    widthSeg.parentElement!.hidden = style !== "paragraph" && style !== "subtitle";
+    padding.row.hidden = style === "subtitle";
+    textLab.textContent = style === "subtitle" ? "Cues" : "Copy";
+    textarea.placeholder = style === "subtitle" ? "One line = one cue" : "";
+    textarea.rows = style === "subtitle" ? 4 : 2;
   }
 
   function refreshSummary(): void {
@@ -690,7 +699,7 @@ export function buildTypePanel(
   container.className = "type-panel";
 
   let state = clampTypeState(initial);
-  let expanded: 0 | 1 | null = 0;
+  let expanded: TypeSlot | null = 0;
 
   const head = document.createElement("div");
   head.className = "panel-label-row type-master";
@@ -865,21 +874,28 @@ export function buildTypePanel(
   const applyExpanded = (): void => {
     block0.setExpanded(expanded === 0);
     block1.setExpanded(expanded === 1);
+    block2.setExpanded(expanded === 2);
+  };
+
+  const onEnabled = (index: TypeSlot) => (on: boolean) => {
+    if (on) {
+      expanded = index;
+      applyExpanded();
+    }
   };
 
   const block0 = buildBlock(body, 0, state.blocks[0], true, onChange, (next) => {
     expanded = next;
     applyExpanded();
-  }, () => {});
+  }, onEnabled(0));
   const block1 = buildBlock(body, 1, state.blocks[1], false, onChange, (next) => {
     expanded = next;
     applyExpanded();
-  }, (on) => {
-    if (on) {
-      expanded = 1;
-      applyExpanded();
-    }
-  });
+  }, onEnabled(1));
+  const block2 = buildBlock(body, 2, state.blocks[2], false, onChange, (next) => {
+    expanded = next;
+    applyExpanded();
+  }, onEnabled(2));
 
   return {
     sync(next: TypeState) {
@@ -891,6 +907,7 @@ export function buildTypePanel(
       paintTiming();
       block0.sync(state.blocks[0]);
       block1.sync(state.blocks[1]);
+      block2.sync(state.blocks[2]);
     },
   };
 }

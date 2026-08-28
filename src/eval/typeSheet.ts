@@ -59,6 +59,17 @@ function pair(a: Partial<TypeBlock>, b: Partial<TypeBlock>): TypeState {
   });
 }
 
+function triple(a: Partial<TypeBlock>, b: Partial<TypeBlock>, c: Partial<TypeBlock>): TypeState {
+  return clampTypeState({
+    enabled: true,
+    blocks: [
+      { enabled: true, color: "#f3efe6", ...a },
+      { enabled: true, color: "#f3efe6", ...b },
+      { enabled: true, color: "#f3efe6", ...c },
+    ],
+  });
+}
+
 function cell(
   parent: HTMLElement,
   label: string,
@@ -161,7 +172,7 @@ export interface SheetReport {
   };
   spaceBetween: { two: boolean; three: boolean; date: boolean };
   paragraphReadable: { column: TypeColumn; fontSize: number; lines: number; ok: boolean }[];
-  styleCeilings: { headline: number; paragraph: number; footnote: number; ordered: boolean };
+  styleCeilings: { headline: number; paragraph: number; subtitle: number; ordered: boolean };
   overflow: { ink: number; pixels: number };
   exportParity: { copy: string; match: boolean }[];
   needType03: { evidence: string[]; verdict: "two-enough" | "three-would-help" };
@@ -269,28 +280,39 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
     {
       title: "02 COMING SOON BL + footnote date TR",
       a: { text: "COMING SOON", composition: "headline", scale: 80, anchor: "bl" },
-      b: { text: "07.09.2026", composition: "footnote", scale: 80, anchor: "tr" },
+      b: { text: "07.09.2026", composition: "subtitle", scale: 80, anchor: "tr" },
     },
     {
       title: "03 two-line Between + MADE BY MADELEN BR",
       a: { text: "FIRST LINE\nSECOND LINE", composition: "headline", scale: 80, distribution: "between", anchor: "ml" },
-      b: { text: "MADE BY MADELEN", composition: "footnote", scale: 70, anchor: "br" },
+      b: { text: "MADE BY MADELEN", composition: "subtitle", scale: 70, anchor: "br" },
     },
     {
       title: "04 Headline + Footnote — missing Paragraph",
       a: { text: "09.07\n2026", composition: "headline", scale: 90, distribution: "between", anchor: "ml" },
-      b: { text: "MADE BY MADELEN", composition: "footnote", scale: 70, anchor: "br" },
+      b: { text: "MADE BY MADELEN", composition: "subtitle", scale: 70, anchor: "br" },
     },
     {
       title: "05 Paragraph + Footnote — missing Headline",
       a: { text: para, composition: "paragraph", scale: 55, column: "medium", anchor: "tl" },
-      b: { text: "SS26", composition: "footnote", scale: 80, anchor: "br" },
+      b: { text: "SS26", composition: "subtitle", scale: 80, anchor: "br" },
     },
   ];
   for (const mix of mixes) {
     const r = row(root);
     const state = pair(mix.a, mix.b);
     for (const aspect of ASPECTS) cell(r, `${mix.title} · ${aspect.id}`, aspect.w, aspect.h, state);
+  }
+
+  section(root, "TEST E3 — Type 01 + 02 + 03");
+  {
+    const r = row(root);
+    const state = triple(
+      { text: "MADE BY MADELEN", composition: "headline", scale: 78, anchor: "tc" },
+      { text: para, composition: "paragraph", scale: 36, column: "medium", anchor: "ml" },
+      { text: "Made in Sydney.\nDesigned for movement.", composition: "subtitle", scale: 40, anchor: "br" },
+    );
+    for (const aspect of ASPECTS) cell(r, `three units · ${aspect.id}`, aspect.w, aspect.h, state);
   }
 
   const base = block({
@@ -356,7 +378,7 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
   const proofs: TypeState[] = [
     base, twoState, threeState, dateState,
     block({ text: para, composition: "paragraph", scale: 100, column: "wide", anchor: "ml" }),
-    block({ text: "NOW AVAILABLE", composition: "footnote", scale: 100, anchor: "bl" }),
+    block({ text: "NOW AVAILABLE", composition: "subtitle", scale: 100, anchor: "bl" }),
     pair(
       { text: "09.07\n2026", composition: "headline", scale: 100, distribution: "between", anchor: "ml" },
       { text: para, composition: "paragraph", scale: 40, column: "medium", anchor: "br" },
@@ -385,20 +407,19 @@ export async function runTypeSheet(root: HTMLElement): Promise<SheetReport> {
 
   const needType03: SheetReport["needType03"] = {
     evidence: [
-      "Headline date + Paragraph standfirst uses both blocks; Footnote credit cannot join that page.",
-      "COMING SOON + 07.09.2026 works as Headline + Footnote without a third block.",
-      "A campaign page that wants date (Headline), body (Paragraph) and MADE BY MADELEN (Footnote) simultaneously cannot be authored with two blocks.",
+      "Type 03 is a third independent editorial block on the same page.",
+      "Headline + Paragraph + Subtitle can now be authored as one static frame.",
     ],
-    verdict: "three-would-help",
+    verdict: "two-enough",
   };
 
   const styleCeilings = {
     headline: layoutTypography(block({ text: "COMING SOON", composition: "headline", scale: 100, anchor: "mc" }), 500, 625)?.fontSize ?? 0,
     paragraph: layoutTypography(block({ text: para, composition: "paragraph", scale: 100, column: "medium", anchor: "ml" }), 500, 625)?.fontSize ?? 0,
-    footnote: layoutTypography(block({ text: "NOW AVAILABLE", composition: "footnote", scale: 100, anchor: "bl" }), 500, 625)?.fontSize ?? 0,
+    subtitle: layoutTypography(block({ text: "NOW AVAILABLE", composition: "subtitle", scale: 100, anchor: "bl" }), 500, 625)?.fontSize ?? 0,
     ordered: false,
   };
-  styleCeilings.ordered = styleCeilings.headline > styleCeilings.paragraph && styleCeilings.paragraph > styleCeilings.footnote;
+  styleCeilings.ordered = styleCeilings.headline > styleCeilings.paragraph && styleCeilings.paragraph > styleCeilings.subtitle;
 
   return {
     coupling: {

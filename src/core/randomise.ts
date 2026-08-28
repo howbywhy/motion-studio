@@ -9,12 +9,10 @@ import type { ParamValues } from "./types";
  *   Overlap+reveal sum capped so the photograph cannot vanish into a blob.
  *   resolveLimit is left unchanged (art-directed terminal coverage).
  *
- * Phase (local to the current pair):
- *   ~50% 0.18–0.40, 30% 0.40–0.55, 10% 0.12–0.18, 10% 0.55–0.68
- *
  * Does not touch media, sequence, Registration (including Amount), End
- * Behaviour, Typography (including Type States, page order, Frame Hold, Hold Length, Sequence Speed,
- * Sequence Window), Bloom Pulse Range / Speed, B&W, background, audio, export, or aspect. Does not
+ * Behaviour, Typography (including Type States, Type 03, Subtitle copy / cue order,
+ * page order, Frame Hold, Hold Length, Sequence Speed, Sequence Window), Bloom Pulse
+ * Range / Speed, B&W, background, audio, export, or aspect. Does not
  * randomise FIELD or Shift.
  */
 

@@ -19,6 +19,7 @@ const status = document.getElementById("status")!;
 const out = document.getElementById("out")!;
 const frames = document.getElementById("frames")!;
 
+void (async () => {
 const { canvas, image, paintMs } = await renderGoldenFrame(false);
 const omitted = await renderGoldenFrame(false);
 const atDefault = await renderGoldenFrame(false, 50);
@@ -68,3 +69,7 @@ status.textContent = capturing
     ? `PASS  paint ${paintMs.toFixed(1)}ms  PNG exact=${result.pngExact}  WebP texture=${result.webpTextureVisible}`
     : `FAIL  ${result.failures.join(" | ")}`;
 out.textContent = JSON.stringify({ capturing, result, metrics }, null, 2);
+})().catch((e) => {
+  status.className = "fail";
+  status.textContent = e instanceof Error ? e.message : String(e);
+});

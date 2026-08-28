@@ -36,22 +36,34 @@ export function getHalftonePattern(ctx: CanvasRenderingContext2D): CanvasPattern
 }
 
 let lastAvg: RGB = { r: 150, g: 150, b: 150 };
-let lastTintAt = 0;
+let lastTintKey = "";
 
 /** Test hook only. Does not change the paint algorithm. */
 export function resetRegistrationInkTintCache(): void {
   lastAvg = { r: 150, g: 150, b: 150 };
-  lastTintAt = 0;
+  lastTintKey = "";
   halftonePattern = null;
 }
 
-/** The photograph's own average color, damped and re-sampled at most every
- * 400ms — sampling every frame is unnecessary and costs a getImageData. */
+function tintCacheKey(bLayer: HTMLCanvasElement, sample: RGB): string {
+  return `${bLayer.width}x${bLayer.height}:${sample.r | 0},${sample.g | 0},${sample.b | 0}`;
+}
+
+/**
+ * The photograph's own average colour, scaled for the tinted separation.
+ *
+ * Sampling is deterministic at a given B layer: same pixels → same tint.
+ * A previous 400ms `performance.now()` throttle let preview and export
+ * disagree when one path reused a stale sample. The 12×12 average is
+ * cheap; we still skip a second getImageData when the downsampled
+ * average has not changed.
+ */
 export function currentInkTint(bLayer: HTMLCanvasElement, bw = false): RGB {
-  const now = performance.now();
-  if (now - lastTintAt > 400) {
-    lastTintAt = now;
-    lastAvg = sampleAverageColor(bLayer);
+  const sample = sampleAverageColor(bLayer);
+  const key = tintCacheKey(bLayer, sample);
+  if (key !== lastTintKey) {
+    lastTintKey = key;
+    lastAvg = sample;
   }
   const scaled = { r: lastAvg.r * 0.62, g: lastAvg.g * 0.62, b: lastAvg.b * 0.62 };
   if (!bw) return scaled;

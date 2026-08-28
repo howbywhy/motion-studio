@@ -41,9 +41,27 @@ function smoothstep(t: number): number {
   return u * u * (3 - 2 * u);
 }
 
+/** Envelope B (production). Shared by resolve-limit remapping. */
+const ENVELOPE_B_PEAK = 0.52;
+const ENVELOPE_B_HOLD = 0.72;
+
 /** 0 → 0.5 with zero derivative at both ends. Native Bloom/Shift peak. */
 function oneWayToPeak(p: number): number {
   return 0.25 * (1 - Math.cos(Math.PI * clamp01(p)));
+}
+
+function invertSmoothstep(y: number): number {
+  const target = clamp01(y);
+  if (target <= 0) return 0;
+  if (target >= 1) return 1;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2;
+    if (smoothstep(mid) < target) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 export interface SequenceEnvelope {
@@ -83,8 +101,8 @@ export function sequenceEnvelope(
 
   // B — default: peak earlier, then authored mask settle that can
   // actually reach whole B before the next pair's A takes over.
-  const peakAt = 0.52;
-  const holdUntil = 0.72;
+  const peakAt = ENVELOPE_B_PEAK;
+  const holdUntil = ENVELOPE_B_HOLD;
   if (p <= peakAt) return { behaviorPhase: oneWayToPeak(p / peakAt), resolve: 0 };
   if (p <= holdUntil) return { behaviorPhase: 0.5, resolve: 0 };
   return { behaviorPhase: 0.5, resolve: smoothstep((p - holdUntil) / (1 - holdUntil)) };
@@ -97,12 +115,54 @@ export function clampResolveLimit(value: unknown): number {
 }
 
 /**
- * Remap sequence-stage mask expansion so the settle window still runs
- * in full, but terminates at `resolveLimit` instead of whole B.
- *
- * This is not Bloom `resolveAmount` (field coalesce at peak) and not a
- * canvas opacity crossfade. 100 is pixel-identical to the unclamped envelope.
+ * Authored terminal completeness in grow-space.
+ * `applySequenceResolve` uses resolve², so linear slider × linear resolve
+ * collapsed 0–50 into almost no mask expansion. These keypoints are the
+ * intended visual reads at pair end:
+ *   0   peak field / no terminal
+ *   25  strongly incomplete
+ *   50  clearly suspended
+ *   75  mostly resolved
+ *   100 full approved Bloom
+ */
+export function resolveLimitCompleteness(limit: unknown): number {
+  const u = clampResolveLimit(limit) / 100;
+  if (u <= 0) return 0;
+  if (u >= 1) return 1;
+  if (u < 0.25) return (0.22 * u) / 0.25;
+  if (u < 0.5) return 0.22 + ((0.48 - 0.22) * (u - 0.25)) / 0.25;
+  if (u < 0.75) return 0.48 + ((0.8 - 0.48) * (u - 0.5)) / 0.25;
+  return 0.8 + ((1 - 0.8) * (u - 0.75)) / 0.25;
+}
+
+/**
+ * How far through the pair-local envelope Bloom is allowed to travel.
+ * 100 leaves pair progress untouched (approved Bloom). 0 freezes at the
+ * peak-field boundary so the pair never enters terminal settle.
+ */
+export function limitedPairProgress(pairProgress: number, resolveLimit: unknown): number {
+  const p = clamp01(pairProgress);
+  const u = clampResolveLimit(resolveLimit) / 100;
+  if (u >= 1) return p;
+  const grow = resolveLimitCompleteness(resolveLimit);
+  if (grow <= 0) return Math.min(p, ENVELOPE_B_PEAK);
+  const targetResolve = Math.sqrt(grow);
+  const t = invertSmoothstep(targetResolve);
+  const pMax = ENVELOPE_B_HOLD + (1 - ENVELOPE_B_HOLD) * t;
+  return Math.min(p, pMax);
+}
+
+/**
+ * Resolve after Limit when the caller already has an envelope resolve
+ * (pair progress already applied). 100 is a no-op. Prefer feeding
+ * `limitedPairProgress` into `sequenceEnvelope` so incomplete limits hold.
  */
 export function limitedSequenceResolve(resolve: number, resolveLimit: unknown): number {
-  return clamp01(resolve) * (clampResolveLimit(resolveLimit) / 100);
+  const u = clampResolveLimit(resolveLimit) / 100;
+  if (u >= 1) return clamp01(resolve);
+  if (u <= 0) return 0;
+  const full = sequenceEnvelope("bloom", "clean", 1).resolve;
+  const cap = sequenceEnvelope("bloom", "clean", limitedPairProgress(1, resolveLimit)).resolve;
+  if (!(full > 0)) return 0;
+  return clamp01(resolve) * (cap / full);
 }

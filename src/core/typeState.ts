@@ -16,9 +16,10 @@ export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
 export type TypeTextAlign = "left" | "center" | "right";
 export type TypeAnchor = "tl" | "tc" | "tr" | "ml" | "mc" | "mr" | "bl" | "bc" | "br";
-export type TypeStyle = "headline" | "paragraph" | "footnote";
+export type TypeStyle = "headline" | "paragraph" | "subtitle";
 export type TypeRole = TypeStyle;
 export type TypeComposition = TypeStyle;
+export type TypeSlot = 0 | 1 | 2;
 export type TypeDistribution = "packed" | "between";
 export type TypeColumn = "narrow" | "medium" | "wide";
 export type TypeBlendMode = "normal" | "multiply" | "screen" | "overlay" | "difference" | "exclusion";
@@ -53,14 +54,14 @@ export interface TypeBlock {
   spacing: number;
 }
 
-/** Document: two independent editorial blocks. Sequence / arrangement
+/** Document: three independent editorial blocks. Sequence / arrangement
  * fields on old saves are ignored. */
 export interface TypeState {
   enabled: boolean;
-  blocks: [TypeBlock, TypeBlock];
-  activeIndex: 0 | 1;
+  blocks: TypePage;
+  activeIndex: TypeSlot;
   /** 1–6 editorial frames. Length 1 is production-identical. */
-  pages: [TypeBlock, TypeBlock][];
+  pages: TypePage[];
   /** Which frame the Type inspector is editing. */
   selected: number;
   /** Per-frame Hold on/off. Final frame is ignored by the resolver but stored so reorder can restore it. */
@@ -79,7 +80,16 @@ export const TYPE_WEIGHT_MIN = 100;
 export const TYPE_WEIGHT_MAX = 900;
 export const TYPE_WEIGHT_DEFAULT = 500;
 
-export const TYPE_STYLES: TypeStyle[] = ["headline", "paragraph", "footnote"];
+export const TYPE_SLOT_COUNT = 3;
+
+/**
+ * No canonical Made by Madelen yellow exists in the product palette.
+ * Ivory `#f3efe6` is the headline/paragraph default. This is a restrained
+ * film-subtitle yellow used only as the Subtitle identity default.
+ */
+export const SUBTITLE_YELLOW = "#f5c518";
+
+export const TYPE_STYLES: TypeStyle[] = ["headline", "paragraph", "subtitle"];
 export const TYPE_ROLES = TYPE_STYLES;
 export const TYPE_COMPOSITIONS = TYPE_STYLES;
 export const TYPE_ANCHORS: TypeAnchor[] = ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"];
@@ -115,14 +125,37 @@ function num(v: unknown, lo: number, hi: number, fb: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
+function incomingStyleToken(raw: Partial<TypeBlock> | Partial<TypeState> | null | undefined): string | undefined {
+  const rec = raw as { composition?: unknown; style?: unknown; mode?: unknown } | null | undefined;
+  if (typeof rec?.style === "string") return rec.style;
+  if (typeof rec?.composition === "string") return rec.composition;
+  if (rec?.mode === "fixed") return "footnote";
+  return undefined;
+}
+
+export function isLegacyFootnoteToken(token: string | undefined): boolean {
+  return token === "footnote" || token === "caption" || token === "quiet";
+}
+
+/** Collapse legacy Footnote copy to a single Subtitle cue. */
+export function flattenLegacyFootnoteCopy(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join(" ");
+}
+
 export function parseStyle(raw: Partial<TypeBlock> | Partial<TypeState> | null | undefined): TypeStyle {
   const rec = raw as { composition?: unknown; style?: unknown } | null | undefined;
   const c = rec?.style ?? rec?.composition;
-  if (c === "headline" || c === "paragraph" || c === "footnote") return c;
+  if (c === "headline" || c === "paragraph" || c === "subtitle") return c;
+  if (c === "footnote") return "subtitle";
   if (c === "display" || c === "folio" || c === "stack") return "headline";
   if (c === "editorial" || c === "spread") return "paragraph";
-  if (c === "caption" || c === "quiet") return "footnote";
-  if ((raw as { mode?: unknown })?.mode === "fixed") return "footnote";
+  if (c === "caption" || c === "quiet") return "subtitle";
+  if ((raw as { mode?: unknown })?.mode === "fixed") return "subtitle";
   return "headline";
 }
 
@@ -208,17 +241,17 @@ export function styleDefaults(style: TypeStyle): StyleDefaults {
       column: "medium",
     };
   }
-  if (style === "footnote") {
+  if (style === "subtitle") {
     return {
-      scale: 36,
-      tracking: 54,
+      scale: 32,
+      tracking: 28,
       gap: 16,
       leading: 48,
       weight: 500,
-      anchor: "bl",
+      anchor: "bc",
       padding: 0,
       distribution: "packed",
-      column: "wide",
+      column: "medium",
     };
   }
   return {
@@ -253,6 +286,8 @@ export function applyStyleChange(
     spacing: next.tracking,
   };
   if (current.anchor === prev.anchor) patch.anchor = next.anchor;
+  if (style === "subtitle") patch.color = SUBTITLE_YELLOW;
+  else if (current.composition === "subtitle") patch.color = "#f3efe6";
   return patch;
 }
 
@@ -281,14 +316,14 @@ export function defaultTypeBlock(enabled: boolean, style: TypeStyle = "headline"
     column: defs.column,
     padding: defs.padding,
     weight: defs.weight,
-    color: "#f3efe6",
+    color: style === "subtitle" ? SUBTITLE_YELLOW : "#f3efe6",
     blendMode: "normal",
     opacity: 100,
     align: placed.align,
     valign: placed.valign,
     x: placed.x,
     y: placed.y,
-    mode: style === "footnote" ? "fixed" : "responsive",
+    mode: "responsive",
     spacing: defs.tracking,
   };
 }
@@ -297,9 +332,12 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
   const composition = parseStyle(raw);
   const d = defaultTypeBlock(fallbackEnabled, composition);
   if (!raw) return d;
+  const legacyFootnote = isLegacyFootnoteToken(incomingStyleToken(raw));
   const anchor = parseAnchor(raw, d.anchor);
   const placed = alignFromAnchor(anchor);
   const color = typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : d.color;
+  const rawText = typeof raw.text === "string" ? raw.text : d.text;
+  const text = legacyFootnote ? flattenLegacyFootnoteCopy(rawText) : rawText;
   const tracking = num(
     (raw as { tracking?: unknown }).tracking ?? raw.spacing ?? (raw as { spread?: number }).spread,
     0,
@@ -308,7 +346,7 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
   );
   return {
     enabled: raw.enabled === true,
-    text: typeof raw.text === "string" ? raw.text : d.text,
+    text,
     composition,
     textAlign: parseTextAlign((raw as { textAlign?: unknown }).textAlign, d.textAlign),
     anchor,
@@ -327,13 +365,17 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
     valign: placed.valign,
     x: placed.x,
     y: placed.y,
-    mode: composition === "footnote" ? "fixed" : "responsive",
+    mode: "responsive",
     spacing: tracking,
   };
 }
 
 export function defaultTypeState(): TypeState {
-  const blocks: TypePage = [defaultTypeBlock(true, "headline"), defaultTypeBlock(false, "headline")];
+  const blocks: TypePage = [
+    defaultTypeBlock(true, "headline"),
+    defaultTypeBlock(false, "headline"),
+    defaultTypeBlock(false, "headline"),
+  ];
   return {
     enabled: false,
     blocks,
@@ -409,19 +451,24 @@ function looksLikeLegacyBlock(raw: Record<string, unknown>): boolean {
   );
 }
 
+function padTypePage(raw: unknown[] | undefined, fallbackEnabled0 = true): TypePage {
+  return [
+    clampTypeBlock((raw?.[0] as Partial<TypeBlock> | undefined) ?? defaultTypeBlock(fallbackEnabled0, "headline"), fallbackEnabled0),
+    clampTypeBlock((raw?.[1] as Partial<TypeBlock> | undefined) ?? defaultTypeBlock(false, "headline"), false),
+    clampTypeBlock((raw?.[2] as Partial<TypeBlock> | undefined) ?? defaultTypeBlock(false, "headline"), false),
+  ];
+}
+
 export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown> | null | undefined): TypeState {
   const d = defaultTypeState();
   if (!raw) return d;
   const rec = raw as Record<string, unknown>;
-  const activeIndex: 0 | 1 = rec.activeIndex === 1 ? 1 : 0;
+  const activeIndex: TypeSlot = rec.activeIndex === 2 ? 2 : rec.activeIndex === 1 ? 1 : 0;
   let blocks: TypePage;
   if (Array.isArray(rec.blocks) && rec.blocks.length >= 1) {
-    blocks = [
-      clampTypeBlock(rec.blocks[0] as Partial<TypeBlock>, true),
-      clampTypeBlock((rec.blocks[1] as Partial<TypeBlock> | undefined) ?? defaultTypeBlock(false), false),
-    ];
+    blocks = padTypePage(rec.blocks, true);
   } else if (looksLikeLegacyBlock(rec)) {
-    blocks = [clampTypeBlock({ ...(rec as Partial<TypeBlock>), enabled: true }, true), defaultTypeBlock(false)];
+    blocks = padTypePage([clampTypeBlock({ ...(rec as Partial<TypeBlock>), enabled: true }, true)]);
   } else {
     blocks = cloneTypePage(d.blocks);
   }
@@ -431,10 +478,7 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     const home = cloneTypePage(blocks);
     pages = rec.pages.slice(0, TYPE_PAGE_MAX).map((page) => {
       if (!Array.isArray(page)) return cloneTypePage(home);
-      return [
-        clampTypeBlock(page[0] as Partial<TypeBlock>, true),
-        clampTypeBlock((page[1] as Partial<TypeBlock> | undefined) ?? defaultTypeBlock(false), false),
-      ];
+      return padTypePage(page, true);
     });
   } else {
     pages = [cloneTypePage(blocks)];
@@ -542,11 +586,13 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   };
 }
 
-export function activeTypeBlocks(state: TypeState): { index: 0 | 1; block: TypeBlock }[] {
+export function activeTypeBlocks(state: TypeState): { index: TypeSlot; block: TypeBlock }[] {
   if (!state.enabled) return [];
-  const out: { index: 0 | 1; block: TypeBlock }[] = [];
-  if (state.blocks[0].enabled && state.blocks[0].text.trim()) out.push({ index: 0, block: state.blocks[0] });
-  if (state.blocks[1].enabled && state.blocks[1].text.trim()) out.push({ index: 1, block: state.blocks[1] });
+  const out: { index: TypeSlot; block: TypeBlock }[] = [];
+  for (const index of [0, 1, 2] as const) {
+    const block = state.blocks[index];
+    if (block.enabled && block.text.trim()) out.push({ index, block });
+  }
   return out;
 }
 
@@ -562,7 +608,7 @@ export function cloneTypeState(state: TypeState): TypeState {
   const win = clampSequenceWindow(state.sequenceStart, state.sequenceStop);
   return {
     enabled: state.enabled,
-    activeIndex: state.activeIndex,
+    activeIndex: state.activeIndex === 2 ? 2 : state.activeIndex === 1 ? 1 : 0,
     pages,
     selected,
     frameHoldEnabled: cloneFrameHoldEnabled(state.frameHoldEnabled, pages.length),

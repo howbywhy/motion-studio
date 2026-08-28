@@ -6,12 +6,12 @@ import { defaultParamValues, type ParamValues } from "../core/types";
 import { presetsForTreatment } from "../core/presets";
 import { clampEndBehaviourSettings, type EndBehaviourMode } from "../core/endBehaviour";
 import { clampTypeState } from "../core/typeState";
-import { limitedSequenceResolve, sequenceEnvelope } from "../core/sequencePhase";
+import { limitedPairProgress, limitedSequenceResolve, sequenceEnvelope } from "../core/sequencePhase";
 
 const W = 320;
 const H = 400;
 const LOOP = 12;
-const LIMITS = [100, 75, 50, 25, 0];
+const LIMITS = [100, 80, 75, 70, 60, 50, 40, 25, 20, 0];
 const PHASES = [0.25, 0.5, 0.7, 0.85, 0.95, 0.995];
 const EXPORT_TIMES = [0, 1, 3, 6, 11.9];
 
@@ -100,9 +100,12 @@ export interface ResolveLimitReport {
   identity100: boolean;
   peakUnaffected: boolean;
   terminalDiffers: boolean;
+  midRangeDistinct: boolean;
   holdExportIdentical: boolean;
   autoMoves: boolean;
   envelopeMath: boolean;
+  pulseDefaultStable: boolean;
+  pulseSettleRangeMoves: boolean;
   elapsedMs: number;
   details: Record<string, unknown>;
 }
@@ -142,15 +145,27 @@ export async function runResolveLimitSheet(root: HTMLElement): Promise<ResolveLi
     allEqual(LIMITS.map((l) => hashes[`${l}@${p}`]!)),
   );
 
-  const terminal = LIMITS.map((l) => hashes[`${l}@0.995`]!);
-  const terminalDiffers = new Set(terminal).size === LIMITS.length;
+  const coreLimits = [0, 25, 50, 75, 100];
+  const terminal = coreLimits.map((l) => hashes[`${l}@0.995`]!);
+  const terminalDiffers = new Set(terminal).size === coreLimits.length;
+
+  const midRangeDistinct =
+    hashes["25@0.995"] !== hashes["50@0.995"] &&
+    hashes["50@0.995"] !== hashes["75@0.995"] &&
+    hashes["75@0.995"] !== hashes["100@0.995"] &&
+    hashes["0@0.995"] !== hashes["25@0.995"];
 
   const env995 = sequenceEnvelope("bloom", "clean", 0.995);
   const envelopeMath =
+    limitedPairProgress(0.995, 100) === 0.995 &&
+    limitedPairProgress(0.995, undefined) === 0.995 &&
+    limitedPairProgress(0.995, 0) === 0.52 &&
     limitedSequenceResolve(env995.resolve, 100) === env995.resolve &&
-    limitedSequenceResolve(env995.resolve, 50) === env995.resolve * 0.5 &&
     limitedSequenceResolve(env995.resolve, 0) === 0 &&
-    limitedSequenceResolve(env995.resolve, undefined) === env995.resolve;
+    limitedSequenceResolve(env995.resolve, undefined) === env995.resolve &&
+    limitedPairProgress(1, 25) < limitedPairProgress(1, 50) &&
+    limitedPairProgress(1, 50) < limitedPairProgress(1, 75) &&
+    limitedPairProgress(1, 75) < limitedPairProgress(1, 100);
 
   renderer.setParams(bloomParams(45));
   renderer.setClockMode("hold");
@@ -205,13 +220,38 @@ export async function runResolveLimitSheet(root: HTMLElement): Promise<ResolveLi
     cell(strip, `p${p.toFixed(3)} pair ${info.pairIndex}`, img);
   }
 
+  renderer.setPlaybackMode("pingpong");
+  renderer.setBloomPulse({ start: 0.42, end: 0.58, cycles: 1 });
+  renderer.setClockMode("hold");
+  renderer.setHoldPhase(0.5);
+  const pulseDefault: Record<number, string> = {};
+  for (const limit of [0, 50, 100]) {
+    renderer.setParams(bloomParams(limit));
+    pulseDefault[limit] = hashPixels(settle(renderer));
+  }
+  const pulseDefaultStable = pulseDefault[0] === pulseDefault[50] && pulseDefault[50] === pulseDefault[100];
+
+  renderer.setBloomPulse({ start: 0.72, end: 0.95, cycles: 1 });
+  renderer.setHoldPhase(0.5);
+  const pulseSettle: Record<number, string> = {};
+  for (const limit of [0, 50, 100]) {
+    renderer.setParams(bloomParams(limit));
+    pulseSettle[limit] = hashPixels(settle(renderer));
+  }
+  const pulseSettleRangeMoves =
+    pulseSettle[0] !== pulseSettle[100] && pulseSettle[50] !== pulseSettle[100] && pulseSettle[0] !== pulseSettle[50];
+  renderer.setPlaybackMode("loop");
+
   return {
     identity100,
     peakUnaffected,
     terminalDiffers,
+    midRangeDistinct,
     holdExportIdentical,
     autoMoves,
     envelopeMath,
+    pulseDefaultStable,
+    pulseSettleRangeMoves,
     elapsedMs: Math.round(performance.now() - t0),
     details: {
       hashes,
@@ -221,6 +261,15 @@ export async function runResolveLimitSheet(root: HTMLElement): Promise<ResolveLi
       auto: { a17, a63, a95 },
       seqPairs,
       env995: env995.resolve,
+      pMax: {
+        0: limitedPairProgress(1, 0),
+        25: limitedPairProgress(1, 25),
+        50: limitedPairProgress(1, 50),
+        75: limitedPairProgress(1, 75),
+        100: limitedPairProgress(1, 100),
+      },
+      pulseDefault,
+      pulseSettle,
     },
   };
 }

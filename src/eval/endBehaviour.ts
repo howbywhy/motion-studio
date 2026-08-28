@@ -56,7 +56,7 @@ function mbmType(): TypeState {
       {
         enabled: true,
         text: mbmById("now").text,
-        composition: "footnote",
+        composition: "subtitle",
         anchor: "bl",
         textAlign: "left",
         color: "#ffffff",
@@ -315,7 +315,7 @@ function mbmLiveType(): TypeState {
       {
         enabled: true,
         text: mbmById("worn").text,
-        composition: "footnote",
+        composition: "subtitle",
         anchor: "bl",
         textAlign: "left",
         color: "#ffffff",

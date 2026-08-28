@@ -44,7 +44,7 @@ function typeOn() {
     enabled: true,
     blocks: [
       { enabled: true, text: "MADE TO BE WORN", composition: "headline", anchor: "bl", color: "#ffffff", scale: 62 },
-      { enabled: true, text: "NOW AVAILABLE", composition: "footnote", anchor: "bl", color: "#ffffff", scale: 34 },
+      { enabled: true, text: "NOW AVAILABLE", composition: "subtitle", anchor: "bl", color: "#ffffff", scale: 34 },
     ],
   });
 }
@@ -108,6 +108,7 @@ function cell(parent: HTMLElement, label: string, img: ImageData): void {
 
 export interface HoldExportReport {
   holdIdentical: boolean;
+  restrained037: boolean;
   autoMoves: boolean;
   endBehaviourHold: boolean;
   workflowB: boolean;
@@ -307,8 +308,11 @@ export async function runHoldExportSheet(root: HTMLElement): Promise<HoldExportR
 
   const exportRestoresClock = renderer.getClockMode() === "hold" && renderer.getLoopPhase() === 0.63;
 
+  const restrained037 = (holdRows.Restrained as Record<string, { ok?: boolean }>)?.["0.37"]?.ok === true;
+
   return {
     holdIdentical,
+    restrained037,
     autoMoves,
     endBehaviourHold,
     workflowB,
