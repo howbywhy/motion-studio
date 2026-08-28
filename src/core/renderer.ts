@@ -35,6 +35,12 @@ import {
   type PlaybackMode,
   type SequenceItem,
 } from "./sequence";
+import {
+  bloomPulsePairMapping,
+  clampBloomPulse,
+  DEFAULT_BLOOM_PULSE,
+  type BloomPulseSettings,
+} from "./bloomPulse";
 import type { MaskBehavior, ParamValues } from "./types";
 
 export type { PlaybackMode, SequenceItem };
@@ -180,6 +186,7 @@ export class Renderer {
   private elapsed = 0;
   private lastTs = 0;
   private playbackMode: PlaybackMode = "loop";
+  private bloomPulse: BloomPulseSettings = { ...DEFAULT_BLOOM_PULSE };
   private diagnostic: DiagnosticMode = "off";
   private registrationOn = false;
   private registrationAmount = REGISTRATION_AMOUNT_DEFAULT;
@@ -738,6 +745,21 @@ export class Renderer {
     return this.playbackMode;
   }
 
+  setBloomPulse(pulse: { start?: unknown; end?: unknown; cycles?: unknown }): void {
+    this.bloomPulse = clampBloomPulse({ ...this.bloomPulse, ...pulse });
+    this.bindActivePair();
+    this.renderFrame();
+  }
+
+  getBloomPulse(): BloomPulseSettings {
+    return { ...this.bloomPulse };
+  }
+
+  /** Pair-local Bloom phase after Loop / Ping-pong mapping. */
+  getBloomSamplePhase(): number {
+    return this.pairMapping().localPhase;
+  }
+
   setAudioEnabled(on: boolean): void {
     this.audioEnabled = on;
     this.syncAudio();
@@ -1018,7 +1040,11 @@ export class Renderer {
   }
 
   private pairMapping(): PairMapping {
-    return resolveActivePair(this.items.length, this.getLoopPhase(), this.playbackMode);
+    const master = this.getLoopPhase();
+    if (this.playbackMode === "pingpong" && this.behavior?.id === "bloom") {
+      return bloomPulsePairMapping(this.items.length, master, this.bloomPulse);
+    }
+    return resolveActivePair(this.items.length, master, this.playbackMode);
   }
 
   private bindActivePair(): void {
@@ -1497,13 +1523,13 @@ export class Renderer {
     const tType = mark();
 
     const end = this.endBehaviour;
-    if (end.mode !== "off" && this.playbackMode === "loop") {
+    if (end.mode !== "off") {
       this.lastEndDiagnostics = applyEndBehaviour(
         composedCtx,
         this.composedLayer,
         this.getLoopPhase(),
         end,
-        this.playbackMode,
+        "loop",
       );
     } else {
       this.lastEndDiagnostics = emptyEndDiagnostics(this.getLoopPhase(), end, this.playbackMode);

@@ -14,7 +14,9 @@
  *   B  peak-hold-settle — peak by 0.52, hold to 0.72, then authored mask settle
  *   C  peak-hold-cut    — peak by 0.62, hold to the boundary, editorial cut
  *
- * Ping-pong reverses source order. Behaviour phase is never run backwards.
+ * Bloom Ping-pong remaps pair-local progress only. Behaviour phase is
+ * still the one-way envelope; we sample it between Pulse Start and End.
+ * Type / Flicker / Registration keep using master phase.
  */
 
 export type SeamCandidate = "A" | "B" | "C";

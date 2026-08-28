@@ -142,9 +142,8 @@ export function mountEndBehaviourPanel(
   };
 
   function sync(): void {
-    const pingpong = getPlaybackMode() !== "loop";
-    host.hidden = pingpong;
-    if (pingpong) return;
+    host.hidden = false;
+    void getPlaybackMode;
     const state = get();
     rebuildMode(state);
     rebuildFields(state);

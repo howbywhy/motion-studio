@@ -28,6 +28,9 @@ export interface SavedState {
   bwOn: boolean;
   aspect: string;
   playbackMode: "loop" | "pingpong";
+  pulseStart?: number;
+  pulseEnd?: number;
+  pulseCycles?: number;
   loopSeconds: number;
   selectedId: string | null;
   audioEnabled: boolean;

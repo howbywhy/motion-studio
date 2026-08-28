@@ -778,8 +778,17 @@ body {
   z-index: 1;
 }
 
-.type-seq-handle[aria-label="Stop"] {
+.type-seq-handle[aria-label="Stop"],
+.type-seq-handle[aria-label="End"] {
   z-index: 2;
+}
+
+.bloom-pulse {
+  margin-bottom: 4px;
+}
+
+.bloom-pulse .seg-toggle button {
+  flex: 1;
 }
 
 .type-panel .type-seg button {

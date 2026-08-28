@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: resolve(root, "index.html"),
         typeStates: resolve(root, "eval/type-states.html"),
+        bloomPulse: resolve(root, "eval/bloom-pulse.html"),
       },
     },
   },

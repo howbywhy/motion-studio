@@ -14,7 +14,7 @@ import type { ParamValues } from "./types";
  *
  * Does not touch media, sequence, Registration (including Amount), End
  * Behaviour, Typography (including Type States, page order, Frame Hold, Hold Length, Sequence Speed,
- * Sequence Window), B&W, background, audio, export, or aspect. Does not
+ * Sequence Window), Bloom Pulse Range / Speed, B&W, background, audio, export, or aspect. Does not
  * randomise FIELD or Shift.
  */
 

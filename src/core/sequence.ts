@@ -34,8 +34,9 @@ export function clampLoopPhase(phase: number): number {
  * Consecutive pairs along the sequence.
  *
  * Loop: 01/02, 02/03, …, n/01
- * Ping-pong: walk 01→n then fold back n→01, pairing neighbours on that path.
- * For two sources both modes yield 01/02 then 02/01.
+ * Legacy Ping-pong (non-Bloom): walk 01→n then fold back n→01.
+ * Bloom Ping-pong does not use this path — it freezes on LOOP pair 0
+ * and remaps pair-local phase (see bloomPulse.ts).
  */
 export function sequencePairs(n: number, mode: PlaybackMode): [number, number][] {
   if (n < 2) return [];

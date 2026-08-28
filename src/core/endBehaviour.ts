@@ -201,7 +201,7 @@ function rgbPxFor(amount: number): number {
 
 export function endRegionFor(phase: number, settings: EndBehaviourSettings, playbackMode: PlaybackMode): EndRegion {
   if (settings.mode === "off") return "off";
-  if (playbackMode !== "loop") return "pingpong";
+  void playbackMode;
   const win = endWindows(settings.hold, settings.duration);
   if (!(phase > 0) || phase >= 1) return "before";
   if (phase >= win.disruptStart) return "disrupt";

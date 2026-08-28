@@ -15,6 +15,8 @@ import { buildBloomFieldMap } from "./ui/bloomFieldMap";
 import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
 import { mountEndBehaviourPanel } from "./ui/endBehaviourPanel";
+import { mountBloomPulse } from "./ui/bloomPulsePanel";
+import { clampBloomPulse } from "./core/bloomPulse";
 import { clampEndBehaviourSettings, END_BEHAVIOUR_OFF } from "./core/endBehaviour";
 import { clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./core/globalRegistration";
 import { loadSwitzer } from "./core/typeFont";
@@ -639,7 +641,16 @@ function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: Par
     const revealDefs = defs.filter((d) => revealKeys.has(d.key));
     const resolveDefs = defs.filter((d) => resolveKeys.has(d.key));
     const rest = defs.filter((d) => !fieldKeys.has(d.key) && !revealKeys.has(d.key) && !resolveKeys.has(d.key));
-    buildControls(container, fieldDefs, values, onChange);
+    const pulse = appendFamily(container, "Pulse");
+    (pulse.parentElement as HTMLElement).hidden = renderer.getPlaybackMode() !== "pingpong";
+    mountBloomPulse(
+      pulse,
+      () => renderer.getBloomPulse(),
+      (next) => renderer.setBloomPulse(next),
+    );
+    const fields = document.createElement("div");
+    container.appendChild(fields);
+    buildControls(fields, fieldDefs, values, onChange);
     const reveal = appendFamily(container, "Reveal");
     buildControls(reveal, revealDefs, values, onChange);
     const resolve = appendFamily(container, "Resolve");
@@ -1109,6 +1120,7 @@ function setPlaybackModeUI(mode: "loop" | "pingpong"): void {
     b.classList.toggle("active", b.getAttribute("data-value") === mode);
   });
   endUi.sync();
+  rebuildControlsPanel();
 }
 
 playbackToggle.addEventListener("click", (e) => {
@@ -1135,6 +1147,9 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     placeholderBg,
     aspect: currentAspect,
     playbackMode: currentPlaybackMode,
+    pulseStart: renderer.getBloomPulse().start,
+    pulseEnd: renderer.getBloomPulse().end,
+    pulseCycles: renderer.getBloomPulse().cycles,
     loopSeconds: renderer.getLoopSeconds(),
     selectedId: renderer.getSelectedId(),
     audioEnabled: renderer.isAudioEnabled(),
@@ -1184,6 +1199,11 @@ function loadSavedState(state: SavedState): void {
   }
 
   setAspect(state.aspect);
+  renderer.setBloomPulse(clampBloomPulse({
+    start: state.pulseStart,
+    end: state.pulseEnd,
+    cycles: state.pulseCycles,
+  }));
   setPlaybackModeUI(state.playbackMode);
   renderer.setLoopSeconds(state.loopSeconds);
   loopLengthUi.setSeconds(renderer.getLoopSeconds());
@@ -1701,6 +1721,12 @@ Object.assign(window, {
     getSeamCandidate: () => renderer.getSeamCandidate(),
     setPlaybackMode: (mode: "loop" | "pingpong") => setPlaybackModeUI(mode),
     getPlaybackMode: () => renderer.getPlaybackMode(),
+    setBloomPulse: (pulse: { start?: number; end?: number; cycles?: number }) => {
+      renderer.setBloomPulse(clampBloomPulse({ ...renderer.getBloomPulse(), ...pulse }));
+      rebuildControlsPanel();
+    },
+    getBloomPulse: () => renderer.getBloomPulse(),
+    getBloomSamplePhase: () => renderer.getBloomSamplePhase(),
     getLoopSeconds: () => renderer.getLoopSeconds(),
     setLoopSeconds: (seconds: number) => {
       renderer.setLoopSeconds(seconds);

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bloom Pulse</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.4 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 64em; }
+      pre { color: #bbb; font-size: 11px; margin: 8px 0 24px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin: 12px 0 36px; }
+      figure { margin: 0; }
+      canvas { width: 100%; height: auto; background: #000; display: block; }
+      figcaption { margin-top: 6px; color: #888; font-size: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Bloom Pulse</h1>
+    <p>Ping-pong samples a Pulse Range of the approved Bloom pair. Type and Flicker stay on the master clock.</p>
+    <div id="root">Loading…</div>
+    <pre id="out"></pre>
+    <script type="module">
+      import { runBloomPulseSheet } from "/src/eval/bloomPulse.ts";
+      const root = document.getElementById("root");
+      const out = document.getElementById("out");
+      void (async () => {
+        try {
+          const report = await runBloomPulseSheet(root);
+          window.__BLOOM_PULSE__ = report;
+          const { tables, details, ...summary } = report;
+          out.textContent = JSON.stringify({ summary, details, tables }, null, 2);
+        } catch (e) {
+          const err = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ""}` : String(e);
+          root.textContent = err;
+          console.error(e);
+        }
+      })();
+    </script>
+  </body>
+</html>

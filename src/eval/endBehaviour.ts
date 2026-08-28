@@ -158,7 +158,7 @@ export interface EndBehaviourReport {
   noHistory: boolean;
   amountDoesNotMoveWindow: boolean;
   holdCreatesStillness: boolean;
-  pingpongBypass: boolean;
+    pingpongMasterFlicker: boolean;
   fpsParity: boolean;
   scaleFragmentParity: boolean;
   fractureMigrates: boolean;
@@ -258,7 +258,7 @@ export async function runEndBehaviourSheet(root: HTMLElement): Promise<EndBehavi
     noHistory: pixelDiff(a, c) === 0,
     amountDoesNotMoveWindow: windowUnmoved,
     holdCreatesStillness: pixelDiff(srcData, holdPaint) === 0 && seqDiags.hold?.region === "hold",
-    pingpongBypass: ping.applied === false,
+    pingpongMasterFlicker: ping.applied === true,
     fpsParity: fpsSameRecipe,
     scaleFragmentParity: p1080.fragmentCount === p2160.fragmentCount,
     fractureMigrates,
