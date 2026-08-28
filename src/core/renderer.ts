@@ -1615,6 +1615,7 @@ export class Renderer {
         this.playbackMode,
         this.transitionFlickerEnabled,
         this.endBehaviour,
+        this.getLoopSeconds(),
       );
     } else {
       this.lastTransitionDiagnostics = emptyTransitionFlickerDiagnostics(loopPairCount);

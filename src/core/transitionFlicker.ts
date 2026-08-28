@@ -1,4 +1,4 @@
-import type { PlaybackMode } from "./sequence";
+import { clampLoopSeconds, type PlaybackMode } from "./sequence";
 import {
   endWindows,
   flickerPeakMetrics,
@@ -13,12 +13,23 @@ import {
  * Transition Flicker is a Loop-only micro interruption at Bloom pair cuts.
  * Same grammar as End Flicker, lower duration and violence.
  * Deterministic from master phase. No timers, no events, no accumulating state.
+ * Window width is wall-clock time / authored loop length, so 4s / 8s / 12s
+ * share the same punctuation duration. Not runtime-FPS dependent.
  */
 
-/** Full master-phase span ≈ 0.012 (~3.6 frames at 12s / 25fps). Not exposed. */
-export const TRANSITION_FLICKER_HALF_SPAN = 0.006;
+/** Authored wall-clock duration of the micro interruption. Not exposed. */
+export const TRANSITION_FLICKER_DURATION_SEC = 0.12;
 /** Peak energy vs End Flicker at amount 100. Not exposed. */
 export const TRANSITION_FLICKER_ENERGY = 0.28;
+
+/** Full master-phase span for this loop length. ~3 frames at 25fps. */
+export function transitionFlickerSpan(loopSeconds: number): number {
+  return TRANSITION_FLICKER_DURATION_SEC / clampLoopSeconds(loopSeconds);
+}
+
+export function transitionFlickerHalfSpan(loopSeconds: number): number {
+  return transitionFlickerSpan(loopSeconds) / 2;
+}
 const TRANSITION_SEED = 0x51f1c4e1;
 
 export interface TransitionFlickerPlan {
@@ -76,14 +87,16 @@ function microState(seed: number, cutIndex: number): FlickerState {
 export function transitionFlickerEnvelope(
   phase: number,
   pairCount: number,
+  loopSeconds: number,
 ): { envelope: number; cutIndex: number; cut: number } {
   const p = masterPhase(phase);
+  const half = transitionFlickerHalfSpan(loopSeconds);
   const cuts = transitionPairCuts(pairCount);
   let best = 0;
   let bestI = -1;
   let bestCut = 0;
   for (let i = 0; i < cuts.length; i++) {
-    const env = 1 - Math.abs(p - cuts[i]!) / TRANSITION_FLICKER_HALF_SPAN;
+    const env = half > 0 ? 1 - Math.abs(p - cuts[i]!) / half : 0;
     if (env > best) {
       best = env;
       bestI = i;
@@ -101,10 +114,11 @@ export function transitionFlickerEnvelope(
 export function transitionFlickerOverlapsEnd(
   cut: number,
   end: EndBehaviourSettings,
+  loopSeconds: number,
 ): boolean {
   if (end.mode !== "flicker") return false;
   const win = endWindows(end.hold, end.duration);
-  return cut + TRANSITION_FLICKER_HALF_SPAN >= win.holdStart;
+  return cut + transitionFlickerHalfSpan(loopSeconds) >= win.holdStart;
 }
 
 export function emptyTransitionFlickerPlan(pairCount = 0): TransitionFlickerPlan {
@@ -129,16 +143,17 @@ export function planTransitionFlicker(
   end: EndBehaviourSettings,
   width: number,
   height: number,
+  loopSeconds: number,
 ): TransitionFlickerPlan {
   const empty = emptyTransitionFlickerPlan(pairCount);
   if (!enabled || playbackMode !== "loop" || pairCount < 2) return empty;
-  const { envelope, cutIndex, cut } = transitionFlickerEnvelope(phase, pairCount);
+  const { envelope, cutIndex, cut } = transitionFlickerEnvelope(phase, pairCount, loopSeconds);
   if (cutIndex < 0 || envelope <= 0.02) return empty;
 
   const p = masterPhase(phase);
   if (end.mode === "flicker") {
     const win = endWindows(end.hold, end.duration);
-    if (p >= win.holdStart || transitionFlickerOverlapsEnd(cut, end)) {
+    if (p >= win.holdStart || transitionFlickerOverlapsEnd(cut, end, loopSeconds)) {
       return { ...empty, cutIndex, cut, envelope, suppressed: true };
     }
   }
@@ -171,6 +186,7 @@ export function applyTransitionFlicker(
   playbackMode: PlaybackMode,
   enabled: boolean,
   end: EndBehaviourSettings,
+  loopSeconds: number,
 ): TransitionFlickerDiagnostics {
   const plan = planTransitionFlicker(
     phase,
@@ -180,6 +196,7 @@ export function applyTransitionFlicker(
     end,
     layer.width,
     layer.height,
+    loopSeconds,
   );
   if (!plan.active) {
     return {

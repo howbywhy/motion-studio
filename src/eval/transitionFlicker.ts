@@ -9,7 +9,9 @@ import { clampTypeState, type TypeBlock, type TypeState } from "../core/typeStat
 import { generateRandomisation } from "../core/randomise";
 import { loadSwitzer, switzerReady } from "../core/typeFont";
 import {
-  TRANSITION_FLICKER_HALF_SPAN,
+  TRANSITION_FLICKER_DURATION_SEC,
+  transitionFlickerHalfSpan,
+  transitionFlickerSpan,
   transitionPairCuts,
   planTransitionFlicker,
 } from "../core/transitionFlicker";
@@ -156,6 +158,7 @@ export interface TransitionFlickerReport {
   savedRestore: boolean;
   randomiseLeaves: boolean;
   defaultOff: boolean;
+  durationLocked: boolean;
   elapsedMs: number;
   details: Record<string, unknown>;
 }
@@ -185,8 +188,9 @@ export async function runTransitionFlickerSheet(root: HTMLElement): Promise<Tran
   const r2onWrap = at(r2, 0);
   const r2onWrapApplied = r2.lastTransitionDiagnostics?.applied === true;
   const r2onCutAgain = at(r2, 0.5);
-  const r2fwd = [0.5 - TRANSITION_FLICKER_HALF_SPAN * 0.6, 0.5, 0.5 + TRANSITION_FLICKER_HALF_SPAN * 0.6].map((p) => hashPixels(at(r2, p)));
-  const r2back = [0.5 + TRANSITION_FLICKER_HALF_SPAN * 0.6, 0.5, 0.5 - TRANSITION_FLICKER_HALF_SPAN * 0.6].map((p) => hashPixels(at(r2, p)));
+  const half12 = transitionFlickerHalfSpan(LOOP);
+  const r2fwd = [0.5 - half12 * 0.6, 0.5, 0.5 + half12 * 0.6].map((p) => hashPixels(at(r2, p)));
+  const r2back = [0.5 + half12 * 0.6, 0.5, 0.5 - half12 * 0.6].map((p) => hashPixels(at(r2, p)));
   const holdA = hashPixels(at(r2, 0.5));
   const holdB = hashPixels(at(r2, 0.5));
 
@@ -288,8 +292,54 @@ export async function runTransitionFlickerSheet(root: HTMLElement): Promise<Tran
   const lastCutSuppressedNearEnd = midStill && suppressR.lastTransitionDiagnostics?.applied !== true
     && suppressR.lastTransitionDiagnostics?.suppressed === true;
 
-  const typeGrid = section(root, "Type repetition + Transition Flicker  ·  3 images");
+  const durationGrid = section(root, "Duration lock  ·  same sources  ·  4s / 8s / 12s at cut 0.50");
+  const durationOffsets = section(root, "Duration lock  ·  60ms from cut  ·  same punctuation width in time");
+  const spanEq: Record<number, number> = {};
+  let durationLocked = true;
+  for (const seconds of [4, 8, 12] as const) {
+    const span = transitionFlickerSpan(seconds);
+    spanEq[seconds] = span;
+    if (Math.abs(span * seconds - TRANSITION_FLICKER_DURATION_SEC) > 1e-9) durationLocked = false;
+    if (Math.abs(span * seconds * 25 - 3) > 1e-9) durationLocked = false;
+    const r = makeRenderer(hidden, 2);
+    r.setLoopSeconds(seconds);
+    r.setTransitionFlickerEnabled(true);
+    const peak = at(r, 0.5);
+    const peakOn = r.lastTransitionDiagnostics?.applied === true;
+    const half = transitionFlickerHalfSpan(seconds);
+    const edge = at(r, 0.5 + half * 0.5);
+    const edgeOn = r.lastTransitionDiagnostics?.applied === true;
+    at(r, 0.5 + half * 1.4);
+    const outsideOn = r.lastTransitionDiagnostics?.applied === true;
+    if (!peakOn || !edgeOn || outsideOn) durationLocked = false;
+    cell(durationGrid, `${seconds}s  cut  ${Math.round(span * seconds * 1000)}ms`, peak);
+    cell(durationOffsets, `${seconds}s  +60ms`, edge);
+    r.setTransitionFlickerEnabled(false);
+    const off = at(r, 0.5);
+    if (pixelDiff(off, peak) === 0) durationLocked = false;
+  }
+  const probe = 0.5 + 0.008;
+  const r4s = makeRenderer(hidden, 2);
+  r4s.setLoopSeconds(4);
+  r4s.setTransitionFlickerEnabled(true);
+  at(r4s, probe);
+  const probe4 = r4s.lastTransitionDiagnostics?.applied === true;
+  const r12s = makeRenderer(hidden, 2);
+  r12s.setLoopSeconds(12);
+  r12s.setTransitionFlickerEnabled(true);
+  at(r12s, probe);
+  const probe12 = r12s.lastTransitionDiagnostics?.applied === true;
+  if (!probe4 || probe12) durationLocked = false;
+
+  const typeRepGrid = section(root, "Type repetition  ·  MADE BY MADELEN × 5  ·  4s / 8s / 12s at 1/3");
   typed.setEndBehaviour(clampEndBehaviourSettings({ mode: "off" }));
+  typed.setLoopSeconds(12);
+  for (const seconds of [4, 8, 12] as const) {
+    typed.setLoopSeconds(seconds);
+    cell(typeRepGrid, `${seconds}s  1/3`, at(typed, 1 / 3));
+  }
+  const typeGrid = section(root, "Type repetition + Transition Flicker  ·  3 images · 12s");
+  typed.setLoopSeconds(12);
   for (const p of [0.15, 0.25, 1 / 3, 0.45, 2 / 3, 0.7]) {
     cell(typeGrid, `p${p.toFixed(2)}`, at(typed, p));
   }
@@ -334,8 +384,8 @@ export async function runTransitionFlickerSheet(root: HTMLElement): Promise<Tran
   const fresh = makeRenderer(hidden, 2);
   const defaultOff = fresh.getTransitionFlickerEnabled() === false;
 
-  const idlePlan = planTransitionFlicker(0.2, 2, "loop", true, END_BEHAVIOUR_OFF, W, H);
-  const cutPlan = planTransitionFlicker(0.5, 2, "loop", true, END_BEHAVIOUR_OFF, W, H);
+  const idlePlan = planTransitionFlicker(0.2, 2, "loop", true, END_BEHAVIOUR_OFF, W, H, LOOP);
+  const cutPlan = planTransitionFlicker(0.5, 2, "loop", true, END_BEHAVIOUR_OFF, W, H, LOOP);
 
   return {
     cuts2,
@@ -356,9 +406,23 @@ export async function runTransitionFlickerSheet(root: HTMLElement): Promise<Tran
     savedRestore,
     randomiseLeaves,
     defaultOff,
+    durationLocked,
     elapsedMs: Math.round(performance.now() - t0),
     details: {
-      halfSpan: TRANSITION_FLICKER_HALF_SPAN,
+      durationSec: TRANSITION_FLICKER_DURATION_SEC,
+      span: spanEq,
+      frames25: {
+        4: spanEq[4]! * 4 * 25,
+        8: spanEq[8]! * 8 * 25,
+        12: spanEq[12]! * 12 * 25,
+      },
+      ms: {
+        4: Math.round(spanEq[4]! * 4 * 1000),
+        8: Math.round(spanEq[8]! * 8 * 1000),
+        12: Math.round(spanEq[12]! * 12 * 1000),
+      },
+      probe4,
+      probe12,
       idleEnvelope: idlePlan.envelope,
       cutEnvelope: cutPlan.envelope,
       cutState: cutPlan.flickerState,
