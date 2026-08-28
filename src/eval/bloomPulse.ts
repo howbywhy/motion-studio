@@ -12,9 +12,11 @@ import { loadSwitzer, switzerReady } from "../core/typeFont";
 import {
   bloomPulsePhase,
   clampBloomPulse,
+  DEFAULT_BLOOM_PULSE,
   triangle01,
   type PulseCycles,
 } from "../core/bloomPulse";
+import { generateRandomisation } from "../core/randomise";
 
 const W = 320;
 const H = 400;
@@ -71,14 +73,13 @@ function campaignType(): TypeState {
     sequenceStart: 0.2,
     sequenceStop: 0.75,
     sequenceSpeed: 50,
-    frameHoldEnabled: [false, true, false, false, false, false],
-    frameHoldLength: [2, 2.25, 2, 2, 2, 2],
+    frameHoldEnabled: [false, true, false, false, false],
+    frameHoldLength: [2, 2.25, 2, 2, 2],
     pages: [
       page({ text: "07.09", composition: "headline", scale: 100, anchor: "tl" }),
       page({ text: mbmById("name-break").text, composition: "headline", scale: 78, anchor: "mc" }),
       page({ text: "FLAWED", composition: "headline", scale: 86, anchor: "bl" }),
       page({ text: "AND FLAWLESS", composition: "headline", scale: 64, anchor: "bl" }),
-      page({ text: mbmById("now").text, composition: "headline", scale: 70, anchor: "br" }),
       page({ text: "2026", composition: "headline", scale: 100, anchor: "br" }),
     ],
   });
@@ -178,6 +179,8 @@ export interface BloomPulseReport {
   holdExportExact: boolean;
   loopLengthIndependent: boolean;
   wholeCyclesSeam: boolean;
+  defaultRange: boolean;
+  randomiseLeavesPulse: boolean;
   elapsedMs: number;
   tables: Record<string, PhaseRow[]>;
   details: Record<string, unknown>;
@@ -191,7 +194,7 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
 
   const intro = document.createElement("p");
   intro.textContent =
-    "Loop is the approved Bloom. Ping-pong samples a Pulse Range of that same pair-local evolution. Type sequences on master phase. Flicker still uses master phase.";
+    "Loop is the approved Bloom. Pulse samples a Pulse Range of that same pair-local evolution. Type sequences on master phase. Flicker still uses master phase.";
   root.appendChild(intro);
 
   const hidden = document.createElement("div");
@@ -258,7 +261,7 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
     }
   }
 
-  const sample = clampBloomPulse({ start: 0.4, end: 0.58, cycles: 2 });
+  const sample = clampBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
   pulseR.setPlaybackMode("pingpong");
   pulseR.setBloomPulse(sample);
   loopR.setPlaybackMode("loop");
@@ -307,10 +310,10 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
   pulseR.setTypeState(type);
   pulseR.setRegistrationEnabled(true);
   pulseR.setRegistrationAmount(68);
-  pulseR.setBloomPulse({ start: 0.4, end: 0.58, cycles: 2 });
+  pulseR.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
   pulseR.setPlaybackMode("pingpong");
   let typeIndependent = true;
-  const typeGrid = section(root, "Type + Bloom — 40–58 · 2× · Start 20 Stop 75");
+  const typeGrid = section(root, "Type + Bloom — 42–58 · 2× · Start 20 Stop 75");
   for (const p of MASTER) {
     pulseR.setHoldPhase(p);
     const img = settle(pulseR);
@@ -343,7 +346,7 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
 
   const flickerR = makeRenderer(hidden);
   flickerR.setPlaybackMode("pingpong");
-  flickerR.setBloomPulse({ start: 0.4, end: 0.58, cycles: 2 });
+  flickerR.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
   flickerR.setHoldPhase(0.96);
   flickerR.setEndBehaviour(clampEndBehaviourSettings({ mode: "off" }));
   const noFlicker = settle(flickerR);
@@ -351,8 +354,8 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
   const withFlicker = settle(flickerR);
   const flickerOverPulse = pixelDiff(noFlicker, withFlicker) > 0 && flickerR.getActivePair().pairIndex === 0;
   const flickGrid = section(root, "Flicker over pulsing Bloom — master 0.96");
-  cell(flickGrid, "Ping-pong Flicker Off", noFlicker);
-  cell(flickGrid, "Ping-pong Flicker 100", withFlicker);
+  cell(flickGrid, "Pulse Flicker Off", noFlicker);
+  cell(flickGrid, "Pulse Flicker 100", withFlicker);
 
   pulseR.setTypeState(clampTypeState({ enabled: false }));
   pulseR.setEndBehaviour(clampEndBehaviourSettings({ mode: "off" }));
@@ -400,36 +403,90 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
   for (const range of [
     { label: "5%  45–50", start: 0.45, end: 0.5 },
     { label: "10%  45–55", start: 0.45, end: 0.55 },
+    { label: "16%  42–58", start: 0.42, end: 0.58 },
     { label: "18%  40–58", start: 0.4, end: 0.58 },
     { label: "25%  35–60", start: 0.35, end: 0.6 },
-    { label: "45%  20–65", start: 0.2, end: 0.65 },
   ]) {
     pulseR.setBloomPulse({ start: range.start, end: range.end, cycles: 2 });
     pulseR.setHoldPhase(0.25);
     cell(sizeGrid, `${range.label}  peak`, settle(pulseR));
   }
 
-  const speedGrid = section(root, "Pulse Speed — 40–58 at master 0.25");
-  pulseR.setBloomPulse({ start: 0.4, end: 0.58, cycles: 1 });
+  const speedGrid = section(root, "Pulse Speed — 42–58 at master 0.25");
+  pulseR.setBloomPulse({ start: 0.42, end: 0.58, cycles: 1 });
   for (const cycles of SPEEDS) {
-    pulseR.setBloomPulse({ start: 0.4, end: 0.58, cycles });
+    pulseR.setBloomPulse({ start: 0.42, end: 0.58, cycles });
     pulseR.setHoldPhase(0.25);
     cell(speedGrid, `${cycles}×  bloom ${pulseR.getBloomSamplePhase().toFixed(3)}`, settle(pulseR));
   }
 
-  pulseR.setBloomPulse({ start: 0.4, end: 0.58, cycles: 2 });
+  pulseR.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
   pulseR.setTypeState(type);
   pulseR.setRegistrationEnabled(true);
   pulseR.setRegistrationAmount(68);
   pulseR.setParams(bloomParams(60));
-  const proof = section(root, "Campaign proof — image pulses, information sequences");
-  for (const p of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.85, 0.96, 1]) {
+  pulseR.setEndBehaviour(clampEndBehaviourSettings({ mode: "off" }));
+
+  const comparePhases = [0, 0.15, 0.25, 0.4, 0.5, 0.65, 0.85, 0.96];
+  const variants: { id: string; label: string; mode: "loop" | "pingpong"; start: number; end: number; cycles: PulseCycles }[] = [
+    { id: "A", label: "A  LOOP", mode: "loop", start: 0.42, end: 0.58, cycles: 1 },
+    { id: "B", label: "B  PULSE 42–58  1×", mode: "pingpong", start: 0.42, end: 0.58, cycles: 1 },
+    { id: "C", label: "C  PULSE 42–58  2×", mode: "pingpong", start: 0.42, end: 0.58, cycles: 2 },
+    { id: "D", label: "D  PULSE 45–55  2×", mode: "pingpong", start: 0.45, end: 0.55, cycles: 2 },
+  ];
+  for (const v of variants) {
+    pulseR.setPlaybackMode(v.mode);
+    pulseR.setBloomPulse({ start: v.start, end: v.end, cycles: v.cycles });
+    pulseR.setTypeState(clampTypeState({ enabled: false }));
+    const grid = section(root, `${v.label}  — image only`);
+    for (const p of comparePhases) {
+      pulseR.setHoldPhase(p);
+      cell(grid, `${p.toFixed(2)}  bloom ${pulseR.getBloomSamplePhase().toFixed(2)}`, settle(pulseR));
+    }
+  }
+  for (const v of variants.filter((row) => row.id !== "A")) {
+    pulseR.setPlaybackMode("pingpong");
+    pulseR.setBloomPulse({ start: v.start, end: v.end, cycles: v.cycles });
+    pulseR.setTypeState(type);
+    const grid = section(root, `${v.label}  + Type Sequence`);
+    for (const p of comparePhases) {
+      pulseR.setHoldPhase(p);
+      const vis = typeVisibleForState(type, p);
+      const idx = vis ? typePageIndexForState(type, p) : -1;
+      cell(grid, `${p.toFixed(2)}  ${vis ? `0${idx + 1}` : "no type"}`, settle(pulseR));
+    }
+  }
+
+  pulseR.setPlaybackMode("pingpong");
+  pulseR.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
+  pulseR.setTypeState(type);
+  pulseR.setEndBehaviour(clampEndBehaviourSettings({ mode: "flicker", amount: 100, hold: 45, duration: 35 }));
+  const rhythm = section(root, "Rhythm  C 42–58 2×  ·  Type event  ·  Flicker interruption");
+  for (const p of [0, 0.1, 0.2, 0.32, 0.45, 0.58, 0.7, 0.75, 0.88, 0.96, 1]) {
     pulseR.setHoldPhase(p);
-    const bloom = pulseR.getBloomSamplePhase();
     const vis = typeVisibleForState(type, p);
     const idx = vis ? typePageIndexForState(type, p) : -1;
-    cell(proof, `${p.toFixed(2)}  bloom ${bloom.toFixed(2)}  ${vis ? `0${idx + 1}` : "no type"}`, settle(pulseR));
+    const bloom = pulseR.getBloomSamplePhase();
+    cell(rhythm, `${p.toFixed(2)}  bloom ${bloom.toFixed(2)}  ${vis ? `0${idx + 1}` : p >= 0.9 ? "flicker" : "no type"}`, settle(pulseR));
   }
+  pulseR.setEndBehaviour(clampEndBehaviourSettings({ mode: "off" }));
+  pulseR.setTypeState(clampTypeState({ enabled: false }));
+
+  const omitted = clampBloomPulse({});
+  const defaultRange = omitted.start === 0.42 && omitted.end === 0.58 && omitted.cycles === 1
+    && DEFAULT_BLOOM_PULSE.start === 0.42 && DEFAULT_BLOOM_PULSE.end === 0.58;
+  pulseR.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
+  const beforeRand = pulseR.getBloomPulse();
+  const rand = generateRandomisation({
+    seed: 42,
+    params: bloomParams(60),
+    loopSeconds: LOOP,
+    pairIndex: 0,
+    pairCount: 2,
+  });
+  pulseR.setParams(rand.params);
+  const afterRand = pulseR.getBloomPulse();
+  const randomiseLeavesPulse = afterRand.start === beforeRand.start && afterRand.end === beforeRand.end && afterRand.cycles === beforeRand.cycles;
 
   return {
     loopUntouched,
@@ -443,6 +500,8 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
     holdExportExact,
     loopLengthIndependent,
     wholeCyclesSeam,
+    defaultRange,
+    randomiseLeavesPulse,
     elapsedMs: performance.now() - t0,
     tables,
     details: {
@@ -453,6 +512,8 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
       turnaround: "cosine",
       pulseMin: 0.03,
       speeds: SPEEDS,
+      defaultPulse: DEFAULT_BLOOM_PULSE,
+      uiMode: "Loop / Pulse",
       note: "Pulse Range is pair-local on LOOP pair 0. Two sources: Loop master = local / 2.",
     },
   };

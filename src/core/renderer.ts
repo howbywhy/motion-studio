@@ -755,7 +755,7 @@ export class Renderer {
     return { ...this.bloomPulse };
   }
 
-  /** Pair-local Bloom phase after Loop / Ping-pong mapping. */
+  /** Pair-local Bloom phase after Loop / Pulse mapping. */
   getBloomSamplePhase(): number {
     return this.pairMapping().localPhase;
   }

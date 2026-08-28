@@ -81,7 +81,7 @@ app.innerHTML = `
           </div>
           <div class="seg-toggle" id="playback-toggle">
             <button data-value="loop" class="active">Loop</button>
-            <button data-value="pingpong">Ping-pong</button>
+            <button data-value="pingpong">Pulse</button>
           </div>
           <div id="loop-length"></div>
           <div id="phase-control"></div>

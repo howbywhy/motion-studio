@@ -1,8 +1,8 @@
 import { sequencePairs, type PairMapping } from "./sequence";
 
 /**
- * Bloom Ping-pong samples a section of the existing pair-local Bloom
- * evolution. Loop mapping is untouched. This file is a pure function:
+ * Bloom Pulse (UI: LOOP / PULSE) samples a section of the existing
+ * pair-local Bloom evolution. Loop mapping is untouched. Pure function:
  * master phase → pair-local Bloom phase. No per-frame state.
  *
  * One pulse = Start → End → Start. Integer cycle counts land on Start
@@ -10,8 +10,9 @@ import { sequencePairs, type PairMapping } from "./sequence";
  */
 
 export const PULSE_RANGE_MIN = 0.03;
-export const PULSE_START_DEFAULT = 0.35;
-export const PULSE_END_DEFAULT = 0.6;
+/** Product default: visible breath around the Bloom peak, not a short A→B. */
+export const PULSE_START_DEFAULT = 0.42;
+export const PULSE_END_DEFAULT = 0.58;
 export const PULSE_CYCLES_DEFAULT = 1;
 export const PULSE_CYCLES = [1, 2, 3, 4] as const;
 
