@@ -2,7 +2,9 @@
  * Deterministic Registration golden-master regression harness.
  * Uses generated rasters only — no client media.
  *
- * REGISTRATION GOLDEN MASTER — commit 728ff08.
+ * REGISTRATION GOLDEN MASTER — commit 728ff08 grammar.
+ * Pixel fixture is the deterministic B-sample tint (rebased from a
+ * wall-clock-dependent cache capture). Not a visual redesign.
  */
 import type { ResolvedField } from "../behaviors/bloom/fields";
 import { paintClean } from "../behaviors/bloom/treatments";
@@ -12,7 +14,8 @@ import {
   REGISTRATION_GOLDEN_MASTER,
   registrationPaintAmount,
 } from "../core/globalRegistration";
-import { BLOOM_REGISTRATION_AMOUNT, resetRegistrationInkTintCache } from "../core/registrationInk";
+import { BLOOM_REGISTRATION_AMOUNT, resetRegistrationInkTintCache, setRegistrationInkTintOverride } from "../core/registrationInk";
+import type { RGB } from "../core/media";
 
 export const FIXTURE_WIDTH = 480;
 export const FIXTURE_HEIGHT = 360;
@@ -201,11 +204,38 @@ export function compareImageData(a: ImageData, b: ImageData): { mad: number; max
   return { mad: sum / pixels, maxAbs: max };
 }
 
+export function lumaImageData(src: ImageData): ImageData {
+  const out = new ImageData(src.width, src.height);
+  const s = src.data;
+  const d = out.data;
+  for (let i = 0; i < s.length; i += 4) {
+    const y = Math.round(s[i]! * 0.2126 + s[i + 1]! * 0.7152 + s[i + 2]! * 0.0722);
+    d[i] = y;
+    d[i + 1] = y;
+    d[i + 2] = y;
+    d[i + 3] = s[i + 3]!;
+  }
+  return out;
+}
+
+export function cropImage(src: ImageData, crop: { x: number; y: number; w: number; h: number }): ImageData {
+  return cropData(src, crop);
+}
+
+export function meanDelta(a: number[], b: number[]): { dr: number; dg: number; db: number; mean: number } {
+  const dr = (a[0] ?? 0) - (b[0] ?? 0);
+  const dg = (a[1] ?? 0) - (b[1] ?? 0);
+  const db = (a[2] ?? 0) - (b[2] ?? 0);
+  return { dr, dg, db, mean: (Math.abs(dr) + Math.abs(dg) + Math.abs(db)) / 3 };
+}
+
 export async function renderGoldenFrame(
   bw = false,
   uiAmount: number = REGISTRATION_AMOUNT_DEFAULT,
+  tintOverride: RGB | null = null,
 ): Promise<{ canvas: HTMLCanvasElement; image: ImageData; paintMs: number }> {
   resetRegistrationInkTintCache();
+  setRegistrationInkTintOverride(tintOverride);
   const w = FIXTURE_WIDTH;
   const h = FIXTURE_HEIGHT;
   const a = makeCanvas(w, h);
@@ -219,6 +249,7 @@ export async function renderGoldenFrame(
   paintClean(ctx, a, b, mask, w, h);
   paintGoldenMasterRegistration(ctx, b, FIXED_FIELDS, w, h, bw, uiAmount);
   const paintMs = performance.now() - t0;
+  setRegistrationInkTintOverride(null);
   if (BLOOM_REGISTRATION_AMOUNT !== 0.4) {
     throw new Error("BLOOM_REGISTRATION_AMOUNT drifted from golden master 0.4");
   }

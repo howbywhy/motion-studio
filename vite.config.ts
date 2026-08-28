@@ -15,6 +15,7 @@ export default defineConfig({
         holdExport: resolve(root, "eval/hold-export.html"),
         resolveLimit: resolve(root, "eval/resolve-limit.html"),
         registrationGolden: resolve(root, "eval/registration-golden.html"),
+        registrationRebase: resolve(root, "eval/registration-rebase.html"),
         subtitle: resolve(root, "eval/subtitle.html"),
         typeSheet: resolve(root, "eval/type-sheet.html"),
       },

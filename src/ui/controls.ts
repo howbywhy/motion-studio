@@ -31,6 +31,7 @@ export function buildControls(
   for (const def of defs) {
     const row = document.createElement("div");
     row.className = "control-row";
+    row.dataset.param = def.key;
 
     const labelEl = document.createElement("label");
     labelEl.textContent = def.label;

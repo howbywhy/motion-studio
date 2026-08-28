@@ -13,6 +13,10 @@
  *   → paintRegistrationSurface
  *       (paintRegistrationInkContent, sharp field rings, amount 0.4)
  *
+ * Tint is sampled from source B and is deterministic at a given image.
+ * The HTML fixture is the pixel authority for that sample. Grammar
+ * remains commit 728ff08 — not a redesign.
+ *
  * This module is the product facade. It must not grow a second visual path.
  */
 import { paintRegistrationSurface } from "../behaviors/bloom/treatments";

@@ -1276,6 +1276,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.control-row-inert {
+  opacity: 0.42;
+}
+
+.control-row-inert input[type="range"] {
+  pointer-events: none;
+}
+
+.control-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+}
+
 select {
   width: 100%;
   background: var(--panel);

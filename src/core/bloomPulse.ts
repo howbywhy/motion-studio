@@ -1,4 +1,5 @@
 import { sequencePairs, type PairMapping } from "./sequence";
+import { ENVELOPE_B_HOLD } from "./sequencePhase";
 
 /**
  * Bloom Pulse (UI: LOOP / PULSE) samples a section of the existing
@@ -72,6 +73,19 @@ export function clampBloomPulse(
 ): BloomPulseSettings {
   const range = clampPulseRange(raw?.start, raw?.end);
   return { start: range.start, end: range.end, cycles: clampPulseCycles(raw?.cycles) };
+}
+
+/**
+ * Resolve Limit only changes Bloom once pair-local progress enters settle
+ * (after envelope B hold). Pulse windows that never reach that region leave
+ * the control inert — the envelope is not rewritten to fake an effect.
+ */
+export function resolveLimitControlMode(
+  playbackMode: "loop" | "pingpong",
+  pulse: { start?: unknown; end?: unknown } | null | undefined,
+): "active" | "inert" {
+  if (playbackMode !== "pingpong") return "active";
+  return clampPulseRange(pulse?.start, pulse?.end).end > ENVELOPE_B_HOLD ? "active" : "inert";
 }
 
 /** Linear triangle 0 → 1 → 0 over one cycle. */

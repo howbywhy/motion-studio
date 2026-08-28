@@ -54,6 +54,8 @@ mustNotContain("src/core/renderer.ts", "paintLockedGlobalRegistration");
 mustNotContain("src/core/globalRegistration.ts", "prepareFieldPrintInk");
 mustNotContain("src/core/globalRegistration.ts", "paintFieldPersistent");
 mustNotContain("src/core/registrationInk.ts", "paintLockedPersistent");
+mustNotContain("src/core/registrationInk.ts", "performance.now()");
+mustNotContain("src/core/registrationInk.ts", "Date.now");
 
 if (failures.length) {
   console.error("REGISTRATION GOLDEN MASTER source lock FAILED:");

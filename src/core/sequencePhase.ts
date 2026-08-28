@@ -43,7 +43,8 @@ function smoothstep(t: number): number {
 
 /** Envelope B (production). Shared by resolve-limit remapping. */
 const ENVELOPE_B_PEAK = 0.52;
-const ENVELOPE_B_HOLD = 0.72;
+/** Pair-local progress where authored terminal settle begins. */
+export const ENVELOPE_B_HOLD = 0.72;
 
 /** 0 → 0.5 with zero derivative at both ends. Native Bloom/Shift peak. */
 function oneWayToPeak(p: number): number {

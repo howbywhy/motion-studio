@@ -82,11 +82,7 @@ export const TYPE_WEIGHT_DEFAULT = 500;
 
 export const TYPE_SLOT_COUNT = 3;
 
-/**
- * No canonical Made by Madelen yellow exists in the product palette.
- * Ivory `#f3efe6` is the headline/paragraph default. This is a restrained
- * film-subtitle yellow used only as the Subtitle identity default.
- */
+/** Subtitle identity default. Not a documented brand colour. */
 export const SUBTITLE_YELLOW = "#f5c518";
 
 export const TYPE_STYLES: TypeStyle[] = ["headline", "paragraph", "subtitle"];

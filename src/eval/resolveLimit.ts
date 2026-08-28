@@ -7,6 +7,7 @@ import { presetsForTreatment } from "../core/presets";
 import { clampEndBehaviourSettings, type EndBehaviourMode } from "../core/endBehaviour";
 import { clampTypeState } from "../core/typeState";
 import { limitedPairProgress, limitedSequenceResolve, sequenceEnvelope } from "../core/sequencePhase";
+import { resolveLimitControlMode } from "../core/bloomPulse";
 
 const W = 320;
 const H = 400;
@@ -106,6 +107,9 @@ export interface ResolveLimitReport {
   envelopeMath: boolean;
   pulseDefaultStable: boolean;
   pulseSettleRangeMoves: boolean;
+  pulseDefaultLimitInert: boolean;
+  pulseSettleLimitActive: boolean;
+  loopLimitActive: boolean;
   elapsedMs: number;
   details: Record<string, unknown>;
 }
@@ -240,6 +244,26 @@ export async function runResolveLimitSheet(root: HTMLElement): Promise<ResolveLi
   }
   const pulseSettleRangeMoves =
     pulseSettle[0] !== pulseSettle[100] && pulseSettle[50] !== pulseSettle[100] && pulseSettle[0] !== pulseSettle[50];
+
+  const pulseDefaultLimitInert = resolveLimitControlMode("pingpong", { start: 0.42, end: 0.58 }) === "inert";
+  const pulseSettleLimitActive = resolveLimitControlMode("pingpong", { start: 0.72, end: 0.95 }) === "active";
+  const loopLimitActive = resolveLimitControlMode("loop", { start: 0.42, end: 0.58 }) === "active";
+
+  const pulseInertStrip = section(root, "Pulse 42–58 — Limit does not apply");
+  for (const limit of [0, 50, 100]) {
+    renderer.setPlaybackMode("pingpong");
+    renderer.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
+    renderer.setParams(bloomParams(limit));
+    renderer.setHoldPhase(0.5);
+    cell(pulseInertStrip, `42–58 L${limit}`, settle(renderer));
+  }
+  const pulseActiveStrip = section(root, "Pulse 72–95 — Limit applies");
+  for (const limit of [0, 50, 100]) {
+    renderer.setBloomPulse({ start: 0.72, end: 0.95, cycles: 2 });
+    renderer.setParams(bloomParams(limit));
+    renderer.setHoldPhase(0.5);
+    cell(pulseActiveStrip, `72–95 L${limit}`, settle(renderer));
+  }
   renderer.setPlaybackMode("loop");
 
   return {
@@ -252,6 +276,9 @@ export async function runResolveLimitSheet(root: HTMLElement): Promise<ResolveLi
     envelopeMath,
     pulseDefaultStable,
     pulseSettleRangeMoves,
+    pulseDefaultLimitInert,
+    pulseSettleLimitActive,
+    loopLimitActive,
     elapsedMs: Math.round(performance.now() - t0),
     details: {
       hashes,

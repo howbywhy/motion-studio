@@ -16,7 +16,7 @@ import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
 import { mountEndBehaviourPanel } from "./ui/endBehaviourPanel";
 import { mountBloomPulse } from "./ui/bloomPulsePanel";
-import { clampBloomPulse } from "./core/bloomPulse";
+import { clampBloomPulse, resolveLimitControlMode } from "./core/bloomPulse";
 import { clampEndBehaviourSettings, END_BEHAVIOUR_OFF } from "./core/endBehaviour";
 import { clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./core/globalRegistration";
 import { loadSwitzer } from "./core/typeFont";
@@ -646,7 +646,10 @@ function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: Par
     mountBloomPulse(
       pulse,
       () => renderer.getBloomPulse(),
-      (next) => renderer.setBloomPulse(next),
+      (next) => {
+        renderer.setBloomPulse(next);
+        syncResolveLimitAvailability();
+      },
     );
     const fields = document.createElement("div");
     container.appendChild(fields);
@@ -657,10 +660,30 @@ function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: Par
     buildControls(resolve, resolveDefs, values, onChange);
     const time = appendFamily(container, "Time");
     buildControls(time, rest, values, onChange);
+    syncResolveLimitAvailability();
     return;
   }
 
   buildControls(container, defs, values, onChange);
+}
+
+function syncResolveLimitAvailability(): void {
+  const row = controlsEl.querySelector('[data-param="resolveLimit"]');
+  if (!(row instanceof HTMLElement)) return;
+  const inert =
+    resolveLimitControlMode(renderer.getPlaybackMode(), renderer.getBloomPulse()) === "inert";
+  row.classList.toggle("control-row-inert", inert);
+  const input = row.querySelector("input");
+  if (input instanceof HTMLInputElement) input.disabled = inert;
+  const existing = row.querySelector(".control-note");
+  if (inert) {
+    const note = existing instanceof HTMLElement ? existing : document.createElement("span");
+    note.className = "control-note";
+    note.textContent = "Outside Pulse range";
+    if (!existing) row.appendChild(note);
+  } else if (existing) {
+    existing.remove();
+  }
 }
 
 function rebuildControlsPanel(): void {

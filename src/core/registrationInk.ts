@@ -37,12 +37,20 @@ export function getHalftonePattern(ctx: CanvasRenderingContext2D): CanvasPattern
 
 let lastAvg: RGB = { r: 150, g: 150, b: 150 };
 let lastTintKey = "";
+/** Test-only. `null` = sample B. Used to reconstruct the old unsampled cache. */
+let tintSampleOverride: RGB | null = null;
 
 /** Test hook only. Does not change the paint algorithm. */
 export function resetRegistrationInkTintCache(): void {
   lastAvg = { r: 150, g: 150, b: 150 };
   lastTintKey = "";
+  tintSampleOverride = null;
   halftonePattern = null;
+}
+
+/** Test hook only. Pass `{r:150,g:150,b:150}` to reconstruct the old default cache. */
+export function setRegistrationInkTintOverride(rgb: RGB | null): void {
+  tintSampleOverride = rgb;
 }
 
 function tintCacheKey(bLayer: HTMLCanvasElement, sample: RGB): string {
@@ -53,13 +61,13 @@ function tintCacheKey(bLayer: HTMLCanvasElement, sample: RGB): string {
  * The photograph's own average colour, scaled for the tinted separation.
  *
  * Sampling is deterministic at a given B layer: same pixels → same tint.
- * A previous 400ms `performance.now()` throttle let preview and export
- * disagree when one path reused a stale sample. The 12×12 average is
- * cheap; we still skip a second getImageData when the downsampled
- * average has not changed.
+ * A previous 400ms wall-clock throttle let preview and export disagree
+ * when one path reused a stale sample. The 12×12 average is cheap; we
+ * still skip a second getImageData when the downsampled average has
+ * not changed.
  */
 export function currentInkTint(bLayer: HTMLCanvasElement, bw = false): RGB {
-  const sample = sampleAverageColor(bLayer);
+  const sample = tintSampleOverride ?? sampleAverageColor(bLayer);
   const key = tintCacheKey(bLayer, sample);
   if (key !== lastTintKey) {
     lastTintKey = key;
