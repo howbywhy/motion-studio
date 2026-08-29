@@ -1,15 +1,17 @@
 import { paintFlickerGrammar } from "./endBehaviour";
-import { MARK_EMBLEM, MARK_FILL_WHITE, MARK_LATERAL_DX, MARK_STACKED, markPaths } from "./markAssets";
-import { diagnosticsFrom, emptyMarkDiagnostics, planMark, type MarkDiagnostics, type MarkPlan } from "./markPlan";
+import { MARK_EMBLEM, MARK_FILL_WHITE, MARK_STACKED, markPaths } from "./markAssets";
+import { diagnosticsFrom, emptyMarkDiagnostics, markAligned, planMark, type MarkDiagnostics, type MarkPlan } from "./markPlan";
 import { clampMarkState, type MarkState } from "./markState";
-
-const GAP_PX = 36;
 
 function fillPaths(ctx: CanvasRenderingContext2D, paths: Path2D[], fill: string): void {
   ctx.fillStyle = fill;
   for (const path of paths) ctx.fill(path);
 }
 
+/**
+ * MADE BY stays at stacked origin. MADELEN translates in X only.
+ * When madeLenX === 0 the two rows are the stacked SVG paths, unshifted.
+ */
 export function paintMarkLayer(ctx: CanvasRenderingContext2D, plan: MarkPlan, fill = MARK_FILL_WHITE): void {
   if (!plan.visible) return;
   const { layout } = plan;
@@ -20,6 +22,7 @@ export function paintMarkLayer(ctx: CanvasRenderingContext2D, plan: MarkPlan, fi
   ctx.globalAlpha = 1;
   ctx.translate(layout.x, layout.y);
   ctx.scale(layout.s, layout.s);
+  ctx.translate(layout.originX, 0);
   if (plan.kind === "emblem") {
     const fit = MARK_STACKED.width / MARK_EMBLEM.width;
     const emblemH = MARK_EMBLEM.height * fit;
@@ -29,13 +32,9 @@ export function paintMarkLayer(ctx: CanvasRenderingContext2D, plan: MarkPlan, fi
     ctx.restore();
     return;
   }
-  const gap = plan.gap * GAP_PX;
-  ctx.save();
-  ctx.translate(0, -gap * 0.45);
   fillPaths(ctx, paths.madeBy, fill);
-  ctx.restore();
   ctx.save();
-  ctx.translate((1 - plan.travel) * MARK_LATERAL_DX, gap * 0.55);
+  if (!markAligned(plan.madeLenX)) ctx.translate(plan.madeLenX, 0);
   fillPaths(ctx, paths.madeLen, fill);
   ctx.restore();
   ctx.restore();
