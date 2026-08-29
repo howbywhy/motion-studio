@@ -11,13 +11,18 @@ import { loadSwitzer, switzerReady } from "../core/typeFont";
 import { MARK_FILL_BLACK, MARK_LATERAL_DX, MARK_STACKED, markPaths } from "../core/markAssets";
 import { clampMarkState, defaultMarkState, MARK_MODE_WINDOW } from "../core/markState";
 import {
+  layoutMarkRect,
   layoutMarkTravelRect,
   MARK_ALIGN_X,
+  MARK_CLAMP_START_X,
   MARK_LEFT_X,
   MARK_LOCAL,
+  MARK_OSC_LOCAL,
   MARK_RIGHT_X,
   MARK_START_X,
+  markAligned,
   markMadeLenX,
+  markMadeLenXOscillating,
   planMark,
   planMarkStudy,
   type MarkPlan,
@@ -33,7 +38,9 @@ const LOOP = 12;
 const GEO_W = 720;
 const GEO_H = 260;
 
-const SCRUB_LOCAL = [0, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.73, 0.76, 0.84, 0.92, 1];
+const SCRUB_LOCAL = [0, 0.16, 0.28, 0.4, 0.52, 0.58, 0.63, 0.64, 0.68, 0.8, 0.92, 1];
+const OSC_LOCALS = [0, 0.15, 0.38, 0.48, 0.62, 0.72, 0.84, 0.92];
+const RED_LOCALS = [0, 0.16, 0.52, 0.63, 0.64, 0.68, 0.84, 0.92];
 
 function hashPixels(img: ImageData): string {
   let h = 2166136261;
@@ -165,17 +172,30 @@ function windowPhase(mode: "intro" | "interrupt" | "end", local: number): number
   return w.start + local * (w.stop - w.start);
 }
 
-function scrubLabel(local: number): string {
-  const x = Math.round(markMadeLenX(local));
+function scrubLabel(local: number, xFn: (t: number) => number = markMadeLenX): string {
+  const x = Math.round(xFn(local));
   const pct = Math.round(local * 100);
-  if (local >= MARK_LOCAL.holdEnd) return `${pct}% release  x=${x}`;
-  if (local >= MARK_LOCAL.holdStart) return `${pct}% HOLD  x=${x}`;
-  if (local >= MARK_LOCAL.rightPeak) return `${pct}% SNAP  x=${x}`;
-  if (local > MARK_LOCAL.secondAlign) return `${pct}% right overshoot  x=${x}`;
-  if (local >= MARK_LOCAL.leftPeak) return `${pct}% 2nd align  x=${x}`;
-  if (local > MARK_LOCAL.firstAlign) return `${pct}% left overshoot  x=${x}`;
-  if (local > MARK_LOCAL.rightHold) return `${pct}% travel left  x=${x}`;
+  const k = MARK_LOCAL;
+  if (local >= k.holdEnd) return `${pct}% release  x=${x}`;
+  if (local >= k.holdStart) return `${pct}% HOLD  x=${x}`;
+  if (local >= k.leftPeak) return `${pct}% SNAP  x=${x}`;
+  if (local > k.firstAlign) return `${pct}% left overshoot  x=${x}`;
+  if (local > k.rightHold) return `${pct}% travel left  x=${x}`;
   return `${pct}% RIGHT hold  x=${x}`;
+}
+
+function oscLabel(local: number): string {
+  const x = Math.round(markMadeLenXOscillating(local));
+  const pct = Math.round(local * 100);
+  const k = MARK_OSC_LOCAL;
+  if (local >= k.holdEnd) return `OSC ${pct}% release  x=${x}`;
+  if (local >= k.holdStart) return `OSC ${pct}% HOLD  x=${x}`;
+  if (local >= k.rightPeak) return `OSC ${pct}% SNAP  x=${x}`;
+  if (local > k.secondAlign) return `OSC ${pct}% right overshoot  x=${x}`;
+  if (local >= k.leftPeak) return `OSC ${pct}% 2nd align  x=${x}`;
+  if (local > k.firstAlign) return `OSC ${pct}% left overshoot  x=${x}`;
+  if (local > k.rightHold) return `OSC ${pct}% travel left  x=${x}`;
+  return `OSC ${pct}% RIGHT hold  x=${x}`;
 }
 
 function paintClean(plan: MarkPlan, w = GEO_W, h = GEO_H): ImageData {
@@ -210,7 +230,7 @@ function paintStackedReference(layout: MarkPlan["layout"]): ImageData {
 
 function paintTrajectory(): ImageData {
   const tw = 720;
-  const th = 240;
+  const th = 260;
   const canvas = document.createElement("canvas");
   canvas.width = tw;
   canvas.height = th;
@@ -250,10 +270,22 @@ function paintTrajectory(): ImageData {
   ctx.font = "10px ui-monospace, monospace";
   ctx.fillText("ALIGN x=0", x0 + 6, toY(MARK_ALIGN_X) - 6);
 
+  const samples = 400;
+  ctx.strokeStyle = "#bbbbbb";
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  for (let i = 0; i <= samples; i++) {
+    const t = (i / samples) * MARK_OSC_LOCAL.holdEnd;
+    const px = toX(t);
+    const py = toY(markMadeLenXOscillating(t));
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
   ctx.strokeStyle = "#111111";
   ctx.lineWidth = 1.75;
   ctx.beginPath();
-  const samples = 400;
   for (let i = 0; i <= samples; i++) {
     const t = (i / samples) * MARK_LOCAL.holdEnd;
     const px = toX(t);
@@ -264,7 +296,7 @@ function paintTrajectory(): ImageData {
   ctx.stroke();
 
   ctx.fillStyle = "#111111";
-  for (const t of [0, MARK_LOCAL.rightHold, MARK_LOCAL.firstAlign, MARK_LOCAL.leftPeak, MARK_LOCAL.secondAlign, MARK_LOCAL.rightPeak, MARK_LOCAL.holdStart, MARK_LOCAL.holdEnd]) {
+  for (const t of [0, MARK_LOCAL.rightHold, MARK_LOCAL.firstAlign, MARK_LOCAL.leftPeak, MARK_LOCAL.holdStart, MARK_LOCAL.holdEnd]) {
     ctx.beginPath();
     ctx.arc(toX(t), toY(markMadeLenX(t)), 3, 0, Math.PI * 2);
     ctx.fill();
@@ -272,10 +304,31 @@ function paintTrajectory(): ImageData {
 
   ctx.fillStyle = "#666";
   ctx.fillText("local →", x1 - 48, y1 + 22);
-  ctx.fillText("MADELEN X", 6, 14);
+  ctx.fillText("grey = CURRENT osc  black = REDUCED", 6, 14);
   ctx.fillText("RIGHT", 6, toY(MARK_START_X) + 4);
   ctx.fillText("LEFT", 6, toY(MARK_LEFT_X) + 4);
   return ctx.getImageData(0, 0, tw, th);
+}
+
+function paintFlickerStudy(id: MarkStudyId, local: number): ImageData {
+  const canvas = document.createElement("canvas");
+  canvas.width = GEO_W;
+  canvas.height = GEO_H;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, GEO_W, GEO_H);
+  const plan = planMarkStudy(id, local, GEO_W, GEO_H, LOOP);
+  paintMarkLayer(ctx, plan, MARK_FILL_BLACK);
+  if (plan.flicker > 0.02) {
+    ctx.fillStyle = "#c43d3d";
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText(`flicker ${plan.flicker.toFixed(2)}`, 12, 18);
+  } else {
+    ctx.fillStyle = "#888";
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText("flicker off", 12, 18);
+  }
+  return ctx.getImageData(0, 0, GEO_W, GEO_H);
 }
 
 export interface MarkReport {
@@ -284,9 +337,10 @@ export interface MarkReport {
   stackedExactAtHold: boolean;
   dockSnaps: boolean;
   firstAlignCrosses: boolean;
-  secondAlignCrosses: boolean;
   leftOvershoots: boolean;
-  rightOvershoots: boolean;
+  noSecondOscillation: boolean;
+  snapFlickerOffProduct: boolean;
+  interruptKeepsFlicker: boolean;
   lateralFromSvg: boolean;
   typeHiddenInIntro: boolean;
   interruptEmblemThenStacked: boolean;
@@ -321,10 +375,18 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   const offB = at(offR, 0.09);
   const offIdentity = hashPixels(offA) === hashPixels(offB) && pixelDiff(offA, offB) === 0;
 
-  const clean = section(root, "Clean — white field, black mark, no Bloom / Type / Registration");
-  const traj = section(root, "Trajectory — MADELEN X vs MARK local phase");
-  cell(traj, "RIGHT → ALIGN → LEFT → ALIGN → RIGHT → SNAP", paintTrajectory());
+  const traj = section(root, "Trajectory — CURRENT oscillating (grey) vs REDUCED (black)");
+  cell(traj, "CURRENT: RIGHT → ALIGN → LEFT → ALIGN → RIGHT → SNAP   |   REDUCED: RIGHT → ALIGN → LEFT → SNAP", paintTrajectory());
 
+  const compare = section(root, "CURRENT vs REDUCED — travel-fit, white field, black mark");
+  for (const local of OSC_LOCALS) {
+    cell(compare, oscLabel(local), paintClean(planMarkStudy("oscillating", local, GEO_W, GEO_H, LOOP)));
+  }
+  for (const local of RED_LOCALS) {
+    cell(compare, `RED ${scrubLabel(local)}`, paintClean(planMarkStudy("dock", local, GEO_W, GEO_H, LOOP)));
+  }
+
+  const clean = section(root, "Clean reduced — white field, black mark, no Bloom / Type / Registration");
   const xAt: number[] = [];
   for (const local of SCRUB_LOCAL) {
     const plan = planMarkStudy("dock", local, GEO_W, GEO_H, LOOP);
@@ -342,12 +404,41 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
     hashPixels(stackedRef) === hashPixels(stackedDock) &&
     pixelDiff(stackedRef, stackedDock) === 0;
 
-  const modes = section(root, "Intro / Interrupt / End — 9:16 · 12s (product layout)");
+  const flicker = section(root, "SNAP Flicker — A off (product) · B 120ms / 28% (eval)");
+  for (const local of [0.64, 0.66, 0.68, 0.84]) {
+    cell(flicker, `A off · ${Math.round(local * 100)}%`, paintFlickerStudy("flickerA", local));
+    cell(flicker, `B on · ${Math.round(local * 100)}%`, paintFlickerStudy("flickerB", local));
+  }
+
+  const modes = section(root, "Intro / Interrupt / End — 9:16 · 12s (product layout, off-frame start)");
   const introR = makeRenderer(hidden);
   introR.setMarkState(introState());
-  for (const local of [0, 0.25, 0.45, 0.65, 0.76, 0.84, 0.96]) {
+  for (const local of [0, 0.28, 0.52, 0.63, 0.64, 0.68, 0.84, 0.96]) {
     cell(modes, `INTRO ${scrubLabel(local)}`, at(introR, windowPhase("intro", local)));
   }
+
+  const offFrame = section(root, "Off-frame start — A full separation (product) · B clamped in-frame (eval)");
+  const layout916 = layoutMarkRect(W, H, 78, "mc");
+  const productStart = planMark(introState(), windowPhase("intro", 0), W, H, LOOP);
+  cell(offFrame, `A start dx=${MARK_START_X} (product)`, paintClean({ ...productStart, layout: layout916 }, W, H));
+  cell(offFrame, `B start dx=${MARK_CLAMP_START_X}`, paintClean({
+    ...productStart,
+    layout: layout916,
+    madeLenX: MARK_CLAMP_START_X,
+    aligned: markAligned(MARK_CLAMP_START_X),
+  }, W, H));
+  const productTravel = planMark(introState(), windowPhase("intro", 0.28), W, H, LOOP);
+  cell(offFrame, "A travel 28%", paintClean({ ...productTravel, layout: layout916 }, W, H));
+  const clampTravelX = MARK_CLAMP_START_X + (MARK_ALIGN_X - MARK_CLAMP_START_X) * ((0.28 - 0.16) / (0.52 - 0.16));
+  cell(offFrame, "B travel 28% from clamp", paintClean({
+    ...productTravel,
+    layout: layout916,
+    madeLenX: clampTravelX,
+    aligned: markAligned(clampTravelX),
+  }, W, H));
+  cell(offFrame, "A 9:16 campaign start", at(introR, windowPhase("intro", 0)));
+  cell(offFrame, "A 9:16 campaign 28%", at(introR, windowPhase("intro", 0.28)));
+  cell(offFrame, "A 9:16 campaign HOLD", at(introR, windowPhase("intro", 0.84)));
 
   const intR = makeRenderer(hidden);
   intR.setMarkState(clampMarkState({ enabled: true, mode: "interrupt", source: "stacked", scale: 78 }));
@@ -357,17 +448,20 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   cell(modes, "INTERRUPT emblem", intEmblem);
   cell(modes, "INTERRUPT stacked", intStacked);
   cell(modes, "INTERRUPT out", intOut);
+  for (const local of [0.08, 0.25, 0.55, 0.88]) {
+    cell(flicker, `INTERRUPT · ${Math.round(local * 100)}%`, paintFlickerStudy("interrupt", local));
+  }
 
   const endR = makeRenderer(hidden);
   endR.setTypeState(campaignType());
   endR.setMarkState(clampMarkState({ enabled: true, mode: "end", source: "stacked", scale: 78 }));
   endR.setEndBehaviour(clampEndBehaviourSettings({ mode: "flicker", amount: 70, hold: 40, duration: 40 }));
   cell(modes, "END type still", at(endR, 0.7));
-  cell(modes, "END travel", at(endR, windowPhase("end", 0.25)));
+  cell(modes, "END travel", at(endR, windowPhase("end", 0.28)));
   cell(modes, "END HOLD", at(endR, windowPhase("end", 0.84)));
   cell(modes, "END released", at(endR, windowPhase("end", 0.96)));
 
-  const scrub = section(root, "Scrub local 0 / 15 / 25 / 35 / 45 / 55 / 65 / 73 / 76 / 84 / 92 / 100%");
+  const scrub = section(root, "Scrub reduced 0 / 16 / 28 / 40 / 52 / 58 / 63 / 64 / 68 / 80 / 92 / 100%");
   const scrubHashes: string[] = [];
   const scrubX: number[] = [];
   for (const local of SCRUB_LOCAL) {
@@ -376,35 +470,9 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
     scrubX.push(planMark(introState(), windowPhase("intro", local), W, H, LOOP).madeLenX);
     cell(scrub, scrubLabel(local), img);
   }
-  const backLocal = 0.35;
+  const backLocal = 0.4;
   const back = at(introR, windowPhase("intro", backLocal));
   const scrubReverse = hashPixels(back) === scrubHashes[SCRUB_LOCAL.indexOf(backLocal)];
-
-  const study = section(root, "Flicker tests — A snap only (product) · B 2nd crossing + snap · C release only");
-  const studies: { id: MarkStudyId; label: string; locals: number[] }[] = [
-    { id: "flickerA", label: "A snap only", locals: [0.62, 0.73, 0.84, 0.92] },
-    { id: "flickerB", label: "B 2nd + snap", locals: [0.62, 0.73, 0.84, 0.92] },
-    { id: "flickerC", label: "C release only", locals: [0.62, 0.73, 0.84, 0.92] },
-    { id: "interrupt", label: "INTERRUPT", locals: [0.08, 0.25, 0.55, 0.88] },
-  ];
-  for (const item of studies) {
-    for (const local of item.locals) {
-      const canvas = document.createElement("canvas");
-      canvas.width = GEO_W;
-      canvas.height = GEO_H;
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, GEO_W, GEO_H);
-      const plan = planMarkStudy(item.id, local, GEO_W, GEO_H, LOOP);
-      paintMarkLayer(ctx, plan, MARK_FILL_BLACK);
-      if (plan.flicker > 0.02) {
-        ctx.fillStyle = "#c43d3d";
-        ctx.font = "11px ui-monospace, monospace";
-        ctx.fillText(`flicker ${plan.flicker.toFixed(2)}`, 12, 18);
-      }
-      cell(study, `${item.label} · ${Math.round(local * 100)}%`, ctx.getImageData(0, 0, GEO_W, GEO_H));
-    }
-  }
 
   const creative = section(root, "Campaign — Bloom + Registration + Type · MARK End 78–96");
   const piece = makeRenderer(hidden, 360, 640);
@@ -412,7 +480,7 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   piece.setBloomPulse({ start: 0.42, end: 0.58, cycles: 2 });
   piece.setPlaybackMode("pingpong");
   piece.setMarkState(clampMarkState({ enabled: true, mode: "end", source: "stacked", scale: 74 }));
-  for (const p of [0.22, 0.5, 0.7, windowPhase("end", 0.25), windowPhase("end", 0.45), windowPhase("end", 0.84), 0.99]) {
+  for (const p of [0.22, 0.5, 0.7, windowPhase("end", 0.28), windowPhase("end", 0.58), windowPhase("end", 0.84), 0.99]) {
     cell(creative, `END piece ${p.toFixed(2)}`, at(piece, p));
   }
 
@@ -420,16 +488,36 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   const open = makeRenderer(hidden, 360, 640);
   open.setTypeState(campaignType());
   open.setMarkState(clampMarkState({ enabled: true, mode: "intro", source: "stacked", scale: 80 }));
-  for (const local of [0.02, 0.25, 0.45, 0.65, 0.84, 1.1]) {
+  for (const local of [0.02, 0.28, 0.52, 0.63, 0.64, 0.84, 1.1]) {
     const p = local > 1 ? 0.22 : windowPhase("intro", local);
     cell(introPiece, local > 1 ? "after MARK" : `INTRO ${scrubLabel(local)}`, at(open, p));
   }
 
-  const dockSnaps = markMadeLenX(0.719) > 80 && markMadeLenX(MARK_LOCAL.rightPeak) === 0 && markMadeLenX(0.84) === 0;
-  const firstAlignCrosses = markMadeLenX(MARK_LOCAL.firstAlign) === 0 && markMadeLenX(0.36) > 0 && markMadeLenX(0.4) < 0;
-  const secondAlignCrosses = markMadeLenX(MARK_LOCAL.secondAlign) === 0 && markMadeLenX(0.5) < 0 && markMadeLenX(0.66) > 0;
-  const leftOvershoots = markMadeLenX(MARK_LOCAL.leftPeak) === MARK_LEFT_X && MARK_LEFT_X < 0;
-  const rightOvershoots = markMadeLenX(0.71) > 80 && markMadeLenX(0.71) < MARK_START_X * 0.25;
+  const dockSnaps =
+    markMadeLenX(MARK_LOCAL.leftPeak - 0.001) < -1 &&
+    markMadeLenX(MARK_LOCAL.leftPeak) === 0 &&
+    markMadeLenX(0.84) === 0;
+  const firstAlignCrosses =
+    markMadeLenX(MARK_LOCAL.firstAlign) === 0 &&
+    markMadeLenX(MARK_LOCAL.firstAlign - 0.02) > 0 &&
+    markMadeLenX(MARK_LOCAL.firstAlign + 0.02) < 0;
+  const leftOvershoots = markMadeLenX(MARK_LOCAL.leftPeak - 0.001) < -1 && MARK_LEFT_X < 0;
+  let noSecondOscillation = true;
+  for (let i = 0; i <= 80; i++) {
+    const t = MARK_LOCAL.leftPeak + (i / 80) * (MARK_LOCAL.holdEnd - MARK_LOCAL.leftPeak);
+    if (markMadeLenX(t) !== 0) noSecondOscillation = false;
+  }
+  const snapPhase = windowPhase("intro", MARK_LOCAL.snap);
+  const snapPlan = planMark(introState(), snapPhase, W, H, LOOP);
+  const snapFlickerOffProduct = snapPlan.flicker <= 0.02 && snapPlan.madeLenX === 0;
+  const intFlickerPlan = planMark(
+    clampMarkState({ enabled: true, mode: "interrupt" }),
+    windowPhase("interrupt", 0.1),
+    W,
+    H,
+    LOOP,
+  );
+  const interruptKeepsFlicker = intFlickerPlan.flicker > 0.02;
   const lateralFromSvg = MARK_LATERAL_DX > 1200 && MARK_STACKED.madeBy.length === 6 && MARK_STACKED.madeLen.length === 7;
 
   introR.setTypeState(campaignType());
@@ -456,7 +544,7 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   at(pulseR, windowPhase("intro", 0.84));
   const pulseKeepsMark = pulseR.lastMarkDiagnostics?.kind === "logotype";
 
-  const travelPhase = windowPhase("intro", 0.25);
+  const travelPhase = windowPhase("intro", 0.28);
   const exportR = makeRenderer(hidden);
   exportR.setMarkState(introState());
   exportR.setHoldPhase(travelPhase);
@@ -468,7 +556,7 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   const exportX = exportR.lastMarkDiagnostics?.madeLenX;
   exportR.endExport();
   const holdExportIdentical = preview === exported && exportR.getClockMode() === "hold";
-  const madeLenXDeterministic = holdX === exportX && holdX === markMadeLenX(0.25);
+  const madeLenXDeterministic = holdX === exportX && holdX === markMadeLenX(0.28);
 
   const saveR = makeRenderer(hidden);
   saveR.setMarkState(clampMarkState({ enabled: true, mode: "end", source: "emblem", scale: 61, sequenceStart: 0.8, sequenceStop: 0.95, anchor: "bl" }));
@@ -528,7 +616,7 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   introR.setMarkState(introState());
   at(introR, 0.5);
   const outside = introR.lastMarkDiagnostics?.kind === "absent" && introR.lastMarkDiagnostics?.applied === false;
-  at(introR, windowPhase("intro", 0.25));
+  at(introR, windowPhase("intro", 0.28));
   const inside = introR.lastMarkDiagnostics?.kind === "logotype";
   const windowGates = outside && inside;
 
@@ -547,9 +635,10 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
     stackedExactAtHold,
     dockSnaps,
     firstAlignCrosses,
-    secondAlignCrosses,
     leftOvershoots,
-    rightOvershoots,
+    noSecondOscillation,
+    snapFlickerOffProduct,
+    interruptKeepsFlicker,
     lateralFromSvg,
     typeHiddenInIntro,
     interruptEmblemThenStacked,
@@ -568,9 +657,12 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
       startX: MARK_START_X,
       leftX: MARK_LEFT_X,
       rightX: MARK_RIGHT_X,
+      clampStartX: MARK_CLAMP_START_X,
       stacked: MARK_STACKED.width,
       introWindow: MARK_MODE_WINDOW.intro,
       holdX: holdPlan.madeLenX,
+      snapFlicker: snapPlan.flicker,
+      interruptFlicker: intFlickerPlan.flicker,
       scrubX,
       xAt,
       travelLayout: layoutMarkTravelRect(GEO_W, GEO_H, 80, "mc"),

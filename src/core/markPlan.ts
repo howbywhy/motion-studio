@@ -7,7 +7,7 @@ import {
   type FlickerState,
 } from "./endBehaviour";
 import { MARK_LATERAL_DX, MARK_STACKED } from "./markAssets";
-import { clampMarkState, type MarkMode, type MarkSource, type MarkState } from "./markState";
+import { clampMarkState, MARK_MODE_WINDOW, type MarkMode, type MarkSource, type MarkState } from "./markState";
 
 const INSET = 0.07;
 const MARK_SEED = 0x4d41524b;
@@ -15,11 +15,28 @@ const MARK_SEED = 0x4d41524b;
 /** MADELEN X in stacked SVG units. 0 = exact stacked lockup. Positive = right. */
 export const MARK_ALIGN_X = 0;
 export const MARK_START_X = MARK_LATERAL_DX;
-/** After first alignment: about one letter, not another trip across the page. */
+/** After first alignment: about one letter, not another composition. */
 export const MARK_LEFT_X = -Math.round(MARK_LATERAL_DX * 0.14);
+/** Previous oscillating right peak — eval comparison only. */
 export const MARK_RIGHT_X = Math.round(MARK_LATERAL_DX * 0.16);
+/**
+ * Eval-only start X so MADELEN’s first letters stay in the stacked box.
+ * Product keeps the full supplied separation (may begin off-frame).
+ */
+export const MARK_CLAMP_START_X = Math.round(MARK_STACKED.width * 0.38);
 
+/** Reduced product dock: RIGHT → ALIGN → LEFT → SNAP ALIGN → HOLD. */
 export const MARK_LOCAL = {
+  rightHold: 0.16,
+  firstAlign: 0.52,
+  leftPeak: 0.64,
+  snap: 0.66,
+  holdStart: 0.68,
+  holdEnd: 0.92,
+} as const;
+
+/** Previous oscillating dock — eval comparison only. */
+export const MARK_OSC_LOCAL = {
   rightHold: 0.15,
   firstAlign: 0.38,
   leftPeak: 0.48,
@@ -31,7 +48,8 @@ export const MARK_LOCAL = {
 } as const;
 
 export type MarkKind = "absent" | "logotype" | "emblem";
-export type MarkFlickerTest = "A" | "B" | "C";
+/** A = snap flicker off (product). B = 120ms / 28% snap flicker (eval). */
+export type MarkFlickerTest = "A" | "B";
 
 export interface MarkLayout {
   x: number;
@@ -166,13 +184,23 @@ export function layoutMarkTravelRect(
 }
 
 /**
- * MADELEN X vs MARK local phase.
- * RIGHT hold → through ALIGN → LEFT → through ALIGN → RIGHT → SNAP ALIGN → HOLD.
- * Linear segments. Hard snap at 72%. No sine, bounce, or elastic.
+ * Product MADELEN X vs MARK local phase.
+ * RIGHT hold → through ALIGN → LEFT overshoot → SNAP ALIGN → HOLD.
+ * Linear segments. Hard snap at 64%. No second rightward oscillation.
  */
 export function markMadeLenX(local: number): number {
   const t = clamp01(local);
   const k = MARK_LOCAL;
+  if (t < k.rightHold) return MARK_START_X;
+  if (t < k.firstAlign) return lerp(MARK_START_X, MARK_ALIGN_X, (t - k.rightHold) / (k.firstAlign - k.rightHold));
+  if (t < k.leftPeak) return lerp(MARK_ALIGN_X, MARK_LEFT_X, (t - k.firstAlign) / (k.leftPeak - k.firstAlign));
+  return MARK_ALIGN_X;
+}
+
+/** Previous oscillating path — eval comparison only. */
+export function markMadeLenXOscillating(local: number): number {
+  const t = clamp01(local);
+  const k = MARK_OSC_LOCAL;
   if (t < k.rightHold) return MARK_START_X;
   if (t < k.firstAlign) return lerp(MARK_START_X, MARK_ALIGN_X, (t - k.rightHold) / (k.firstAlign - k.rightHold));
   if (t < k.leftPeak) return lerp(MARK_ALIGN_X, MARK_LEFT_X, (t - k.firstAlign) / (k.leftPeak - k.firstAlign));
@@ -185,11 +213,10 @@ export function markAligned(x: number): boolean {
   return Math.abs(x) < 0.5;
 }
 
-/** Product default is A: Flicker only on the final snap. */
+/** Product default is A: no snap Flicker. B is eval-only punctuation. */
 export function dockFlickerCenters(test: MarkFlickerTest): number[] {
-  if (test === "B") return [MARK_LOCAL.secondAlign, MARK_LOCAL.snap];
-  if (test === "C") return [MARK_LOCAL.holdEnd];
-  return [MARK_LOCAL.snap];
+  if (test === "B") return [MARK_LOCAL.snap];
+  return [];
 }
 
 function emptyPlan(state: MarkState, width: number, height: number): MarkPlan {
@@ -235,6 +262,7 @@ function applyCenters(
   width: number,
   height: number,
 ): MarkPlan {
+  if (centers.length === 0) return plan;
   const half = flickerHalfLocal(loopSeconds, span);
   let envelope = 0;
   let slot = 0;
@@ -251,6 +279,11 @@ function applyCenters(
 function introEndSeq(local: number): { kind: MarkKind; madeLenX: number } {
   if (local >= MARK_LOCAL.holdEnd) return { kind: "absent", madeLenX: MARK_ALIGN_X };
   return { kind: "logotype", madeLenX: markMadeLenX(local) };
+}
+
+function oscillatingSeq(local: number): { kind: MarkKind; madeLenX: number } {
+  if (local >= MARK_OSC_LOCAL.holdEnd) return { kind: "absent", madeLenX: MARK_ALIGN_X };
+  return { kind: "logotype", madeLenX: markMadeLenXOscillating(local) };
 }
 
 function interruptSeq(local: number): { kind: MarkKind; madeLenX: number } {
@@ -325,7 +358,7 @@ export function diagnosticsFrom(plan: MarkPlan): MarkDiagnostics {
 }
 
 /** Motion-study variants. Eval only — not product UI. */
-export type MarkStudyId = "dock" | "flickerA" | "flickerB" | "flickerC" | "interrupt";
+export type MarkStudyId = "dock" | "oscillating" | "flickerA" | "flickerB" | "interrupt";
 
 export function planMarkStudy(
   id: MarkStudyId,
@@ -338,7 +371,7 @@ export function planMarkStudy(
   const layout = id === "interrupt"
     ? layoutMarkRect(width, height, 80, "mc")
     : layoutMarkTravelRect(width, height, 80, "mc");
-  const seq = id === "interrupt" ? interruptSeq(l) : introEndSeq(l);
+  const seq = id === "interrupt" ? interruptSeq(l) : id === "oscillating" ? oscillatingSeq(l) : introEndSeq(l);
   const plan: MarkPlan = {
     visible: seq.kind !== "absent",
     kind: seq.kind,
@@ -358,11 +391,10 @@ export function planMarkStudy(
     ? [0.1, 0.82]
     : id === "flickerB"
       ? dockFlickerCenters("B")
-      : id === "flickerC"
-        ? dockFlickerCenters("C")
-        : id === "flickerA" || id === "dock"
-          ? dockFlickerCenters("A")
-          : [];
-  if (id === "dock") return plan;
-  return applyCenters(plan, centers, loopSeconds, 1, width, height);
+      : dockFlickerCenters("A");
+  if (centers.length === 0) return plan;
+  const span = id === "interrupt"
+    ? MARK_MODE_WINDOW.interrupt.stop - MARK_MODE_WINDOW.interrupt.start
+    : MARK_MODE_WINDOW.intro.stop - MARK_MODE_WINDOW.intro.start;
+  return applyCenters(plan, centers, loopSeconds, span, width, height);
 }
