@@ -14,8 +14,11 @@ import {
   type TypeDistribution,
   type TypeState,
   type TypeStyle,
+  type TypeSystemMode,
   type TypeTextAlign,
   type TypeSlot,
+  type SequenceTypeAnchor,
+  type SequenceTypeSizeMode,
 } from "../core/typeState";
 import { TYPE_SLOT_LABELS } from "../core/typeSubtitle";
 import {
@@ -384,6 +387,7 @@ function buildBlock(
 ): {
   root: HTMLElement;
   setExpanded: (open: boolean) => void;
+  setCopyVisible: (visible: boolean) => void;
   sync: (block: TypeBlock) => void;
 } {
   const root = document.createElement("div");
@@ -488,7 +492,7 @@ function buildBlock(
     onChange({ activeIndex: index, ...patch });
   });
 
-  const scale = slider(body, "Scale", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
+  const scale = slider(body, "Type Size", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
   const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
 
   const trackingH = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
@@ -651,6 +655,9 @@ function buildBlock(
   return {
     root,
     setExpanded,
+    setCopyVisible(visible: boolean) {
+      textRow.hidden = !visible;
+    },
     sync(block: TypeBlock) {
       paintOn(block.enabled);
       textarea.value = block.text;
@@ -688,18 +695,49 @@ export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
   typePageMove?: { from: number; to: number };
   frameHold?: boolean;
   holdLength?: number;
+  typeMode?: TypeSystemMode;
+  sequenceCopyAt?: { index: number; text: string };
+  sequenceSizeModeAt?: { index: number; mode: SequenceTypeSizeMode };
+  sequenceSizeAt?: { index: number; size: number };
+  sequenceAnchorAt?: { index: number; anchor: SequenceTypeAnchor };
 };
+
+export interface TypePanelContext {
+  playbackMode: "loop" | "pingpong";
+  sources: { label: string }[];
+  pairIndex: number;
+  selectedIndex: number;
+  copies: string[];
+  sizeModes: SequenceTypeSizeMode[];
+  sizes: number[];
+  anchors: SequenceTypeAnchor[];
+}
 
 export function buildTypePanel(
   container: HTMLElement,
   initial: TypeState,
   onChange: (patch: TypePanelPatch) => void,
-): { sync: (state: TypeState) => void } {
+  onSelectState?: (index: number) => void,
+): {
+  sync: (state: TypeState) => void;
+  setContext: (next: TypePanelContext) => void;
+  setActivePair: (pairIndex: number) => void;
+} {
   container.innerHTML = "";
   container.className = "type-panel";
 
   let state = clampTypeState(initial);
   let expanded: TypeSlot | null = 0;
+  let context: TypePanelContext = {
+    playbackMode: "loop",
+    sources: [],
+    pairIndex: 0,
+    selectedIndex: 0,
+    copies: [],
+    sizeModes: [],
+    sizes: [],
+    anchors: [],
+  };
 
   const head = document.createElement("div");
   head.className = "panel-label-row type-master";
@@ -726,6 +764,23 @@ export function buildTypePanel(
   const body = document.createElement("div");
   body.className = "type-panel-body";
   container.appendChild(body);
+
+  const modeSeg = seg(body, "Type", [
+    { value: "global", label: "Global" },
+    { value: "sequence", label: "Sequence" },
+  ], state.typeMode, (value) => {
+    onChange({ typeMode: value as TypeSystemMode });
+  });
+  const sequenceBtn = modeSeg.querySelector<HTMLButtonElement>('button[data-value="sequence"]');
+
+  const pulseNote = document.createElement("p");
+  pulseNote.className = "type-sequence-note";
+  pulseNote.textContent = "Sequence Type is associated with Loop. Pulse uses Global Type.";
+  body.appendChild(pulseNote);
+
+  const slotsHost = document.createElement("div");
+  slotsHost.className = "type-sequence-slots";
+  body.appendChild(slotsHost);
 
   const statesHost = document.createElement("div");
   statesHost.className = "type-states";
@@ -869,6 +924,182 @@ export function buildTypePanel(
     speed.input.value = String(Math.round(state.sequenceSpeed));
     speed.valueEl.textContent = String(Math.round(state.sequenceSpeed));
   }
+
+  function sequenceUiActive(): boolean {
+    return state.typeMode === "sequence" && context.playbackMode === "loop";
+  }
+
+  function buildSlot(index: number, label: string, copy: string): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "type-sequence-slot";
+    const meta = document.createElement("div");
+    meta.className = "type-sequence-slot-meta";
+    const num = document.createElement("span");
+    num.className = "type-sequence-slot-index";
+    num.textContent = String(index + 1).padStart(2, "0");
+    const src = document.createElement("span");
+    src.className = "type-sequence-slot-source";
+    src.textContent = label;
+    meta.appendChild(num);
+    meta.appendChild(src);
+    meta.addEventListener("click", () => onSelectState?.(index));
+    row.appendChild(meta);
+    const ta = document.createElement("textarea");
+    ta.className = "type-text";
+    ta.rows = 2;
+    ta.value = copy;
+    ta.addEventListener("focus", () => onSelectState?.(index));
+    ta.addEventListener("input", () => {
+      fitTextarea(ta);
+      onChange({ sequenceCopyAt: { index, text: ta.value } });
+    });
+    ta.addEventListener("keydown", (e) => e.stopPropagation());
+    row.appendChild(ta);
+
+    const mode = context.sizeModes[index] ?? state.sequenceSizeModes[index] ?? "auto";
+    const stored = context.sizes[index] ?? state.sequenceSizes[index] ?? state.blocks[0]!.scale;
+    const anchor = context.anchors[index] ?? state.sequenceAnchors[index] ?? "inherit";
+
+    const sizeRow = document.createElement("div");
+    sizeRow.className = "control-row type-sequence-compose";
+    const sizeLab = document.createElement("label");
+    sizeLab.textContent = "Type Size";
+    sizeRow.appendChild(sizeLab);
+    const sizeWrap = document.createElement("div");
+    sizeWrap.className = "type-sequence-size";
+    const autoBtn = document.createElement("button");
+    autoBtn.type = "button";
+    autoBtn.className = "type-sequence-auto";
+    autoBtn.textContent = "Auto";
+    autoBtn.classList.toggle("active", mode === "auto");
+    autoBtn.addEventListener("click", () => {
+      onSelectState?.(index);
+      onChange({ sequenceSizeModeAt: { index, mode: "auto" } });
+    });
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.min = "0";
+    sizeInput.max = "100";
+    sizeInput.step = "1";
+    sizeInput.className = "type-sequence-size-value";
+    sizeInput.value = String(stored);
+    sizeInput.title = "Manual Type Size";
+    sizeInput.addEventListener("focus", () => onSelectState?.(index));
+    sizeInput.addEventListener("input", () => {
+      onChange({
+        sequenceSizeModeAt: { index, mode: "manual" },
+        sequenceSizeAt: { index, size: Number(sizeInput.value) },
+      });
+    });
+    sizeWrap.appendChild(autoBtn);
+    sizeWrap.appendChild(sizeInput);
+    sizeRow.appendChild(sizeWrap);
+    row.appendChild(sizeRow);
+
+    const posRow = document.createElement("div");
+    posRow.className = "control-row type-sequence-compose";
+    const posLab = document.createElement("label");
+    posLab.textContent = "Position";
+    posRow.appendChild(posLab);
+    const posWrap = document.createElement("div");
+    posWrap.className = "type-sequence-pos";
+    const inheritBtn = document.createElement("button");
+    inheritBtn.type = "button";
+    inheritBtn.className = "type-sequence-inherit";
+    inheritBtn.textContent = "Inherit";
+    inheritBtn.classList.toggle("active", anchor === "inherit");
+    inheritBtn.addEventListener("click", () => {
+      onSelectState?.(index);
+      onChange({ sequenceAnchorAt: { index, anchor: "inherit" } });
+    });
+    posWrap.appendChild(inheritBtn);
+    for (const a of TYPE_ANCHORS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "type-sequence-anchor";
+      btn.textContent = a.toUpperCase();
+      btn.setAttribute("data-anchor", a);
+      btn.classList.toggle("active", anchor === a);
+      btn.addEventListener("click", () => {
+        onSelectState?.(index);
+        onChange({ sequenceAnchorAt: { index, anchor: a } });
+      });
+      posWrap.appendChild(btn);
+    }
+    posRow.appendChild(posWrap);
+    row.appendChild(posRow);
+
+    fitTextarea(ta);
+    return row;
+  }
+
+  function paintActivePair(): void {
+    const active = sequenceUiActive();
+    slotsHost.querySelectorAll<HTMLElement>(".type-sequence-slot").forEach((row, i) => {
+      row.classList.toggle("is-active", active && i === context.selectedIndex);
+    });
+  }
+
+  function paintSlots(): void {
+    const sources = context.sources;
+    const copies = context.copies.length ? context.copies : state.sequenceCopies;
+    const rows = slotsHost.querySelectorAll<HTMLElement>(".type-sequence-slot");
+    const labels = Array.from(slotsHost.querySelectorAll<HTMLElement>(".type-sequence-slot-source")).map((el) => el.textContent ?? "");
+    const same =
+      rows.length === sources.length &&
+      labels.every((label, i) => label === (sources[i]?.label ?? ""));
+    if (!same) {
+      slotsHost.innerHTML = "";
+      for (let i = 0; i < sources.length; i++) {
+        slotsHost.appendChild(buildSlot(i, sources[i]!.label, copies[i] ?? ""));
+      }
+    } else {
+      rows.forEach((row, i) => {
+        const ta = row.querySelector("textarea");
+        if (ta && document.activeElement !== ta) {
+          const next = copies[i] ?? "";
+          if (ta.value !== next) {
+            ta.value = next;
+            fitTextarea(ta);
+          }
+        }
+        const mode = context.sizeModes[i] ?? state.sequenceSizeModes[i] ?? "auto";
+        const stored = context.sizes[i] ?? state.sequenceSizes[i] ?? state.blocks[0]!.scale;
+        const anchor = context.anchors[i] ?? state.sequenceAnchors[i] ?? "inherit";
+        row.querySelector(".type-sequence-auto")?.classList.toggle("active", mode === "auto");
+        const sizeInput = row.querySelector<HTMLInputElement>(".type-sequence-size-value");
+        if (sizeInput && document.activeElement !== sizeInput && sizeInput.value !== String(stored)) {
+          sizeInput.value = String(stored);
+        }
+        row.querySelector(".type-sequence-inherit")?.classList.toggle("active", anchor === "inherit");
+        row.querySelectorAll<HTMLButtonElement>(".type-sequence-anchor").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-anchor") === anchor);
+        });
+      });
+    }
+    paintActivePair();
+  }
+
+  function paintMode(): void {
+    const sequence = sequenceUiActive();
+    const pulse = context.playbackMode === "pingpong";
+    markSeg(modeSeg, state.typeMode);
+    if (sequenceBtn) {
+      sequenceBtn.disabled = pulse;
+      sequenceBtn.title = pulse ? "Sequence Type is available in Loop" : "";
+    }
+    pulseNote.hidden = !pulse;
+    statesHost.hidden = sequence;
+    slotsHost.hidden = !sequence;
+    block0.setCopyVisible(!sequence);
+    block1.root.hidden = sequence;
+    block2.root.hidden = sequence;
+    if (sequence && expanded !== 0) {
+      expanded = 0;
+      applyExpanded();
+    }
+    paintSlots();
+  }
   paintTiming();
 
   const applyExpanded = (): void => {
@@ -897,6 +1128,8 @@ export function buildTypePanel(
     applyExpanded();
   }, onEnabled(2));
 
+  paintMode();
+
   return {
     sync(next: TypeState) {
       state = clampTypeState(next);
@@ -908,6 +1141,31 @@ export function buildTypePanel(
       block0.sync(state.blocks[0]);
       block1.sync(state.blocks[1]);
       block2.sync(state.blocks[2]);
+      paintMode();
+    },
+    setContext(next: TypePanelContext) {
+      const playbackChanged = next.playbackMode !== context.playbackMode;
+      const sourcesChanged =
+        next.sources.length !== context.sources.length ||
+        next.sources.some((source, i) => source.label !== context.sources[i]?.label);
+      const copiesChanged =
+        next.copies.length !== context.copies.length ||
+        next.copies.some((copy, i) => copy !== context.copies[i]);
+      const composeChanged =
+        next.sizeModes.some((mode, i) => mode !== context.sizeModes[i]) ||
+        next.sizes.some((size, i) => size !== context.sizes[i]) ||
+        next.anchors.some((anchor, i) => anchor !== context.anchors[i]) ||
+        next.sizeModes.length !== context.sizeModes.length;
+      const selectedChanged = next.selectedIndex !== context.selectedIndex;
+      context = next;
+      if (playbackChanged || sourcesChanged) paintMode();
+      else if (copiesChanged || composeChanged) paintSlots();
+      else if (selectedChanged) paintActivePair();
+    },
+    setActivePair(pairIndex: number) {
+      if (context.pairIndex === pairIndex) return;
+      context = { ...context, pairIndex };
+      paintActivePair();
     },
   };
 }

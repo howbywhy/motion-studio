@@ -16,7 +16,7 @@ export interface MarkState {
 }
 
 export const MARK_WINDOW_MIN = 0.08;
-export const MARK_SCALE_DEFAULT = 72;
+export const MARK_SCALE_DEFAULT = 40;
 
 export const MARK_MODE_WINDOW: Record<MarkMode, { start: number; stop: number }> = {
   intro: { start: 0, stop: 0.18 },
@@ -74,13 +74,12 @@ export function parseMarkAnchor(raw: unknown, fallback: TypeAnchor = "mc"): Type
 }
 
 export function defaultMarkState(): MarkState {
-  const win = MARK_MODE_WINDOW.intro;
   return {
     enabled: false,
     mode: "intro",
     source: "stacked",
-    sequenceStart: win.start,
-    sequenceStop: win.stop,
+    sequenceStart: 0,
+    sequenceStop: 1,
     scale: MARK_SCALE_DEFAULT,
     anchor: "mc",
   };

@@ -340,11 +340,11 @@ export interface MarkReport {
   leftOvershoots: boolean;
   noSecondOscillation: boolean;
   snapFlickerOffProduct: boolean;
-  interruptKeepsFlicker: boolean;
+  interruptHasNoPrivateFlicker: boolean;
   lateralFromSvg: boolean;
-  typeHiddenInIntro: boolean;
-  interruptEmblemThenStacked: boolean;
-  endYieldsFlicker: boolean;
+  typeCoexistsInIntro: boolean;
+  interruptStaysLockup: boolean;
+  endDoesNotYield: boolean;
   pulseKeepsMark: boolean;
   scrubReverse: boolean;
   holdExportIdentical: boolean;
@@ -517,25 +517,25 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
     H,
     LOOP,
   );
-  const interruptKeepsFlicker = intFlickerPlan.flicker > 0.02;
+  const interruptHasNoPrivateFlicker = intFlickerPlan.flicker <= 0.02 && intFlickerPlan.madeLenX === 0;
   const lateralFromSvg = MARK_LATERAL_DX > 1200 && MARK_STACKED.madeBy.length === 6 && MARK_STACKED.madeLen.length === 7;
 
   introR.setTypeState(campaignType());
   introR.setMarkState(introState());
   at(introR, windowPhase("intro", 0.84));
-  const typeHiddenInIntro = introR.lastMarkDiagnostics?.hideType === true;
+  const typeCoexistsInIntro = introR.lastMarkDiagnostics?.hideType === false;
 
   intR.setMarkState(clampMarkState({ enabled: true, mode: "interrupt", source: "stacked" }));
   at(intR, windowPhase("interrupt", 0.25));
-  const emblemKind = intR.lastMarkDiagnostics?.kind === "emblem";
+  const emblemKind = intR.lastMarkDiagnostics?.kind === "logotype" && intR.lastMarkDiagnostics?.aligned === true;
   at(intR, windowPhase("interrupt", 0.6));
   const stackedKind = intR.lastMarkDiagnostics?.kind === "logotype" && intR.lastMarkDiagnostics?.aligned === true;
-  const interruptEmblemThenStacked = emblemKind && stackedKind;
+  const interruptStaysLockup = emblemKind && stackedKind;
 
   endR.setMarkState(clampMarkState({ enabled: true, mode: "end", source: "stacked" }));
   endR.setEndBehaviour(clampEndBehaviourSettings({ mode: "flicker", amount: 80, hold: 40, duration: 40 }));
   at(endR, windowPhase("end", 0.84));
-  const endYieldsFlicker = endR.lastMarkDiagnostics?.yieldEnd === true && endR.lastEndDiagnostics?.applied !== true;
+  const endDoesNotYield = endR.lastMarkDiagnostics?.yieldEnd === false;
 
   const pulseR = makeRenderer(hidden);
   pulseR.setPlaybackMode("pingpong");
@@ -556,7 +556,7 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
   const exportX = exportR.lastMarkDiagnostics?.madeLenX;
   exportR.endExport();
   const holdExportIdentical = preview === exported && exportR.getClockMode() === "hold";
-  const madeLenXDeterministic = holdX === exportX && holdX === markMadeLenX(0.28);
+  const madeLenXDeterministic = holdX === exportX && holdX === 0;
 
   const saveR = makeRenderer(hidden);
   saveR.setMarkState(clampMarkState({ enabled: true, mode: "end", source: "emblem", scale: 61, sequenceStart: 0.8, sequenceStop: 0.95, anchor: "bl" }));
@@ -638,11 +638,11 @@ export async function runMarkSheet(root: HTMLElement): Promise<MarkReport> {
     leftOvershoots,
     noSecondOscillation,
     snapFlickerOffProduct,
-    interruptKeepsFlicker,
+    interruptHasNoPrivateFlicker,
     lateralFromSvg,
-    typeHiddenInIntro,
-    interruptEmblemThenStacked,
-    endYieldsFlicker,
+    typeCoexistsInIntro,
+    interruptStaysLockup,
+    endDoesNotYield,
     pulseKeepsMark,
     scrubReverse,
     holdExportIdentical,

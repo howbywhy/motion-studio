@@ -4,3 +4,5 @@ dist
 *.local
 *.tsbuildinfo
 .vercel
+eval/exports/
+eval/stress-media/

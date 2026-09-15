@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Type Bloom Render QA</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
+      h1 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 80em; }
+      table { border-collapse: collapse; margin-top: 16px; }
+      th, td { border: 1px solid #222; padding: 6px; vertical-align: top; }
+      th { color: #888; font-weight: 500; letter-spacing: 0.06em; }
+      canvas { display: block; background: #000; }
+      .ms { color: #666; }
+    </style>
+  </head>
+  <body>
+    <h1>Type Bloom render</h1>
+    <p>Eval only. Same Bloom field, four Type raster treatments. Product uses SAFE. Image Bloom is not retuned here.</p>
+    <div id="root"></div>
+    <script type="module" src="/src/eval/typeBloomRender.ts"></script>
+  </body>
+</html>

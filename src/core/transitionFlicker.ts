@@ -1,5 +1,11 @@
 import { clampLoopSeconds, type PlaybackMode } from "./sequence";
 import {
+  equalSequenceWeights,
+  sequenceSpans,
+  sequenceWeightsAreUniform,
+  transitionCutsFromWeights,
+} from "./sequenceRhythm";
+import {
   endWindows,
   flickerPeakMetrics,
   paintFlickerGrammar,
@@ -19,8 +25,12 @@ import {
 
 /** Authored wall-clock duration of the micro interruption. Not exposed. */
 export const TRANSITION_FLICKER_DURATION_SEC = 0.12;
-/** Peak energy vs End Flicker at amount 100. Not exposed. */
+/** Peak energy vs End Flicker at amount 100. Visible Transition Flicker punctuation. */
 export const TRANSITION_FLICKER_ENERGY = 0.28;
+/** Restrained state handoff when Sequence Type is on and Transition Flicker is off. */
+export const SEQUENCE_HANDOFF_ENERGY = 0.11;
+/** Cap Flicker to this fraction of the shorter neighbouring slot. */
+export const TRANSITION_FLICKER_SHORT_FRACTION = 0.25;
 
 /** Full master-phase span for this loop length. ~3 frames at 25fps. */
 export function transitionFlickerSpan(loopSeconds: number): number {
@@ -68,13 +78,28 @@ function masterPhase(phase: number): number {
   return !(phase > 0) || phase >= 1 ? 0 : phase;
 }
 
-/** Internal pair cuts only. Loop wrap (0 / 1) is never a Transition Flicker seam. */
-export function transitionPairCuts(pairCount: number): number[] {
+export function phaseDistance(a: number, b: number): number {
+  const d = Math.abs(a - b);
+  return Math.min(d, 1 - d);
+}
+
+/**
+ * Internal pair cuts, plus wrap at 0 when `includeWrap` is set.
+ * Product Loop always includes wrap so last → first uses the same grammar.
+ */
+export function transitionPairCuts(
+  pairCount: number,
+  weights?: readonly number[],
+  includeWrap = false,
+): number[] {
   const n = Math.max(0, Math.floor(pairCount));
   if (n < 2) return [];
-  const cuts: number[] = [];
-  for (let i = 1; i < n; i++) cuts.push(i / n);
-  return cuts;
+  const internal =
+    weights && weights.length === n && !sequenceWeightsAreUniform(weights)
+      ? transitionCutsFromWeights(weights)
+      : Array.from({ length: n - 1 }, (_, i) => (i + 1) / n);
+  if (!includeWrap) return internal;
+  return [0, ...internal];
 }
 
 function microState(seed: number, cutIndex: number): FlickerState {
@@ -84,19 +109,48 @@ function microState(seed: number, cutIndex: number): FlickerState {
   return "joltC";
 }
 
+export function incomingSlotForTransitionCut(cutIndex: number, includeWrap: boolean): number {
+  return includeWrap ? cutIndex : cutIndex + 1;
+}
+
+/** Perceptual Flicker length in seconds. Scales down only when a neighbour is very short. */
+export function transitionFlickerDurationSec(
+  loopSeconds: number,
+  pairCount: number,
+  weights?: readonly number[] | null,
+  incomingIndex?: number,
+): number {
+  const authored = TRANSITION_FLICKER_DURATION_SEC;
+  const n = Math.max(0, Math.floor(pairCount));
+  if (n < 2 || incomingIndex == null || incomingIndex < 0) return authored;
+  const clamped = weights && weights.length === n ? weights : equalSequenceWeights(n);
+  const spans = sequenceSpans(clamped);
+  const incoming = spans[((incomingIndex % n) + n) % n];
+  const outgoing = spans[(((incomingIndex - 1) % n) + n) % n];
+  if (!incoming || !outgoing) return authored;
+  const shorter = Math.min(incoming.share, outgoing.share) * clampLoopSeconds(loopSeconds);
+  return Math.min(authored, Math.max(1 / 30, shorter * TRANSITION_FLICKER_SHORT_FRACTION));
+}
+
 export function transitionFlickerEnvelope(
   phase: number,
   pairCount: number,
   loopSeconds: number,
+  weights?: readonly number[],
+  includeWrap = false,
 ): { envelope: number; cutIndex: number; cut: number } {
   const p = masterPhase(phase);
-  const half = transitionFlickerHalfSpan(loopSeconds);
-  const cuts = transitionPairCuts(pairCount);
+  const cuts = transitionPairCuts(pairCount, weights, includeWrap);
+  const loop = clampLoopSeconds(loopSeconds);
   let best = 0;
   let bestI = -1;
   let bestCut = 0;
   for (let i = 0; i < cuts.length; i++) {
-    const env = half > 0 ? 1 - Math.abs(p - cuts[i]!) / half : 0;
+    const incoming = incomingSlotForTransitionCut(i, includeWrap);
+    const duration = transitionFlickerDurationSec(loopSeconds, pairCount, weights, incoming);
+    const half = duration / loop / 2;
+    const dist = includeWrap ? phaseDistance(p, cuts[i]!) : Math.abs(p - cuts[i]!);
+    const env = half > 0 ? 1 - dist / half : 0;
     if (env > best) {
       best = env;
       bestI = i;
@@ -144,10 +198,13 @@ export function planTransitionFlicker(
   width: number,
   height: number,
   loopSeconds: number,
+  weights?: readonly number[],
+  includeWrap = false,
+  energy = TRANSITION_FLICKER_ENERGY,
 ): TransitionFlickerPlan {
   const empty = emptyTransitionFlickerPlan(pairCount);
   if (!enabled || playbackMode !== "loop" || pairCount < 2) return empty;
-  const { envelope, cutIndex, cut } = transitionFlickerEnvelope(phase, pairCount, loopSeconds);
+  const { envelope, cutIndex, cut } = transitionFlickerEnvelope(phase, pairCount, loopSeconds, weights, includeWrap);
   if (cutIndex < 0 || envelope <= 0.02) return empty;
 
   const p = masterPhase(phase);
@@ -161,8 +218,8 @@ export function planTransitionFlicker(
   const seed = mix(TRANSITION_SEED ^ Math.imul(pairCount, 2654435761) ^ Math.imul(cutIndex + 1, 1597334677));
   const flickerState = microState(seed, cutIndex);
   const peak = flickerPeakMetrics(width, height);
-  const maxDisp = peak.maxDisp * TRANSITION_FLICKER_ENERGY;
-  const rgbBase = peak.rgb * TRANSITION_FLICKER_ENERGY;
+  const maxDisp = peak.maxDisp * energy;
+  const rgbBase = peak.rgb * energy;
   const bands = planFlickerBands(flickerState, seed, width, height, envelope, maxDisp, rgbBase);
   const active = bands.length > 0 && envelope > 0.02;
   return {
@@ -187,6 +244,9 @@ export function applyTransitionFlicker(
   enabled: boolean,
   end: EndBehaviourSettings,
   loopSeconds: number,
+  weights?: readonly number[],
+  includeWrap = false,
+  energy = TRANSITION_FLICKER_ENERGY,
 ): TransitionFlickerDiagnostics {
   const plan = planTransitionFlicker(
     phase,
@@ -197,6 +257,9 @@ export function applyTransitionFlicker(
     layer.width,
     layer.height,
     loopSeconds,
+    weights,
+    includeWrap,
+    energy,
   );
   if (!plan.active) {
     return {
@@ -218,6 +281,38 @@ export function applyTransitionFlicker(
     pairCount: plan.pairCount,
     flickerState: plan.flickerState,
     suppressed: false,
+  };
+}
+
+/** Frozen comparison points: first internal cut and the wrap seam. */
+export function flickerComparePhases(
+  pairCount: number,
+  loopSeconds: number,
+  weights?: readonly number[],
+): {
+  internalOut: number;
+  internalPeak: number;
+  internalIn: number;
+  wrapOut: number;
+  wrapPeak: number;
+  wrapIn: number;
+} {
+  const half = transitionFlickerHalfSpan(loopSeconds);
+  const cuts = transitionPairCuts(pairCount, weights, false);
+  const internal = cuts[0] ?? 0.5;
+  const edge = half * 0.55;
+  const wrap = (n: number): number => {
+    if (n < 0) return n + 1;
+    if (n >= 1) return n - 1;
+    return n;
+  };
+  return {
+    internalOut: wrap(internal - edge),
+    internalPeak: internal,
+    internalIn: wrap(internal + edge),
+    wrapOut: wrap(1 - edge),
+    wrapPeak: 0,
+    wrapIn: wrap(edge),
   };
 }
 

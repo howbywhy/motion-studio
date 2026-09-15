@@ -380,10 +380,11 @@ function maxLegalHeadline(
   return searchFit(8, Number.isFinite(wrappedHi) && wrappedHi > 8 ? wrappedHi : 48, fitWrapped);
 }
 
-function composeHeadline(block: TypeBlock, pad: PadRect): Solution {
+function composeHeadline(block: TypeBlock, pad: PadRect, legalCopy?: string): Solution {
   const rows = authoredRows(block.text);
+  const legalRows = legalCopy && legalCopy.trim() ? authoredRows(legalCopy) : rows;
   const tEm = trackingEm("headline", block.tracking);
-  const legal = maxLegalHeadline(rows, block.weight, tEm, pad.w, pad.h);
+  const legal = maxLegalHeadline(legalRows, block.weight, tEm, pad.w, pad.h);
   const fontSize = Math.min(legal, legal * lerp(0.34, 1, u01(block.scale)));
   const tracking = tEm * fontSize;
   const laid: PreparedLine[] = [];
@@ -485,17 +486,18 @@ function composeSubtitle(block: TypeBlock, pad: PadRect, unitH: number): Solutio
   };
 }
 
-function composeType(block: TypeBlock, pad: PadRect, unitH: number): Solution {
+function composeType(block: TypeBlock, pad: PadRect, unitH: number, legalCopy?: string): Solution {
   if (block.composition === "paragraph") return composeParagraph(block, pad);
   if (block.composition === "subtitle") return composeSubtitle(block, pad, unitH);
-  return composeHeadline(block, pad);
+  return composeHeadline(block, pad, legalCopy);
 }
 
-function composeKey(block: TypeBlock, aspectKey: number): string {
+function composeKey(block: TypeBlock, aspectKey: number, legalCopy?: string): string {
   return [
-    "v18",
+    "v19",
     aspectKey,
     block.text,
+    legalCopy ?? "",
     block.composition,
     block.scale,
     block.tracking,
@@ -692,6 +694,7 @@ function layoutBlock(
   canvasW: number,
   canvasH: number,
   slot: TypeSlot,
+  legalCopy?: string,
 ): TypeLayout | null {
   if (!block.enabled) return null;
   const text = block.text.replace(/\s+$/g, "");
@@ -702,14 +705,14 @@ function layoutBlock(
   const unitW = UNIT;
   const unitH = UNIT * (h / w);
   const pad = paddedRect(unitW, unitH, block.padding, block.composition);
-  const key = composeKey(block, aspectKey);
+  const key = composeKey(block, aspectKey, legalCopy);
 
   let sol: Solution;
   const hit = caches[slot];
   if (hit && hit.key === key) {
     sol = hit.solution;
   } else {
-    sol = composeType(block, pad, unitH);
+    sol = composeType(block, pad, unitH, legalCopy);
     if (sol.prepared.length === 0) return null;
     caches[slot] = { key, solution: sol };
   }
@@ -757,7 +760,7 @@ export function layoutTypography(
 ): TypeLayout | null {
   if (isTypeDocument(input)) {
     if (!input.enabled) return null;
-    return layoutBlock(input.blocks[0], canvasW, canvasH, slot);
+    return layoutBlock(input.blocks[0], canvasW, canvasH, slot, input.sequenceLegalCopy);
   }
   return layoutBlock(input, canvasW, canvasH, slot);
 }
@@ -770,7 +773,7 @@ export function layoutTypeDocument(
   const active = activeTypeBlocks(state);
   const out: { index: TypeSlot; layout: TypeLayout }[] = [];
   for (const item of active) {
-    const layout = layoutBlock(item.block, canvasW, canvasH, item.index);
+    const layout = layoutBlock(item.block, canvasW, canvasH, item.index, state.sequenceLegalCopy);
     if (layout) out.push({ index: item.index, layout });
   }
   return out;

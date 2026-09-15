@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Identity Final QA</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
+      h1 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 72em; }
+      .stage canvas { display: block; background: #000; }
+      .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
+      .bar button { background: #1a1a1e; color: #ddd; border: 1px solid #333; padding: 6px 10px; font: inherit; cursor: pointer; }
+      .bar button.is-on { border-color: #eee; color: #fff; }
+      .bar span { color: #666; letter-spacing: 0.08em; }
+      .hud { color: #aaa; min-height: 1.4em; }
+    </style>
+  </head>
+  <body>
+    <h1>Identity final</h1>
+    <p>Eval only. Four master-identity treatments. Product MARK stays CURRENT until a winner is chosen. No Bloom-masked logo.</p>
+    <div class="stage" id="stage"></div>
+    <div class="bar" id="treat"></div>
+    <div class="bar" id="opts"></div>
+    <div class="hud" id="hud"></div>
+    <script type="module" src="/src/eval/identityFinal.ts"></script>
+  </body>
+</html>

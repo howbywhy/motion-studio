@@ -1,4 +1,5 @@
 import { mulberry32 } from "./rng";
+import { masterPhaseFromSlotLocal } from "./sequenceRhythm";
 import type { ParamValues } from "./types";
 
 /**
@@ -22,6 +23,8 @@ export interface RandomiseInput {
   loopSeconds: number;
   pairIndex: number;
   pairCount: number;
+  /** When present, HOLD lands inside the current weighted slot. */
+  sequenceWeights?: readonly number[];
 }
 
 export interface RandomiseResult {
@@ -61,7 +64,15 @@ function sampleBand(rng: () => number, bands: Band[]): number {
   return last.lo + rng() * (last.hi - last.lo);
 }
 
-function loopPhaseFromLocal(pairIndex: number, pairCount: number, local: number): number {
+function loopPhaseFromLocal(
+  pairIndex: number,
+  pairCount: number,
+  local: number,
+  weights?: readonly number[],
+): number {
+  if (weights && weights.length === pairCount) {
+    return masterPhaseFromSlotLocal(pairIndex, local, weights);
+  }
   if (pairCount <= 1) return Math.min(1, Math.max(0, local));
   const idx = Math.min(pairCount - 1, Math.max(0, pairIndex));
   return Math.min(1, Math.max(0, (idx + Math.min(1, Math.max(0, local))) / pairCount));
@@ -100,7 +111,12 @@ export function generateRandomisation(input: RandomiseInput): RandomiseResult {
   const rng = mulberry32(input.seed >>> 0);
   const params = bloomParams(rng, input.params);
   const local = sampleBand(rng, BLOOM_PHASE);
-  const holdPhase = loopPhaseFromLocal(input.pairIndex, Math.max(1, input.pairCount), local);
+  const holdPhase = loopPhaseFromLocal(
+    input.pairIndex,
+    Math.max(1, input.pairCount),
+    local,
+    input.sequenceWeights,
+  );
   const graphicElapsed = holdPhase * Math.max(0.001, input.loopSeconds);
   return { seed: input.seed >>> 0, params, holdPhase, graphicElapsed };
 }

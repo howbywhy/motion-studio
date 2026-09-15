@@ -8,7 +8,7 @@ import { buildControls } from "./ui/controls";
 import { buildXYPad } from "./ui/xyPad";
 import { buildPhaseControl } from "./ui/phaseControl";
 import { buildLoopLengthControl } from "./ui/loopLengthControl";
-import { buildSequenceStrip } from "./ui/sequenceStrip";
+import { buildSequenceRhythmStrip } from "./ui/sequenceRhythmStrip";
 import { buildSpreadControl } from "./ui/spreadControl";
 import { buildFragmentControl } from "./ui/fragmentControl";
 import { buildBloomFieldMap } from "./ui/bloomFieldMap";
@@ -22,6 +22,7 @@ import { clampEndBehaviourSettings, END_BEHAVIOUR_OFF } from "./core/endBehaviou
 import { clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./core/globalRegistration";
 import { loadSwitzer } from "./core/typeFont";
 import { clampTypeState, cloneTypeState, defaultTypeState } from "./core/typeState";
+import { resolveSequenceTypeSize } from "./core/sequenceTypeSize";
 import { clampMarkState, cloneMarkState, defaultMarkState } from "./core/markState";
 import { debugLinePlan, layoutTypeDocument } from "./core/typeLayout";
 import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
@@ -31,6 +32,7 @@ import { SHIFT_EXPRESSION_COPY } from "./behaviors/shift";
 import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
 import { generateRandomisation, newRandomisationSeed } from "./core/randomise";
+import { clampSequenceWeights } from "./core/sequenceRhythm";
 import type { ClockMode } from "./core/phaseClock";
 import {
   createSavedState,
@@ -260,10 +262,46 @@ void loadSwitzer().then(() => renderer.renderFrame());
 
 const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
   renderer.patchTypeState(patch);
-  if (patch.selected !== undefined || patch.typePage !== undefined || patch.typePageMove !== undefined || patch.frameHold !== undefined || patch.holdLength !== undefined) {
+  if (
+    patch.selected !== undefined ||
+    patch.typePage !== undefined ||
+    patch.typePageMove !== undefined ||
+    patch.frameHold !== undefined ||
+    patch.holdLength !== undefined ||
+    patch.typeMode !== undefined ||
+    patch.sequenceSizeModeAt !== undefined ||
+    patch.sequenceSizeAt !== undefined ||
+    patch.sequenceAnchorAt !== undefined
+  ) {
     typeUi.sync(renderer.getTypeState());
   }
+  typeUi.setContext(typePanelContext());
+}, (index) => {
+  const item = renderer.getSourceAt(index);
+  if (!item) return;
+  renderer.selectItem(item.id);
+  syncSourceInspector();
+  rebuildGraphicPanel();
+  rebuildCompositionPanel();
+  sequenceStrip.refresh();
+  typeUi.setContext(typePanelContext());
 });
+
+function typePanelContext() {
+  const type = renderer.getTypeState();
+  const selected = renderer.getSelectedItem();
+  const selectedIndex = Math.max(0, renderer.getSequence().findIndex((item) => item.id === selected?.id));
+  return {
+    playbackMode: renderer.getPlaybackMode(),
+    sources: renderer.getSequence().map((item) => ({ label: item.asset.label })),
+    pairIndex: renderer.getActivePair().pairIndex,
+    selectedIndex,
+    copies: type.sequenceCopies,
+    sizeModes: type.sequenceSizeModes,
+    sizes: type.sequenceSizes,
+    anchors: type.sequenceAnchors,
+  };
+}
 
 const endUi = mountEndBehaviourPanel(
   endBehaviourPanelEl,
@@ -450,23 +488,33 @@ sourceRemoveBtn.addEventListener("click", () => {
   syncAudioButton();
 });
 
-const sequenceStrip = buildSequenceStrip(document.querySelector<HTMLDivElement>("#sequence-strip")!, {
+const sequenceStrip = buildSequenceRhythmStrip(document.querySelector<HTMLDivElement>("#sequence-strip")!, {
   getItems: () => renderer.getSequence(),
+  getWeights: () => renderer.getSequenceWeights(),
   getSelectedId: () => renderer.getSelectedId(),
-  getActiveIds: () => {
-    const pair = renderer.getActivePair();
-    return { aId: pair.aId, bId: pair.bId };
-  },
+  getActiveIndex: () => renderer.getActivePair().pairIndex,
+  getLoopSeconds: () => renderer.getLoopSeconds(),
   onSelect: (id) => {
     renderer.selectItem(id);
     syncSourceInspector();
     rebuildGraphicPanel();
     rebuildCompositionPanel();
     sequenceStrip.refresh();
+    typeUi.setContext(typePanelContext());
   },
   onAdd: () => addPlaceholderSource(),
   onReorder: (from, to) => {
     renderer.moveSource(from, to);
+    sequenceStrip.refresh();
+    typeUi.sync(renderer.getTypeState());
+    typeUi.setContext(typePanelContext());
+  },
+  onWeights: (weights) => {
+    renderer.setSequenceWeights(weights);
+    sequenceStrip.layout();
+  },
+  onResetTiming: () => {
+    renderer.resetSequenceWeights();
     sequenceStrip.refresh();
   },
   onDropMedia: (id, file) => {
@@ -485,6 +533,7 @@ const loopLengthUi = buildLoopLengthControl(
   (seconds) => {
     renderer.setLoopSeconds(seconds);
     syncExportDuration();
+    sequenceStrip.layout();
   },
 );
 
@@ -492,8 +541,10 @@ renderer.onFrame = () => {
   if (renderer.getClockMode() === "auto") phaseUi.setDisplayedPhase(renderer.getPhase());
   const pair = renderer.getActivePair();
   phaseUi.setPairCount(Math.max(1, pair.pairCount));
+  phaseUi.setActiveIndex(pair.pairIndex);
   sequenceStrip.syncMarks();
   bloomFieldMap.sync();
+  typeUi.setContext(typePanelContext());
 };
 
 const transformParamDefs: ParamDef[] = [
@@ -1070,6 +1121,7 @@ function applyRandomise(): void {
     loopSeconds: renderer.getLoopSeconds(),
     pairIndex: pair.pairIndex,
     pairCount: Math.max(1, pair.pairCount),
+    sequenceWeights: renderer.getSequenceWeights(),
   });
   currentParams = result.params;
   lastParamsByBehavior.set(currentBehavior.id, currentParams);
@@ -1191,6 +1243,7 @@ function setPlaybackModeUI(mode: "loop" | "pingpong"): void {
   });
   endUi.sync();
   rebuildControlsPanel();
+  typeUi.setContext(typePanelContext());
 }
 
 playbackToggle.addEventListener("click", (e) => {
@@ -1243,6 +1296,7 @@ function gatherCurrentSaveInput(name: string): SavedStateInput {
     endBehaviourHold: renderer.getEndBehaviour().hold,
     endBehaviourDuration: renderer.getEndBehaviour().duration,
     transitionFlickerEnabled: renderer.getTransitionFlickerEnabled(),
+    sequenceWeights: renderer.getSequenceWeights(),
     sources: renderer.getSequence().map((item) => ({
       id: item.id,
       asset: item.asset,
@@ -1304,6 +1358,7 @@ function loadSavedState(state: SavedState): void {
       return { id: s.id, asset: s.asset };
     }),
     state.selectedId,
+    clampSequenceWeights(state.sequenceWeights, state.sources.length),
   );
   renderer.setAudioEnabled(state.audioEnabled !== false);
   syncAudioButton();
@@ -1561,6 +1616,7 @@ function applyProductDefault(): void {
     ],
     undefined,
   );
+  renderer.resetSequenceWeights();
   renderer.setLoopSeconds(12);
   loopLengthUi.setSeconds(12);
   syncExportDuration();
@@ -1823,6 +1879,16 @@ Object.assign(window, {
         selected: item.id === renderer.getSelectedId(),
       })),
     getActivePair: () => renderer.getActivePair(),
+    getSequenceWeights: () => renderer.getSequenceWeights(),
+    setSequenceWeights: (weights: number[]) => {
+      renderer.setSequenceWeights(weights);
+      sequenceStrip.refresh();
+    },
+    resetSequenceWeights: () => {
+      renderer.resetSequenceWeights();
+      sequenceStrip.refresh();
+    },
+    getSequenceTiming: () => renderer.getSequenceTiming(),
     setAudio: (on: boolean) => {
       renderer.unlockAudio();
       renderer.setAudioEnabled(on);
@@ -1868,6 +1934,12 @@ Object.assign(window, {
     reverseSequence: () => {
       renderer.reverseSequence();
       sequenceStrip.refresh();
+    },
+    moveSource: (from: number, to: number) => {
+      renderer.moveSource(from, to);
+      sequenceStrip.refresh();
+      typeUi.sync(renderer.getTypeState());
+      typeUi.setContext(typePanelContext());
     },
     setSlotSource: (slot: MediaSlot, mode: "media" | "field") => {
       const item = renderer.getSourceAt(slot === "A" ? 0 : 1);
@@ -1969,6 +2041,35 @@ Object.assign(window, {
         video.addEventListener("error", () => reject(new Error(`Could not decode ${label}`)), { once: true });
         video.src = url;
       }),
+    measureSequenceTypeSize: (copy: string, width?: number, height?: number) => {
+      const type = renderer.getTypeState();
+      const canvas = renderer.getCanvasSize();
+      const w = width ?? canvas.width;
+      const h = height ?? canvas.height;
+      return resolveSequenceTypeSize(type, copy, "auto", type.blocks[0]!.scale, w, h);
+    },
+    getVisibleCanvas: () => renderer.getVisibleCanvas(),
+    resolveSequenceTypeSizes: (width?: number, height?: number) => {
+      const type = renderer.getTypeState();
+      const canvas = renderer.getCanvasSize();
+      const w = width ?? canvas.width;
+      const h = height ?? canvas.height;
+      return type.sequenceCopies.map((copy, i) => ({
+        index: i,
+        copy,
+        mode: type.sequenceSizeModes[i] ?? "auto",
+        stored: type.sequenceSizes[i] ?? type.blocks[0]!.scale,
+        resolved: resolveSequenceTypeSize(
+          type,
+          copy,
+          type.sequenceSizeModes[i] ?? "auto",
+          type.sequenceSizes[i] ?? type.blocks[0]!.scale,
+          w,
+          h,
+        ),
+        anchor: type.sequenceAnchors[i] ?? "inherit",
+      }));
+    },
     play: () => {
       renderer.unlockAudio();
       renderer.play();

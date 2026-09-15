@@ -5,12 +5,41 @@ import { getSeamCandidate, limitedPairProgress, sequenceEnvelope, setSeamCandida
 import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, type MediaAsset, type MediaTransform } from "./media";
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { paintGoldenMasterRegistration, clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./globalRegistration";
-import { lastBloomFieldMap } from "../behaviors/bloom/index";
+import {
+  invalidateIdentityTexture,
+  paintIdentityTexture,
+  prepareIdentityTexture,
+  resolveEvalIdentityTexture,
+} from "./identityTexture";
+import { lastBloomFieldMap, paintBloomOwnershipMask, withBloomFieldSampleBias, type BloomState } from "../behaviors/bloom/index";
+import { loopBloomOwnershipBias, loopBloomRenderBias } from "./bloomPairVariant";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
 import { layoutTypeDocument } from "./typeLayout";
 import { paintTypeLayer, disposeTypeScratch } from "./typePaint";
 import { typeStateAtPhase } from "./typePages";
 import { applySubtitleCues } from "./typeSubtitle";
+import {
+  applySequenceCopyChange,
+  applySequenceFieldChange,
+  paintEvalSequenceType,
+  productSequenceTypeApplies,
+  PRODUCT_SEQUENCE_TYPE_ARRIVAL,
+  PRODUCT_SEQUENCE_TYPE_CONNECTION,
+  PRODUCT_SEQUENCE_TYPE_MOTION,
+  resolveEvalSequenceType,
+  type SequenceCopyChange,
+} from "./sequenceType";
+import { resolveEvalSequenceUnity } from "./sequenceTypeConnection";
+import {
+  advanceBloomOwnership,
+  BLOOM_OWNERSHIP_SAMPLE_W,
+  coverageFromAlpha,
+  dilateMaskAlpha,
+  emptyBloomOwnership,
+  emptyBloomOwnershipLatch,
+  type BloomOwnership,
+  type BloomOwnershipLatch,
+} from "./sequenceOwnership";
 import {
   applyEndBehaviour,
   clampEndBehaviourSettings,
@@ -22,11 +51,19 @@ import {
 import {
   applyTransitionFlicker,
   emptyTransitionFlickerDiagnostics,
+  SEQUENCE_HANDOFF_ENERGY,
+  TRANSITION_FLICKER_ENERGY,
+  transitionFlickerEnvelope,
   type TransitionFlickerDiagnostics,
 } from "./transitionFlicker";
 import { clampMarkState, defaultMarkState, type MarkState } from "./markState";
 import { diagnosticsFrom, planMark, type MarkDiagnostics } from "./markPlan";
 import { paintMarkPlan } from "./markPaint";
+import {
+  identityPaintsBeforeFlicker,
+  planIdentityFinal,
+  resolveEvalIdentityFinal,
+} from "./identityFinal";
 import {
   applyFieldInk,
   deriveFieldInk,
@@ -39,12 +76,23 @@ import {
   clampLoopSeconds,
   LOOP_SECONDS_DEFAULT,
   loopPhaseFromElapsed,
-  moveIndex,
-  resolveActivePair,
   type PairMapping,
   type PlaybackMode,
   type SequenceItem,
 } from "./sequence";
+import { reorderAuthoredSequence, reverseAuthoredSequence } from "./sequenceState";
+import {
+  applySequenceWeightChange,
+  clampSequenceWeights,
+  resetSequenceWeights,
+  resolveEvalSequenceWeights,
+  resolveSequenceTiming,
+  sequenceVideoTime,
+  sequenceWeightsEqual,
+  weightedPairMapping,
+  type SequenceTiming,
+  type SequenceWeightChange,
+} from "./sequenceRhythm";
 import {
   bloomPulsePairMapping,
   clampBloomPulse,
@@ -66,6 +114,7 @@ export interface FrameProfile {
   compositeMs: number;
   resolveMs: number;
   printPrepMs: number;
+  textureMs: number;
   registrationMs: number;
   typeMs: number;
   bwMs: number;
@@ -83,12 +132,17 @@ function makeCanvas(): HTMLCanvasElement {
   return c;
 }
 
-function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void> {
+function seekVideoFrame(video: HTMLVideoElement, timeSec: number, opts?: { loop?: boolean }): Promise<void> {
   const duration = video.duration;
   if (!Number.isFinite(duration) || duration <= 0) return Promise.resolve();
-  let t = timeSec % duration;
-  if (t < 0) t += duration;
-  if (t >= duration) t = Math.max(0, duration - 1 / 120);
+  let t = timeSec;
+  if (opts?.loop === false) {
+    t = Math.min(Math.max(0, duration - 1 / 120), Math.max(0, timeSec));
+  } else {
+    t = timeSec % duration;
+    if (t < 0) t += duration;
+    if (t >= duration) t = Math.max(0, duration - 1 / 120);
+  }
   video.pause();
   if (video.readyState >= 2 && Math.abs(video.currentTime - t) < 1 / 120) return Promise.resolve();
   return new Promise((resolve) => {
@@ -153,9 +207,12 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number): Promise<void>
  * output-layer states on top of that, before copying the result onto the
  * visible canvas:
  *   Bloom compose (Clean)
+ *   → identity Texture plates (e9e49f9 persistent + reactive)
  *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink; UI 50 = amount 0.4)
- *   → static typography (must not mutate Registration)
- *   → End Behaviour (loop seam only; OFF is a true bypass)
+ *   → Sequence / Global Type
+ *   → MARK
+ *   → Flicker
+ *   → End Behaviour
  *   → visible canvas
  *
  * REGISTRATION GOLDEN MASTER — commit 728ff08.
@@ -175,6 +232,9 @@ export class Renderer {
   private readonly composedLayer = makeCanvas();
   private readonly resolveSmall = makeCanvas();
   private readonly resolveGrow = makeCanvas();
+  private readonly ownershipSmall = makeCanvas();
+  lastBloomOwnership: BloomOwnership = emptyBloomOwnership();
+  private ownershipLatch: BloomOwnershipLatch = emptyBloomOwnershipLatch();
 
   private width = 0;
   private height = 0;
@@ -183,6 +243,8 @@ export class Renderer {
   private mediaA: MediaAsset | null = null;
   private mediaB: MediaAsset | null = null;
   private items: SequenceItem[] = [];
+  /** Duration shares by sequence position. Equal ≡ historical floor(master * n). */
+  private sequenceWeights: number[] = [];
   private selectedId: string | null = null;
   private idSeq = 1;
   private loopSeconds = LOOP_SECONDS_DEFAULT;
@@ -208,6 +270,7 @@ export class Renderer {
   private playbackMode: PlaybackMode = "loop";
   private bloomPulse: BloomPulseSettings = { ...DEFAULT_BLOOM_PULSE };
   private diagnostic: DiagnosticMode = "off";
+  private printInkDirty = true;
   private registrationOn = false;
   private registrationAmount = REGISTRATION_AMOUNT_DEFAULT;
   private typeState: TypeState = defaultTypeState();
@@ -336,13 +399,16 @@ export class Renderer {
     this.selectedId = id;
   }
 
-  setSequence(items: SequenceItem[], selectedId?: string | null): void {
+  setSequence(items: SequenceItem[], selectedId?: string | null, weights?: readonly number[]): void {
     this.items = items;
     for (const item of items) {
       const n = Number.parseInt(item.id.replace(/^src-/, ""), 10);
       if (Number.isFinite(n)) this.idSeq = Math.max(this.idSeq, n + 1);
     }
     this.selectedId = selectedId ?? items[0]?.id ?? null;
+    this.alignSequenceTypeCopies({ kind: "resize" });
+    if (weights) this.sequenceWeights = clampSequenceWeights(weights, items.length);
+    else this.alignSequenceWeights({ kind: "resize" });
     this.syncGraphicRasters();
     this.bindActivePair();
     this.invalidatePrintInk();
@@ -353,6 +419,8 @@ export class Renderer {
     const item: SequenceItem = { id: this.nextSourceId(), asset };
     this.items = [...this.items, item];
     if (options?.select !== false) this.selectedId = item.id;
+    this.alignSequenceTypeCopies({ kind: "add" });
+    this.alignSequenceWeights({ kind: "add" });
     this.syncGraphicRasters();
     this.syncOneVideo(asset);
     this.bindActivePair();
@@ -366,6 +434,8 @@ export class Renderer {
     if (index < 0) return null;
     const [removed] = this.items.splice(index, 1);
     if (!removed) return null;
+    this.alignSequenceTypeCopies({ kind: "remove", index });
+    this.alignSequenceWeights({ kind: "remove", index });
     if (this.selectedId === id) this.selectedId = this.items[Math.min(index, this.items.length - 1)]?.id ?? null;
     if (this.audioAsset === removed.asset) this.audioAsset = null;
     parkMediaAsset(removed.asset);
@@ -377,15 +447,49 @@ export class Renderer {
   }
 
   moveSource(from: number, to: number): void {
-    this.items = moveIndex(this.items, from, to);
+    const next = reorderAuthoredSequence(
+      this.items,
+      this.sequenceWeights,
+      this.typeState.sequenceCopies,
+      from,
+      to,
+      this.typeState.sequenceSizeModes,
+      this.typeState.sequenceSizes,
+      this.typeState.sequenceAnchors,
+    );
+    this.items = next.media;
+    this.sequenceWeights = next.weights;
+    this.typeState = {
+      ...this.typeState,
+      sequenceCopies: next.copies,
+      sequenceSizeModes: next.sizeModes,
+      sequenceSizes: next.sizes,
+      sequenceAnchors: next.anchors,
+    };
     this.bindActivePair();
     this.invalidatePrintInk();
     this.renderFrame();
   }
 
-  /** Reverse sequence order. */
+  /** Reverse sequence order. The authored state reverses with the media. */
   reverseSequence(): void {
-    this.items = this.items.slice().reverse();
+    const next = reverseAuthoredSequence(
+      this.items,
+      this.sequenceWeights,
+      this.typeState.sequenceCopies,
+      this.typeState.sequenceSizeModes,
+      this.typeState.sequenceSizes,
+      this.typeState.sequenceAnchors,
+    );
+    this.items = next.media;
+    this.sequenceWeights = next.weights;
+    this.typeState = {
+      ...this.typeState,
+      sequenceCopies: next.copies,
+      sequenceSizeModes: next.sizeModes,
+      sequenceSizes: next.sizes,
+      sequenceAnchors: next.anchors,
+    };
     this.bindActivePair();
     this.invalidatePrintInk();
     this.renderFrame();
@@ -455,6 +559,40 @@ export class Renderer {
       aId: this.items[mapping.aIndex]?.id ?? null,
       bId: this.items[mapping.bIndex]?.id ?? null,
     };
+  }
+
+  getSequenceTiming(): SequenceTiming {
+    return resolveSequenceTiming(this.getLoopPhase(), this.sequenceWeightsNow(), this.getLoopSeconds());
+  }
+
+  getSequenceWeights(): number[] {
+    return this.sequenceWeightsNow().slice();
+  }
+
+  setSequenceWeights(weights: readonly number[]): void {
+    const next = clampSequenceWeights(weights, this.items.length);
+    if (sequenceWeightsEqual(this.sequenceWeights, next)) {
+      this.renderFrame();
+      return;
+    }
+    this.sequenceWeights = next;
+    this.bindActivePair();
+    this.renderFrame();
+  }
+
+  resetSequenceWeights(): void {
+    this.setSequenceWeights(resetSequenceWeights(this.items.length));
+  }
+
+  private alignSequenceWeights(change?: SequenceWeightChange): void {
+    this.sequenceWeights = applySequenceWeightChange(this.sequenceWeights, this.items.length, change);
+  }
+
+  /** Eval bind wins when present. Product weights otherwise. */
+  private sequenceWeightsNow(): number[] {
+    const n = this.items.length;
+    const bound = resolveEvalSequenceWeights(this);
+    return clampSequenceWeights(bound ?? this.sequenceWeights, n);
   }
 
   /** Framing lives on the asset itself (see MediaTransform), so reading it
@@ -583,7 +721,20 @@ export class Renderer {
 
   setTypeState(next: TypeState | Partial<TypeState> | Record<string, unknown>): void {
     this.typeState = clampTypeState({ ...this.typeState, ...next });
+    this.alignSequenceTypeCopies({ kind: "resize" });
     this.renderFrame();
+  }
+
+  private alignSequenceTypeCopies(change?: SequenceCopyChange): void {
+    const n = this.items.length;
+    const preferred = this.typeState.blocks[0]?.scale ?? 48;
+    this.typeState = {
+      ...this.typeState,
+      sequenceCopies: applySequenceCopyChange(this.typeState.sequenceCopies, n, change),
+      sequenceSizeModes: applySequenceFieldChange(this.typeState.sequenceSizeModes, n, change, "auto"),
+      sequenceSizes: applySequenceFieldChange(this.typeState.sequenceSizes, n, change, preferred),
+      sequenceAnchors: applySequenceFieldChange(this.typeState.sequenceAnchors, n, change, "inherit"),
+    };
   }
 
   patchTypeState(patch: Partial<TypeState> | Record<string, unknown>): void {
@@ -991,6 +1142,25 @@ export class Renderer {
   }
 
   private async seekActivePairVideos(timeSec: number): Promise<void> {
+    if (this.playbackMode === "loop") {
+      const timing = resolveSequenceTiming(
+        this.getLoopPhase(),
+        this.sequenceWeightsNow(),
+        this.getLoopSeconds(),
+      );
+      await Promise.all(
+        this.items.map((item, index) => {
+          const el = item.asset.videoEl;
+          if (!el) return Promise.resolve();
+          const t =
+            index === timing.index
+              ? sequenceVideoTime(timing.localPhase, timing.durationSeconds, el.duration)
+              : 0;
+          return seekVideoFrame(el, t, { loop: false });
+        }),
+      );
+      return;
+    }
     const active = new Set<HTMLVideoElement>();
     for (const asset of [this.mediaA, this.mediaB]) {
       if (asset?.videoEl) active.add(asset.videoEl);
@@ -1012,6 +1182,10 @@ export class Renderer {
     behaviorPhase: number;
     pairIndex: number;
     resolve: number;
+    ownership: "A" | "B";
+    ownershipCopyIndex: number;
+    ownershipContribution: number;
+    visibleContribution: number;
     seam: string;
     audioLabel: string | null;
     audioUnlocked: boolean;
@@ -1049,6 +1223,10 @@ export class Renderer {
       behaviorPhase: env.behaviorPhase,
       pairIndex: mapping.pairIndex,
       resolve: env.resolve,
+      ownership: this.lastBloomOwnership.owner,
+      ownershipCopyIndex: this.lastBloomOwnership.copyIndex,
+      ownershipContribution: this.lastBloomOwnership.contribution,
+      visibleContribution: this.lastBloomOwnership.visibleContribution,
       seam: getSeamCandidate(),
       audioLabel: this.audioAsset?.label ?? null,
       audioUnlocked: this.audioUnlocked,
@@ -1077,7 +1255,16 @@ export class Renderer {
     for (const item of this.items) fn(item);
   }
 
-  private invalidatePrintInk(): void {}
+  private invalidatePrintInk(): void {
+    this.printInkDirty = true;
+    invalidateIdentityTexture();
+  }
+
+  private hasLiveSource(): boolean {
+    return [this.mediaA, this.mediaB].some(
+      (a) => Boolean(a?.videoEl) || a?.graphic?.getMotion() === "live",
+    );
+  }
 
   private hasAnyGraphic(): boolean {
     return this.items.some((item) => item.asset.kind === "graphic");
@@ -1097,7 +1284,13 @@ export class Renderer {
     if (this.playbackMode === "pingpong" && this.behavior?.id === "bloom") {
       return bloomPulsePairMapping(this.items.length, master, this.bloomPulse);
     }
-    return resolveActivePair(this.items.length, master, this.playbackMode);
+    return weightedPairMapping(
+      this.items.length,
+      master,
+      this.playbackMode,
+      this.sequenceWeightsNow(),
+      this.getLoopSeconds(),
+    );
   }
 
   private bindActivePair(): void {
@@ -1109,6 +1302,7 @@ export class Renderer {
     const key = `${mapping.aIndex}/${mapping.bIndex}/${mapping.untreated ? "u" : "p"}`;
     if (key !== this.lastPairKey) {
       this.lastPairKey = key;
+      this.printInkDirty = true;
       if (!this.exporting) this.syncActiveVideos();
     }
   }
@@ -1191,6 +1385,10 @@ export class Renderer {
    * freeze is off. Pair changes only retarget mute — they must not
    * pause/play, which clicks and can reset decoder state. */
   private syncActiveVideos(): void {
+    if (this.playbackMode === "loop") {
+      this.applySequenceVideoClock();
+      return;
+    }
     const want = this.videosWantPlay();
     const keep = new Set<HTMLVideoElement>();
     if (this.mediaA?.videoEl) keep.add(this.mediaA.videoEl);
@@ -1201,6 +1399,32 @@ export class Renderer {
       if (!video) continue;
       if (want && keep.has(video)) void video.play().catch(() => undefined);
       else video.pause();
+    }
+  }
+
+  private applySequenceVideoClock(): void {
+    const timing = resolveSequenceTiming(
+      this.getLoopPhase(),
+      this.sequenceWeightsNow(),
+      this.getLoopSeconds(),
+    );
+    for (let i = 0; i < this.items.length; i++) {
+      const video = this.items[i]!.asset.videoEl;
+      if (!video) continue;
+      const t =
+        i === timing.index
+          ? sequenceVideoTime(timing.localPhase, timing.durationSeconds, video.duration)
+          : 0;
+      try {
+        if (!Number.isFinite(video.duration) || video.duration <= 0) {
+          video.pause();
+          continue;
+        }
+        if (Math.abs(video.currentTime - t) > 1 / 120) video.currentTime = t;
+      } catch {
+        /* decoder may reject mid-load */
+      }
+      video.pause();
     }
   }
 
@@ -1411,6 +1635,9 @@ export class Renderer {
     const mark = (): number => (this.profiling ? performance.now() : 0);
 
     this.bindActivePair();
+    if (this.playbackMode === "loop") {
+      this.applySequenceVideoClock();
+    }
     if (this.hasAnyGraphic()) this.paintGraphics();
     const tGraphic = mark();
 
@@ -1430,6 +1657,8 @@ export class Renderer {
       const composedCtx = this.composedLayer.getContext("2d")!;
       composedCtx.clearRect(0, 0, width, height);
       composedCtx.drawImage(this.aLayer, 0, 0);
+      this.lastSequenceResolve = 0;
+      this.noteBloomOwnership(mapping, 0);
       this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tInk, tInk, mark());
       return;
     }
@@ -1439,8 +1668,14 @@ export class Renderer {
     maskCtx.clearRect(0, 0, width, height);
     if (this.behavior) {
       maskCtx.save();
-      this.behavior.renderMask(maskCtx, width, height, time, this.params, this.state, this.bLayer, this.aLayer);
-      maskCtx.restore();
+      try {
+        const bias = loopBloomRenderBias(this.behavior.id, this.playbackMode, mapping.pairIndex, mapping.pairCount);
+        withBloomFieldSampleBias(bias, () => {
+          this.behavior!.renderMask(maskCtx, width, height, time, this.params, this.state, this.bLayer, this.aLayer);
+        });
+      } finally {
+        maskCtx.restore();
+      }
       const intro = mapping.localPhase < 0.1 ? mapping.localPhase / 0.1 : 1;
       if (intro < 0.999) {
         const g = intro * intro * (3 - 2 * intro);
@@ -1508,13 +1743,116 @@ export class Renderer {
     );
     this.applySequenceResolve(composedCtx, env.resolve);
     const tResolve = mark();
+    this.noteBloomOwnership(mapping, env.resolve);
     this.finalizeOutput(composedCtx, width, height, t0, tGraphic, tMedia, tBw, tInk, tMask, tComposite, tResolve);
+  }
+
+  private sampleMaskCoverage(source: HTMLCanvasElement, resolve: number): number {
+    const { width, height } = this;
+    if (width <= 0 || height <= 0 || source.width <= 0) return 0;
+    const smallW = BLOOM_OWNERSHIP_SAMPLE_W;
+    const smallH = Math.max(1, Math.round(smallW * (height / Math.max(1, width))));
+    if (this.ownershipSmall.width !== smallW || this.ownershipSmall.height !== smallH) {
+      this.ownershipSmall.width = smallW;
+      this.ownershipSmall.height = smallH;
+    }
+    const octx = this.ownershipSmall.getContext("2d", { willReadFrequently: true });
+    if (!octx) return 0;
+    octx.clearRect(0, 0, smallW, smallH);
+    octx.imageSmoothingEnabled = true;
+    octx.globalCompositeOperation = "source-over";
+    octx.drawImage(source, 0, 0, smallW, smallH);
+    if (resolve >= 0.008) this.dilateOwnershipSample(octx, smallW, smallH, resolve);
+    return coverageFromAlpha(octx.getImageData(0, 0, smallW, smallH).data);
+  }
+
+  private dilateOwnershipSample(ctx: CanvasRenderingContext2D, smallW: number, smallH: number, resolve: number): void {
+    if (this.resolveGrow.width !== smallW || this.resolveGrow.height !== smallH) {
+      this.resolveGrow.width = smallW;
+      this.resolveGrow.height = smallH;
+    }
+    const grow = resolve * resolve;
+    const blurPx = grow * 48;
+    if (blurPx > 0.45) {
+      const gctx = this.resolveGrow.getContext("2d")!;
+      gctx.clearRect(0, 0, smallW, smallH);
+      gctx.filter = `blur(${blurPx.toFixed(2)}px)`;
+      gctx.drawImage(this.ownershipSmall, 0, 0);
+      gctx.filter = "none";
+      ctx.drawImage(this.resolveGrow, 0, 0);
+    }
+    const img = ctx.getImageData(0, 0, smallW, smallH);
+    dilateMaskAlpha(img.data, resolve);
+    ctx.putImageData(img, 0, 0);
+  }
+
+  private measureSemanticContribution(localPhase: number, resolve: number): number {
+    if (!this.behavior || this.behavior.id !== "bloom") return 0;
+    const { width, height } = this;
+    if (width <= 0 || height <= 0) return 0;
+    const smallW = BLOOM_OWNERSHIP_SAMPLE_W;
+    const smallH = Math.max(1, Math.round(smallW * (height / Math.max(1, width))));
+    if (this.ownershipSmall.width !== smallW || this.ownershipSmall.height !== smallH) {
+      this.ownershipSmall.width = smallW;
+      this.ownershipSmall.height = smallH;
+    }
+    const octx = this.ownershipSmall.getContext("2d", { willReadFrequently: true });
+    if (!octx) return 0;
+    const time = this.effectiveTime();
+    paintBloomOwnershipMask(
+      octx,
+      smallW,
+      smallH,
+      time,
+      this.params,
+      this.state as BloomState,
+      loopBloomOwnershipBias(),
+      this.bLayer,
+    );
+    const intro = localPhase < 0.1 ? localPhase / 0.1 : 1;
+    if (intro < 0.999) {
+      const g = intro * intro * (3 - 2 * intro);
+      octx.save();
+      octx.globalCompositeOperation = "destination-in";
+      octx.fillStyle = `rgba(255,255,255,${g})`;
+      octx.fillRect(0, 0, smallW, smallH);
+      octx.restore();
+    }
+    if (resolve >= 0.008) this.dilateOwnershipSample(octx, smallW, smallH, resolve);
+    return coverageFromAlpha(octx.getImageData(0, 0, smallW, smallH).data);
+  }
+
+  private noteBloomOwnership(mapping: { pairIndex: number; pairCount: number; localPhase: number; untreated: boolean }, resolve: number): void {
+    if (
+      this.behavior?.id !== "bloom" ||
+      this.playbackMode !== "loop" ||
+      mapping.untreated ||
+      mapping.pairCount < 2
+    ) {
+      this.ownershipLatch = emptyBloomOwnershipLatch();
+      this.lastBloomOwnership = emptyBloomOwnership();
+      return;
+    }
+    const visibleContribution = this.sampleMaskCoverage(this.maskLayer, resolve);
+    const contribution = this.measureSemanticContribution(mapping.localPhase, resolve);
+    const next = advanceBloomOwnership(
+      this.ownershipLatch,
+      mapping.pairIndex,
+      mapping.pairCount,
+      mapping.localPhase,
+      contribution,
+    );
+    this.ownershipLatch = next.latch;
+    this.lastBloomOwnership = { ...next.ownership, visibleContribution };
   }
 
   /** Sequence-only: grow B through the existing behaviour mask so the pair
    *  can arrive at whole B. Low-res blur approximates dilation — the
    *  photograph stays sharp. Not a full-frame opacity crossfade. */
+  private lastSequenceResolve = 0;
+
   private applySequenceResolve(composedCtx: CanvasRenderingContext2D, resolve: number): void {
+    this.lastSequenceResolve = resolve;
     if (resolve < 0.008) return;
     const { width, height } = this;
     const smallW = 160;
@@ -1544,18 +1882,7 @@ export class Renderer {
     }
 
     const img = sctx.getImageData(0, 0, smallW, smallH);
-    const data = img.data;
-    const lo = (1 - resolve) * (1 - resolve) * 70;
-    const hi = Math.min(255, lo + 52 + (1 - resolve) * 70);
-    const span = Math.max(1, hi - lo);
-    for (let i = 3; i < data.length; i += 4) {
-      const a = data[i]!;
-      let t = (a - lo) / span;
-      if (t < 0) t = 0;
-      else if (t > 1) t = 1;
-      t = t * t * (3 - 2 * t);
-      data[i] = Math.round(a + (255 - a) * t * (0.28 + 0.72 * resolve));
-    }
+    dilateMaskAlpha(img.data, resolve);
     sctx.putImageData(img, 0, 0);
 
     const dctx = this.bMasked.getContext("2d")!;
@@ -1586,14 +1913,95 @@ export class Renderer {
     const mark = (): number => (this.profiling ? performance.now() : 0);
 
     const tPrep0 = mark();
+    const textureOn = resolveEvalIdentityTexture(this);
+    if (textureOn) {
+      if (this.hasLiveSource() || this.printInkDirty) {
+        prepareIdentityTexture(
+          this.composedLayer,
+          width,
+          height,
+          this.dpr,
+          this.hasLiveSource(),
+          this.bwMode === "both",
+        );
+        if (!this.hasLiveSource()) this.printInkDirty = false;
+      }
+    }
     const tPrep = mark();
+    if (textureOn) {
+      paintIdentityTexture(composedCtx, this.maskLayer, width, height);
+    }
+    const tTexture = mark();
 
-    const markPlan = planMark(this.markState, this.getLoopPhase(), width, height, this.getLoopSeconds());
+    const identity = resolveEvalIdentityFinal(this);
+    const loopPairCount = this.items.length >= 2 ? this.items.length : 0;
+    const identityEnvelope = this.transitionFlickerEnabled && this.behavior?.id === "bloom" && loopPairCount >= 2
+      ? transitionFlickerEnvelope(
+          this.getLoopPhase(),
+          loopPairCount,
+          this.getLoopSeconds(),
+          this.sequenceWeightsNow(),
+          this.playbackMode === "loop",
+        ).envelope
+      : 0;
+    const markPlan = identity
+      ? planIdentityFinal(
+          this.markState,
+          this.getLoopPhase(),
+          width,
+          height,
+          this.getLoopSeconds(),
+          identityEnvelope,
+          identity,
+        )
+      : planMark(this.markState, this.getLoopPhase(), width, height, this.getLoopSeconds());
     this.lastMarkDiagnostics = diagnosticsFrom(markPlan);
 
     const paintType = (): void => {
       if (markPlan.hideType) return;
+      const mapping = this.pairMapping();
+      const evalSequence = resolveEvalSequenceType(this);
+      if (evalSequence && this.playbackMode === "loop") {
+        paintEvalSequenceType(
+          composedCtx,
+          width,
+          height,
+          mapping,
+          this.getLoopSeconds(),
+          {
+            ...evalSequence,
+            masterPhase: this.getLoopPhase(),
+            owner: this,
+            ownedB: this.lastBloomOwnership.owner === "B",
+          },
+          this.typeState.enabled ? this.typeState : undefined,
+        );
+        return;
+      }
       if (!this.typeState.enabled) return;
+      if (productSequenceTypeApplies(this.typeState, this.playbackMode, mapping)) {
+        paintEvalSequenceType(
+          composedCtx,
+          width,
+          height,
+          mapping,
+          this.getLoopSeconds(),
+          {
+            copies: this.typeState.sequenceCopies,
+            motion: PRODUCT_SEQUENCE_TYPE_MOTION,
+            arrival: PRODUCT_SEQUENCE_TYPE_ARRIVAL,
+            connection: PRODUCT_SEQUENCE_TYPE_CONNECTION,
+            masterPhase: this.getLoopPhase(),
+            owner: this,
+            ownershipCopyIndex: this.lastBloomOwnership.copyIndex,
+            ownedB: this.lastBloomOwnership.owner === "B",
+            imageMask: this.maskLayer,
+            imageResolveMask: this.lastSequenceResolve >= 0.008 ? this.resolveSmall : undefined,
+          },
+          this.typeState,
+        );
+        return;
+      }
       const type = applySubtitleCues(typeStateAtPhase(this.typeState, this.getLoopPhase()), this.typeState, this.getLoopPhase());
       if (!type.enabled) return;
       const laid = layoutTypeDocument(type, width, height);
@@ -1623,23 +2031,37 @@ export class Renderer {
     if (!this.typeBeforeRegistration) paintType();
     const tType = mark();
 
-    const loopPairCount = this.items.length >= 2 ? this.items.length : 0;
+    if (identityPaintsBeforeFlicker(identity)) {
+      paintMarkPlan(composedCtx, this.composedLayer, markPlan);
+    }
+
     if (this.behavior?.id === "bloom") {
+      const unity = resolveEvalSequenceUnity(this);
+      const sequenceTypeOn =
+        this.typeState.enabled && this.typeState.typeMode === "sequence" && this.playbackMode === "loop";
+      const productHandoff = !unity && sequenceTypeOn;
+      const punctuation = this.transitionFlickerEnabled;
+      const includeWrap = unity ? unity.flickerWrap === "include-wrap" : this.playbackMode === "loop";
       this.lastTransitionDiagnostics = applyTransitionFlicker(
         composedCtx,
         this.composedLayer,
         this.getLoopPhase(),
         loopPairCount,
         this.playbackMode,
-        this.transitionFlickerEnabled,
+        punctuation || productHandoff,
         this.endBehaviour,
         this.getLoopSeconds(),
+        this.sequenceWeightsNow(),
+        includeWrap,
+        punctuation ? TRANSITION_FLICKER_ENERGY : SEQUENCE_HANDOFF_ENERGY,
       );
     } else {
       this.lastTransitionDiagnostics = emptyTransitionFlickerDiagnostics(loopPairCount);
     }
 
-    paintMarkPlan(composedCtx, this.composedLayer, markPlan);
+    if (!identityPaintsBeforeFlicker(identity)) {
+      paintMarkPlan(composedCtx, this.composedLayer, markPlan);
+    }
 
     const end = this.endBehaviour;
     if (end.mode !== "off" && !markPlan.yieldEnd) {
@@ -1668,8 +2090,9 @@ export class Renderer {
         compositeMs: tComposite - tMask,
         resolveMs: tResolve - tComposite,
         printPrepMs: tPrep - tPrep0,
-        typeMs: this.typeBeforeRegistration ? tTypeEarly - tPrep : tType - tReg,
-        registrationMs: this.typeBeforeRegistration ? tReg - tTypeEarly : tReg - tPrep,
+        textureMs: tTexture - tPrep,
+        typeMs: this.typeBeforeRegistration ? tTypeEarly - tTexture : tType - tReg,
+        registrationMs: this.typeBeforeRegistration ? tReg - tTypeEarly : tReg - tTexture,
         bwMs: tBw - tMedia,
         endBehaviourMs: tEnd - tType,
         outputMs: tOut - tEnd,

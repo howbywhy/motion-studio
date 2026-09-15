@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Final Unity QA</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
+      h1 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 72em; }
+      .stage canvas { display: block; background: #000; }
+      .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: center; }
+      .bar button { background: #1a1a1e; color: #ddd; border: 1px solid #333; padding: 6px 10px; font: inherit; cursor: pointer; }
+      .bar button.is-on { border-color: #eee; color: #fff; }
+      .bar span { color: #666; letter-spacing: 0.08em; margin-right: 4px; }
+      .hud { color: #aaa; min-height: 1.4em; }
+      #proof { color: #9a9; white-space: pre-wrap; max-width: 88em; }
+    </style>
+  </head>
+  <body>
+    <h1>Final unity</h1>
+    <p>Eval only. Restore identity Texture and judge incoming Sequence Type. Product stays free of these controls.</p>
+    <div class="stage" id="stage"></div>
+    <div class="bar" id="texture"></div>
+    <div class="bar" id="incoming"></div>
+    <div class="bar" id="opts"></div>
+    <div class="hud" id="hud"></div>
+    <pre id="proof"></pre>
+    <script type="module" src="/src/eval/finalUnity.ts"></script>
+  </body>
+</html>

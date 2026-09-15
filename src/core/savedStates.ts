@@ -58,6 +58,11 @@ export interface SavedState {
   registrationAmount?: number;
   /** Loop-only Bloom source-change punctuation. Legacy omits this and loads Off. */
   transitionFlickerEnabled?: boolean;
+  /**
+   * Sequence-state duration shares. Legacy omits this and loads equal weights.
+   * Duration travels with the authored state on reorder. Do not persist derived seconds.
+   */
+  sequenceWeights?: number[];
   /** Identity event. Legacy omits these and loads Off. */
   markEnabled?: boolean;
   markMode?: "intro" | "interrupt" | "end";
@@ -66,11 +71,11 @@ export interface SavedState {
   markStop?: number;
   markScale?: number;
   markAnchor?: string;
-  /** Typography may include Type States, page order, Speed, Frame Hold, and Sequence Window.
-   *  Start/Stop gate Type presence (hard in/out). Speed paces multi-State cuts.
-   *  Frame Hold Length (1.0×–3.0×) emphasises a selected non-final State.
-   *  Review-branch Beat 1× → Hold Off. Beat 2× → Hold On / 2.0×. Beat 3× → Hold On / 3.0×.
-   *  Legacy type saves load as one page. */
+  /** Typography may include Type States, page order, Speed, Frame Hold, Sequence Window,
+   *  and Sequence Type (`typeMode`, `sequenceCopies`, size, position).
+   *  Old saves omit composition fields and load AUTO / INHERIT.
+   *  Start/Stop gate Global Type presence. Sequence Type holds and swaps inside Flicker.
+   *  Sequence Type never stored SOFT / crop arrival — those were unshipped eval grammar. */
 }
 
 export type SavedStateInput = Omit<SavedState, "id" | "createdAt">;

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sequence Ownership QA</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
+      h1 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 80em; }
+      table { border-collapse: collapse; margin-top: 16px; }
+      th, td { border: 1px solid #222; padding: 6px; vertical-align: top; text-align: left; }
+      th { color: #888; font-weight: 500; letter-spacing: 0.06em; }
+      canvas { display: block; background: #000; }
+      .meta { color: #bbb; }
+    </style>
+  </head>
+  <body>
+    <h1>Sequence ownership — pair consistency</h1>
+    <p>Eval only. Same pair-local phases across every pair. Visible Bloom still varies A/C/B/D. Type follows the canonical ownership field.</p>
+    <div id="root"></div>
+    <script type="module" src="/src/eval/sequenceOwnership.ts"></script>
+  </body>
+</html>

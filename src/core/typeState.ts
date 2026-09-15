@@ -11,6 +11,9 @@ import {
   TYPE_PAGE_MAX,
   type TypePage,
 } from "./typePages";
+import { clampSequenceCopies, clampTypeSystemMode } from "./sequenceTypeTiming";
+
+export { clampSequenceCopies, clampTypeSystemMode };
 
 export type TypeAlign = "left" | "center" | "right";
 export type TypeValign = "top" | "center" | "bottom";
@@ -54,6 +57,11 @@ export interface TypeBlock {
   spacing: number;
 }
 
+/** Typography system. Old saves omit this and load as `"global"`. */
+export type TypeSystemMode = "global" | "sequence";
+export type SequenceTypeSizeMode = "auto" | "manual";
+export type SequenceTypeAnchor = TypeAnchor | "inherit";
+
 /** Document: three independent editorial blocks. Sequence / arrangement
  * fields on old saves are ignored. */
 export interface TypeState {
@@ -74,6 +82,21 @@ export interface TypeState {
   sequenceStart: number;
   /** Master phase where Type disappears. */
   sequenceStop: number;
+  /** Global Type vs pair-local Sequence Type. Old compositions default to Global. */
+  typeMode: TypeSystemMode;
+  /** State-owned Sequence Type copy. Reorder moves it with media and duration. */
+  sequenceCopies: string[];
+  /** Per-state Type Size mode. Missing saves resolve to auto. */
+  sequenceSizeModes: SequenceTypeSizeMode[];
+  /** Stored Type Size when mode is manual. Preserved while AUTO is selected. */
+  sequenceSizes: number[];
+  /** Per-state position. inherit uses the global Type anchor. */
+  sequenceAnchors: SequenceTypeAnchor[];
+  /**
+   * Runtime only: share one headline legal-max across Sequence Type copies
+   * so short words keep the preferred size instead of filling the frame.
+   */
+  sequenceLegalCopy?: string;
 }
 
 export const TYPE_WEIGHT_MIN = 100;
@@ -113,6 +136,42 @@ export function canvasBlendOp(mode: TypeBlendMode): GlobalCompositeOperation {
 function parseBlendMode(raw: unknown): TypeBlendMode {
   if (typeof raw === "string" && (TYPE_BLEND_MODES as string[]).includes(raw)) return raw as TypeBlendMode;
   return "normal";
+}
+
+export function clampSequenceTypeSizeMode(raw: unknown): SequenceTypeSizeMode {
+  return raw === "manual" ? "manual" : "auto";
+}
+
+export function clampSequenceTypeAnchor(raw: unknown): SequenceTypeAnchor {
+  if (raw === "inherit") return "inherit";
+  if (typeof raw === "string" && (TYPE_ANCHORS as string[]).includes(raw)) return raw as TypeAnchor;
+  return "inherit";
+}
+
+export function clampSequenceSizeModes(raw: unknown, n: number): SequenceTypeSizeMode[] {
+  const src = Array.isArray(raw) ? raw : [];
+  const out: SequenceTypeSizeMode[] = [];
+  for (let i = 0; i < n; i++) out.push(clampSequenceTypeSizeMode(src[i]));
+  return out;
+}
+
+export function clampSequenceSizes(raw: unknown, n: number, fallback: number): number[] {
+  const src = Array.isArray(raw) ? raw : [];
+  const fb = Math.min(100, Math.max(0, Math.round(Number.isFinite(fallback) ? fallback : 48)));
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = src[i];
+    if (typeof v === "number" && Number.isFinite(v)) out.push(Math.min(100, Math.max(0, Math.round(v))));
+    else out.push(fb);
+  }
+  return out;
+}
+
+export function clampSequenceAnchors(raw: unknown, n: number): SequenceTypeAnchor[] {
+  const src = Array.isArray(raw) ? raw : [];
+  const out: SequenceTypeAnchor[] = [];
+  for (let i = 0; i < n; i++) out.push(clampSequenceTypeAnchor(src[i]));
+  return out;
 }
 
 function num(v: unknown, lo: number, hi: number, fb: number): number {
@@ -387,6 +446,11 @@ export function defaultTypeState(): TypeState {
     sequenceSpeed: SEQUENCE_SPEED_DEFAULT,
     sequenceStart: SEQUENCE_START_DEFAULT,
     sequenceStop: SEQUENCE_STOP_DEFAULT,
+    typeMode: "global",
+    sequenceCopies: [],
+    sequenceSizeModes: [],
+    sequenceSizes: [],
+    sequenceAnchors: [],
   };
 }
 
@@ -575,6 +639,49 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
   }
 
   const win = clampSequenceWindow(rec.sequenceStart, rec.sequenceStop);
+  let sequenceCopies = clampSequenceCopies(rec.sequenceCopies);
+  const copyAt = rec.sequenceCopyAt as { index?: unknown; text?: unknown } | undefined;
+  if (copyAt && typeof copyAt === "object") {
+    const index = Math.round(Number(copyAt.index));
+    if (Number.isFinite(index) && index >= 0) {
+      const next = sequenceCopies.slice();
+      while (next.length <= index) next.push("");
+      next[index] = typeof copyAt.text === "string" ? copyAt.text : "";
+      sequenceCopies = next;
+    }
+  }
+  const preferredSize = num(blocks[0]?.scale, 0, 100, 48);
+  let sequenceSizeModes = Array.isArray(rec.sequenceSizeModes) ? rec.sequenceSizeModes.slice() : [];
+  let sequenceSizes = Array.isArray(rec.sequenceSizes) ? rec.sequenceSizes.slice() : [];
+  let sequenceAnchors = Array.isArray(rec.sequenceAnchors) ? rec.sequenceAnchors.slice() : [];
+  const sizeModeAt = rec.sequenceSizeModeAt as { index?: unknown; mode?: unknown } | undefined;
+  if (sizeModeAt && typeof sizeModeAt === "object") {
+    const index = Math.round(Number(sizeModeAt.index));
+    if (Number.isFinite(index) && index >= 0) {
+      while (sequenceSizeModes.length <= index) sequenceSizeModes.push("auto");
+      sequenceSizeModes[index] = clampSequenceTypeSizeMode(sizeModeAt.mode);
+    }
+  }
+  const sizeAt = rec.sequenceSizeAt as { index?: unknown; size?: unknown } | undefined;
+  if (sizeAt && typeof sizeAt === "object") {
+    const index = Math.round(Number(sizeAt.index));
+    if (Number.isFinite(index) && index >= 0) {
+      while (sequenceSizes.length <= index) sequenceSizes.push(preferredSize);
+      sequenceSizes[index] = num(sizeAt.size, 0, 100, preferredSize);
+    }
+  }
+  const anchorAt = rec.sequenceAnchorAt as { index?: unknown; anchor?: unknown } | undefined;
+  if (anchorAt && typeof anchorAt === "object") {
+    const index = Math.round(Number(anchorAt.index));
+    if (Number.isFinite(index) && index >= 0) {
+      while (sequenceAnchors.length <= index) sequenceAnchors.push("inherit");
+      sequenceAnchors[index] = clampSequenceTypeAnchor(anchorAt.anchor);
+    }
+  }
+  const n = sequenceCopies.length;
+  const legal = typeof rec.sequenceLegalCopy === "string" && rec.sequenceLegalCopy.trim()
+    ? rec.sequenceLegalCopy
+    : undefined;
   return {
     enabled: rec.enabled === true,
     blocks,
@@ -588,6 +695,12 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       : num(rec.sequenceSpeed, 0, 100, SEQUENCE_SPEED_DEFAULT),
     sequenceStart: win.start,
     sequenceStop: win.stop,
+    typeMode: clampTypeSystemMode(rec.typeMode),
+    sequenceCopies,
+    sequenceSizeModes: clampSequenceSizeModes(sequenceSizeModes, n),
+    sequenceSizes: clampSequenceSizes(sequenceSizes, n, preferredSize),
+    sequenceAnchors: clampSequenceAnchors(sequenceAnchors, n),
+    ...(legal ? { sequenceLegalCopy: legal } : {}),
   };
 }
 
@@ -648,6 +761,11 @@ export function cloneTypeState(state: TypeState): TypeState {
       : SEQUENCE_SPEED_DEFAULT,
     sequenceStart: win.start,
     sequenceStop: win.stop,
+    typeMode: clampTypeSystemMode(state.typeMode),
+    sequenceCopies: clampSequenceCopies(state.sequenceCopies),
+    sequenceSizeModes: clampSequenceSizeModes(state.sequenceSizeModes, state.sequenceCopies.length),
+    sequenceSizes: clampSequenceSizes(state.sequenceSizes, state.sequenceCopies.length, state.blocks[0]?.scale ?? 48),
+    sequenceAnchors: clampSequenceAnchors(state.sequenceAnchors, state.sequenceCopies.length),
     blocks: cloneTypePage(pages[selected]!),
   };
 }

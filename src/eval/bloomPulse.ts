@@ -17,6 +17,7 @@ import {
   type PulseCycles,
 } from "../core/bloomPulse";
 import { generateRandomisation } from "../core/randomise";
+import { getEvalLoopBloomVariantStrength, setEvalLoopBloomVariantStrength } from "../core/bloomPairVariant";
 
 const W = 320;
 const H = 400;
@@ -268,17 +269,23 @@ export async function runBloomPulseSheet(root: HTMLElement): Promise<BloomPulseR
   loopR.setBloomPulse(sample);
 
   let endpointsMatchLoop = true;
-  const endGrid = section(root, "Endpoints = Loop Bloom at those pair-local phases");
+  const endGrid = section(root, "Endpoints = unbiased Loop Bloom at those pair-local phases");
   const pairCount = 2;
-  for (const local of [sample.start, sample.end]) {
-    pulseR.setHoldPhase(local === sample.start ? 0 : 0.25);
-    const ping = settle(pulseR);
-    loopR.setHoldPhase(local / pairCount);
-    const loop = settle(loopR);
-    const diff = pixelDiff(ping, loop);
-    if (diff !== 0) endpointsMatchLoop = false;
-    cell(endGrid, `Ping ${local === sample.start ? "Start" : "End"}  Δ ${diff}`, ping);
-    cell(endGrid, `Loop local ${local.toFixed(2)}`, loop);
+  const prevStrength = getEvalLoopBloomVariantStrength();
+  setEvalLoopBloomVariantStrength("current");
+  try {
+    for (const local of [sample.start, sample.end]) {
+      pulseR.setHoldPhase(local === sample.start ? 0 : 0.25);
+      const ping = settle(pulseR);
+      loopR.setHoldPhase(local / pairCount);
+      const loop = settle(loopR);
+      const diff = pixelDiff(ping, loop);
+      if (diff !== 0) endpointsMatchLoop = false;
+      cell(endGrid, `Ping ${local === sample.start ? "Start" : "End"}  Δ ${diff}`, ping);
+      cell(endGrid, `Loop local ${local.toFixed(2)}`, loop);
+    }
+  } finally {
+    setEvalLoopBloomVariantStrength(prevStrength);
   }
 
   const seamGrid = section(root, "Seam — master 0 and 1");

@@ -1,5 +1,20 @@
 import type { MaskBehavior, ParamDef, ParamValues } from "../../core/types";
-import { buildFields, computeResolvedFields, type BloomState, type ResolvedField } from "./fields";
+import {
+  buildFields,
+  computeResolvedFields,
+  getBloomFieldSampleBias,
+  type BloomFieldBias,
+  type BloomState,
+  type ResolvedField,
+} from "./fields";
+export {
+  setBloomFieldSampleBias,
+  withBloomFieldSampleBias,
+  withBloomFieldSampleBiasAsync,
+  getBloomFieldSampleBias,
+  type BloomFieldBias,
+  type BloomState,
+} from "./fields";
 import { renderMaskFromFields, renderBoundaryFromFields } from "./render";
 import { paintClean, paintRefraction, paintRegistration } from "./treatments";
 import { getImageAwareAttractors } from "./imageAware";
@@ -52,6 +67,26 @@ export function lastBloomFieldMap(): { width: number; height: number; fields: Re
   return lastMap;
 }
 
+/** Ownership sample. Does not replace the visible pair-variant field cache. */
+export function paintBloomOwnershipMask(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  time: number,
+  p: ParamValues,
+  state: BloomState,
+  bias: BloomFieldBias | null,
+  bLayer: HTMLCanvasElement | null,
+): void {
+  const softnessFrac = (p.softness as number) / 100;
+  const attractors = p.imageAware === "on" && bLayer ? getImageAwareAttractors(bLayer) : null;
+  const fields = computeResolvedFields(width, height, time, p, state, attractors, bias);
+  ctx.save();
+  ctx.clearRect(0, 0, width, height);
+  renderMaskFromFields(ctx, width, height, fields, softnessFrac);
+  ctx.restore();
+}
+
 export const bloomBehavior: MaskBehavior<BloomState> = {
   id: "bloom",
   name: "Bloom",
@@ -75,7 +110,7 @@ export const bloomBehavior: MaskBehavior<BloomState> = {
   renderMask(ctx, width, height, time, p, state, bLayer): void {
     const softnessFrac = (p.softness as number) / 100;
     const attractors = p.imageAware === "on" && bLayer ? getImageAwareAttractors(bLayer) : null;
-    cachedFields = computeResolvedFields(width, height, time, p, state, attractors);
+    cachedFields = computeResolvedFields(width, height, time, p, state, attractors, getBloomFieldSampleBias());
     lastMap = { width, height, fields: cachedFields };
     renderMaskFromFields(ctx, width, height, cachedFields, softnessFrac);
   },

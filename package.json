@@ -7,7 +7,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:registration": "node scripts/assert-registration-golden.mjs"
+    "test:registration": "node scripts/assert-registration-golden.mjs",
+    "test:bloom-variant": "node --experimental-strip-types --no-warnings scripts/assert-bloom-pair-variant.mjs",
+    "test:sequence-type": "node --experimental-strip-types --no-warnings scripts/assert-sequence-type.mjs",
+    "test:sequence-rhythm": "node --experimental-strip-types --no-warnings scripts/assert-sequence-rhythm.mjs",
+    "test:sequence-unity": "node --experimental-strip-types --no-warnings scripts/assert-sequence-unity.mjs",
+    "test:sequence-product": "node --experimental-strip-types --no-warnings scripts/assert-sequence-product.mjs",
+    "test:sequence-ownership": "node --experimental-strip-types --no-warnings scripts/assert-sequence-ownership.mjs",
+    "test:sequence-state": "node --experimental-strip-types --no-warnings scripts/assert-sequence-state.mjs",
+    "test:identity-texture": "node --experimental-strip-types --no-warnings scripts/assert-identity-texture.mjs",
+    "test": "node scripts/assert-registration-golden.mjs && node --experimental-strip-types --no-warnings scripts/assert-bloom-pair-variant.mjs && node --experimental-strip-types --no-warnings scripts/assert-sequence-type.mjs && node --experimental-strip-types --no-warnings scripts/assert-sequence-rhythm.mjs && node --experimental-strip-types --no-warnings scripts/assert-sequence-unity.mjs && node --experimental-strip-types --no-warnings scripts/assert-sequence-product.mjs && node --experimental-strip-types --no-warnings scripts/assert-sequence-ownership.mjs && node --experimental-strip-types --no-warnings scripts/assert-sequence-state.mjs && node --experimental-strip-types --no-warnings scripts/assert-identity-texture.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.2",

@@ -4,6 +4,7 @@ export interface PhaseControlHandle {
   setDisplayedPhase(phase: number): void;
   setMode(mode: ClockMode): void;
   setPairCount(count: number): void;
+  setActiveIndex(index: number): void;
 }
 
 /** Compact AUTO / HOLD + one scrubber.
@@ -62,6 +63,7 @@ export function buildPhaseControl(
   let mode: ClockMode = "auto";
   let suppress = false;
   let pairCount = 2;
+  let activeIndex = 0;
   let lastPhase = 0;
   let scrubbing = false;
 
@@ -75,7 +77,8 @@ export function buildPhaseControl(
         dots.appendChild(d);
       }
     }
-    const active = Math.min(n - 1, Math.floor(phase * n));
+    const fromPhase = Math.min(n - 1, Math.floor(phase * n));
+    const active = Math.min(n - 1, Math.max(0, Number.isFinite(activeIndex) ? activeIndex : fromPhase));
     Array.from(dots.children).forEach((el, i) => {
       el.classList.toggle("is-on", i === active);
     });
@@ -146,6 +149,10 @@ export function buildPhaseControl(
     },
     setPairCount(count: number): void {
       pairCount = Math.max(1, count | 0);
+      paintDots(lastPhase);
+    },
+    setActiveIndex(index: number): void {
+      activeIndex = Math.max(0, index | 0);
       paintDots(lastPhase);
     },
   };

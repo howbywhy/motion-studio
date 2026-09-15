@@ -66,6 +66,8 @@ export interface PairMapping {
   localPhase: number;
   pairIndex: number;
   pairCount: number;
+  /** Wall-clock length of this pair event. Equal slots omit this and use loop/pairCount. */
+  eventSeconds?: number;
 }
 
 export function resolveActivePair(

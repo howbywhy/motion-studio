@@ -293,7 +293,8 @@ function interruptSeq(local: number): { kind: MarkKind; madeLenX: number } {
   return { kind: "absent", madeLenX: MARK_ALIGN_X };
 }
 
-export function planMark(
+/** Previous dock choreography — eval CURRENT only. Product uses planMark. */
+export function planMarkDock(
   raw: MarkState | Partial<MarkState>,
   phase: number,
   width: number,
@@ -329,6 +330,43 @@ export function planMark(
   };
   const centers = state.mode === "interrupt" ? [0.1, 0.82] : dockFlickerCenters("A");
   return applyCenters(plan, centers, loopSeconds, span, width, height);
+}
+
+/** Product identity: authored lockup, no dock travel, Type coexists, Flicker may share the layer. */
+export function planMark(
+  raw: MarkState | Partial<MarkState>,
+  phase: number,
+  width: number,
+  height: number,
+  loopSeconds: number,
+): MarkPlan {
+  void loopSeconds;
+  const state = clampMarkState(raw);
+  const empty = emptyPlan(state, width, height);
+  if (!state.enabled) return empty;
+  const p = masterPhase(phase);
+  const start = state.sequenceStart;
+  const stop = state.sequenceStop;
+  if (p < start || p >= stop) return empty;
+  const span = Math.max(1e-6, stop - start);
+  const local = clamp01((p - start) / span);
+  const layout = layoutMarkRect(width, height, state.scale, state.anchor);
+  const kind = state.source === "emblem" ? "emblem" : "logotype";
+  return {
+    visible: true,
+    kind,
+    local,
+    madeLenX: MARK_ALIGN_X,
+    aligned: kind === "logotype",
+    flicker: 0,
+    flickerState: null,
+    bands: [],
+    hideType: false,
+    yieldEnd: false,
+    layout,
+    source: state.source,
+    mode: state.mode,
+  };
 }
 
 export function emptyMarkDiagnostics(): MarkDiagnostics {
