@@ -24,6 +24,8 @@ function clampMasterPhase(phase: number): number {
 export const SEQUENCE_WEIGHT_DEFAULT = 1;
 /** Technical floor when the loop can afford it. Shorter only if equal share is already tighter. */
 export const SEQUENCE_SLOT_MIN_SECONDS = 0.5;
+/** Product: every authored state shows its duration on the rhythm strip. */
+export const SEQUENCE_RHYTHM_TIMES_ALWAYS_VISIBLE = true;
 /** Sequence Type starts getting tight. Documented only — not a hard clamp. */
 export const SEQUENCE_TYPE_READABILITY_SECONDS = 2;
 

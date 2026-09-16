@@ -27,6 +27,7 @@ import {
 } from "./sequenceTypeConnection";
 import { resolveEvalSequenceWeights } from "./sequenceRhythm";
 import { transitionFlickerEnvelope, transitionFlickerHalfSpan } from "./transitionFlicker";
+import { resolveSequenceTypePosition } from "./sequenceTypeComposition";
 import {
   incomingTypeBFormation,
   incomingTypeBPresent,
@@ -245,7 +246,7 @@ export function composeSequenceTypeState(
   const stored = style.sequenceSizes[copyIndex] ?? style.blocks[0]!.scale;
   const scale = resolveSequenceTypeSize(style, copy, mode, stored, width, height);
   const raw: SequenceTypeAnchor = style.sequenceAnchors[copyIndex] ?? "inherit";
-  const anchor = raw === "inherit" ? style.blocks[0]!.anchor : raw;
+  const anchor = resolveSequenceTypePosition(raw);
   return typeStateForSequenceCopy(style, copy, trackingAdd, { scale, anchor });
 }
 

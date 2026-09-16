@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Type Occupancy QA</title>
+    <style>
+      body { margin: 24px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
+      h1, h2 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+      p { color: #888; max-width: 78em; }
+      .stage canvas { display: block; background: #000; }
+      .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: center; }
+      .bar button { background: #1a1a1e; color: #ddd; border: 1px solid #333; padding: 6px 10px; font: inherit; cursor: pointer; }
+      .bar button.is-on { border-color: #eee; color: #fff; }
+      .bar span { color: #666; letter-spacing: 0.08em; margin-right: 4px; }
+      .strip-host { max-width: 720px; margin: 12px 0 24px; }
+      .grid { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 10px; max-width: 920px; }
+      .cell { background: #111; padding: 8px; }
+      .cell canvas { width: 100%; height: auto; display: block; background: #000; }
+      .cell .cap { color: #888; margin-top: 6px; font-size: 10px; letter-spacing: 0.04em; }
+      .hud { color: #aaa; white-space: pre-wrap; max-width: 88em; }
+      .watch-only .chrome { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Type occupancy</h1>
+    <p>Eval decision record. Product Sequence Composition is the shared datum (BC under STATIC SIGNATURE at MC). Live preview uses that product resolver. Model buttons document the rejected A / B comparison. Manual anchors stay exact. Type motion unchanged.</p>
+    <div class="chrome">
+      <div class="bar" id="models"></div>
+      <div class="bar" id="pieces"></div>
+      <div class="bar" id="opts"></div>
+    </div>
+    <div class="stage" id="stage"></div>
+    <div class="chrome">
+      <div class="strip-host" id="strip"></div>
+      <h2>INHERIT matrix</h2>
+      <p>Representative Sequence Type against the same Signature. AUTO / small / large. One line and two lines.</p>
+      <div class="bar" id="sizes"></div>
+      <div class="grid" id="grid"></div>
+      <pre class="hud" id="hud"></pre>
+    </div>
+    <script type="module" src="/src/eval/typeOccupancy.ts"></script>
+  </body>
+</html>

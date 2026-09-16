@@ -29,6 +29,7 @@ export default defineConfig({
         typeBloomRender: resolve(root, "eval/type-bloom-render.html"),
         identityFinal: resolve(root, "eval/identity-final.html"),
         finalUnity: resolve(root, "eval/final-unity.html"),
+        typeOccupancy: resolve(root, "eval/type-occupancy.html"),
       },
     },
   },

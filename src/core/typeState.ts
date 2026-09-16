@@ -90,7 +90,7 @@ export interface TypeState {
   sequenceSizeModes: SequenceTypeSizeMode[];
   /** Stored Type Size when mode is manual. Preserved while AUTO is selected. */
   sequenceSizes: number[];
-  /** Per-state position. inherit uses the global Type anchor. */
+  /** Per-state position. inherit uses the Sequence composition Type datum. */
   sequenceAnchors: SequenceTypeAnchor[];
   /**
    * Runtime only: share one headline legal-max across Sequence Type copies

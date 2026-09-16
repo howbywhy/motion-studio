@@ -3,6 +3,7 @@ import { paintFieldToCanvas } from "../sources/field";
 import type { SequenceItem } from "../core/sequence";
 import type { MediaAsset } from "../core/media";
 import {
+  SEQUENCE_RHYTHM_TIMES_ALWAYS_VISIBLE,
   sequenceSpans,
   transferSequenceWeight,
 } from "../core/sequenceRhythm";
@@ -35,7 +36,6 @@ export function buildSequenceRhythmStrip(
   container.className = "sequence-strip sequence-rhythm-strip";
 
   let dragFrom: number | null = null;
-  let hoverBoundary: number | null = null;
   let dragBoundary: number | null = null;
 
   function paintThumb(canvas: HTMLCanvasElement, asset: MediaAsset, width: number): void {
@@ -64,10 +64,6 @@ export function buildSequenceRhythmStrip(
     const spans = sequenceSpans(weights);
     const share = spans[index]?.share ?? 0;
     return `${(share * opts.getLoopSeconds()).toFixed(1)}s`;
-  }
-
-  function showTime(index: number): boolean {
-    return dragBoundary === index || dragBoundary === index - 1 || hoverBoundary === index || hoverBoundary === index - 1;
   }
 
   function refresh(): void {
@@ -103,7 +99,7 @@ export function buildSequenceRhythmStrip(
       const timeEl = document.createElement("span");
       timeEl.className = "sequence-cell-time";
       timeEl.textContent = secondsFor(index);
-      timeEl.hidden = !(showTime(index) || item.id === selected);
+      timeEl.hidden = !SEQUENCE_RHYTHM_TIMES_ALWAYS_VISIBLE;
       cell.appendChild(timeEl);
 
       const thumb = document.createElement("canvas");
@@ -191,16 +187,6 @@ export function buildSequenceRhythmStrip(
         handle.addEventListener("pointerup", up);
         handle.addEventListener("pointercancel", up);
       });
-      handle.addEventListener("pointerenter", () => {
-        hoverBoundary = index - 1;
-        syncTimes();
-      });
-      handle.addEventListener("pointerleave", () => {
-        if (dragBoundary === null) {
-          hoverBoundary = null;
-          syncTimes();
-        }
-      });
       rail.appendChild(handle);
     }
 
@@ -238,13 +224,12 @@ export function buildSequenceRhythmStrip(
   }
 
   function syncTimes(): void {
-    const selected = opts.getSelectedId();
     container.querySelectorAll<HTMLElement>(".sequence-cell").forEach((cell) => {
       const index = Number(cell.dataset.index);
       const time = cell.querySelector<HTMLElement>(".sequence-cell-time");
       if (!time || !Number.isFinite(index)) return;
       time.textContent = secondsFor(index);
-      time.hidden = !(showTime(index) || cell.dataset.id === selected);
+      time.hidden = !SEQUENCE_RHYTHM_TIMES_ALWAYS_VISIBLE;
     });
   }
 

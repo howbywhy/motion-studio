@@ -15,6 +15,7 @@ import {
   transitionCutsFromWeights,
   weightedPairMapping,
   SEQUENCE_SLOT_MIN_SECONDS,
+  SEQUENCE_RHYTHM_TIMES_ALWAYS_VISIBLE,
   SEQUENCE_TYPE_READABILITY_SECONDS,
 } from "../src/core/sequenceRhythm.ts";
 
@@ -23,6 +24,7 @@ function fail(msg) {
   failures.push(msg);
 }
 
+if (!SEQUENCE_RHYTHM_TIMES_ALWAYS_VISIBLE) fail("every authored state must show its duration");
 if (clampSequenceWeights(undefined, 4).join(",") !== "1,1,1,1") fail("old state must default to equal weights");
 if (clampSequenceWeights([2, -1, 0], 3).join(",") !== "2,1,1") fail("invalid weights must become 1");
 

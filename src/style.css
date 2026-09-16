@@ -342,6 +342,16 @@ body {
   color: var(--text-dim);
 }
 
+.sequence-rhythm-strip .sequence-cell-time {
+  display: block;
+  opacity: 0.72;
+}
+
+.sequence-rhythm-strip .sequence-cell.is-selected .sequence-cell-time {
+  opacity: 1;
+  color: var(--text);
+}
+
 .sequence-rhythm-handle {
   position: absolute;
   top: 14px;
@@ -1040,6 +1050,10 @@ body {
 
 .type-disabled .type-panel-body {
   display: none;
+}
+
+.type-mode-host {
+  margin-top: 8px;
 }
 
 .type-block {

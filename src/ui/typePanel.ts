@@ -21,6 +21,7 @@ import {
   type SequenceTypeSizeMode,
 } from "../core/typeState";
 import { TYPE_SLOT_LABELS } from "../core/typeSubtitle";
+import { sequenceCopyPatch, sequenceModePatch } from "../core/typeAuthoring";
 import {
   clampHoldLength,
   FRAME_HOLD_LENGTH_DEFAULT,
@@ -761,15 +762,24 @@ export function buildTypePanel(
   container.appendChild(head);
   container.classList.toggle("type-disabled", !state.enabled);
 
+  const modeHost = document.createElement("div");
+  modeHost.className = "type-mode-host";
+  container.appendChild(modeHost);
+
   const body = document.createElement("div");
   body.className = "type-panel-body";
   container.appendChild(body);
 
-  const modeSeg = seg(body, "Type", [
+  const modeSeg = seg(modeHost, "Type", [
     { value: "global", label: "Global" },
     { value: "sequence", label: "Sequence" },
   ], state.typeMode, (value) => {
-    onChange({ typeMode: value as TypeSystemMode });
+    if (value === "sequence") {
+      toggle.classList.add("active");
+      toggle.textContent = "On";
+      container.classList.remove("type-disabled");
+    }
+    onChange(sequenceModePatch(value as TypeSystemMode));
   });
   const sequenceBtn = modeSeg.querySelector<HTMLButtonElement>('button[data-value="sequence"]');
 
@@ -951,7 +961,7 @@ export function buildTypePanel(
     ta.addEventListener("focus", () => onSelectState?.(index));
     ta.addEventListener("input", () => {
       fitTextarea(ta);
-      onChange({ sequenceCopyAt: { index, text: ta.value } });
+      onChange(sequenceCopyPatch(state.typeMode, index, ta.value));
     });
     ta.addEventListener("keydown", (e) => e.stopPropagation());
     row.appendChild(ta);
@@ -1006,7 +1016,8 @@ export function buildTypePanel(
     const inheritBtn = document.createElement("button");
     inheritBtn.type = "button";
     inheritBtn.className = "type-sequence-inherit";
-    inheritBtn.textContent = "Inherit";
+    inheritBtn.textContent = "Composition";
+    inheritBtn.title = "Authored Sequence Type position.";
     inheritBtn.classList.toggle("active", anchor === "inherit");
     inheritBtn.addEventListener("click", () => {
       onSelectState?.(index);
