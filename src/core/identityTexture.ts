@@ -1,22 +1,28 @@
 /**
- * Identity Texture — restored field-print plates.
+ * Identity Texture — field-print plates, now in output-space print material.
  *
- * Last known good: e9e49f92ff0590ab3ba780bd64ba019a6be0b005
- * (still present at 879230d; removed when 9f0a4e9 locked Registration
- * to ring-only golden master).
+ * Lineage: e9e49f92ff0590ab3ba780bd64ba019a6be0b005 (879230d).
+ * That engine stamped hard orthogonal cells and blit them nearest-neighbour.
+ * On photographs — especially 1080 export at dpr 1 — those cells read as
+ * digital speckle, not ink. Occupancy, two plates, tonal impressions,
+ * persistent 0.1 and reactive 0.4 are unchanged. Only the mark body and
+ * sampling space changed.
  *
- * This is NOT Registration rings and NOT Type-safe Bloom.
  * Authored order: Bloom compose → plates → Type.
- *
- * Persistent 0.1 on the composed frame; reactive 0.4 at the Bloom tent.
- * Plates rebuild on media / pair change; video rebuilds every frame.
+ * Product material is print-reactive: quiet print on holds, same reactive
+ * tent during Bloom. Eval may bind current / print / registration.
  */
 
-import { hash2, markCellPx } from "../sources/field";
+import { hash2, markCellPx, markPeriodCss } from "../sources/field";
 
 export const IDENTITY_TEXTURE_COMMIT = "e9e49f92ff0590ab3ba780bd64ba019a6be0b005";
 export const IDENTITY_TEXTURE_PERSISTENT = 0.1;
 export const IDENTITY_TEXTURE_REACTIVE = 0.4;
+
+export type IdentityTextureMaterial = "current" | "print" | "registration" | "print-reactive";
+
+/** Product Texture. Eval may bind another material on a renderer. */
+export const PRODUCT_TEXTURE_MATERIAL: IdentityTextureMaterial = "print-reactive";
 
 function makeCanvas(): HTMLCanvasElement {
   return document.createElement("canvas");
@@ -40,6 +46,8 @@ const SEED_A = 71;
 const SEED_B = 88;
 const COLOR_FOLLOW = 0.2;
 const BOUNDARY_SMALL_W = 200;
+const PRINT_REFERENCE_SHORT = 420;
+const PRINT_OFFSET_REF = 1080;
 
 let lumaCanvas: HTMLCanvasElement | null = null;
 let plateA: HTMLCanvasElement | null = null;
@@ -49,6 +57,7 @@ let colorB: HTMLCanvasElement | null = null;
 let inkScratch: HTMLCanvasElement | null = null;
 let toneScratch: HTMLCanvasElement | null = null;
 let boundarySmall: HTMLCanvasElement | null = null;
+let spreadScratch: HTMLCanvasElement | null = null;
 let stampData: ImageData | null = null;
 let colorDataA: ImageData | null = null;
 let colorDataB: ImageData | null = null;
@@ -56,10 +65,23 @@ let smoothRgb: Float32Array | null = null;
 let prepared = false;
 let preparedW = 0;
 let preparedH = 0;
+let preparedMaterial: IdentityTextureMaterial = PRODUCT_TEXTURE_MATERIAL;
 export let lastIdentityTextureMs = 0;
+export let lastTextureAudit = {
+  material: PRODUCT_TEXTURE_MATERIAL as IdentityTextureMaterial,
+  width: 0,
+  height: 0,
+  dpr: 1,
+  cellA: 0,
+  cellB: 0,
+  colsA: 0,
+  rowsA: 0,
+};
 
 let evalTexture: boolean | null = null;
 const evalByOwner = new WeakMap<object, boolean | null>();
+let evalMaterial: IdentityTextureMaterial | null = null;
+const materialByOwner = new WeakMap<object, IdentityTextureMaterial | null>();
 
 export function setEvalIdentityTexture(on: boolean | null): void {
   evalTexture = on;
@@ -67,6 +89,16 @@ export function setEvalIdentityTexture(on: boolean | null): void {
 
 export function bindEvalIdentityTexture(owner: object, on: boolean | null): void {
   evalByOwner.set(owner, on);
+}
+
+export function setEvalTextureMaterial(material: IdentityTextureMaterial | null): void {
+  evalMaterial = material;
+  invalidateIdentityTexture();
+}
+
+export function bindEvalTextureMaterial(owner: object, material: IdentityTextureMaterial | null): void {
+  materialByOwner.set(owner, material);
+  invalidateIdentityTexture();
 }
 
 /** Product Texture is ON. Eval may bind OFF for comparison. */
@@ -78,6 +110,15 @@ export function resolveEvalIdentityTexture(owner?: object): boolean {
   }
   if (evalTexture === false) return false;
   return true;
+}
+
+export function resolveTextureMaterial(owner?: object): IdentityTextureMaterial {
+  if (owner && materialByOwner.has(owner)) {
+    const bound = materialByOwner.get(owner);
+    if (bound) return bound;
+  }
+  if (evalMaterial) return evalMaterial;
+  return PRODUCT_TEXTURE_MATERIAL;
 }
 
 export function identityTexturePrepared(): boolean {
@@ -118,6 +159,7 @@ function buildMarks(cols: number, rows: number, occ: Float32Array, seed: number)
   return next;
 }
 
+/** Eval A CURRENT only. Product never stamps hard cells. */
 function stampMarks(canvas: HTMLCanvasElement, on: Uint8Array, cols: number, rows: number, cell: number): void {
   const w = canvas.width;
   const h = canvas.height;
@@ -150,6 +192,91 @@ function stampMarks(canvas: HTMLCanvasElement, on: Uint8Array, cols: number, row
   ctx.putImageData(stampData, 0, 0);
 }
 
+function stampSoftDot(
+  d: Uint8ClampedArray,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  alpha: number,
+): void {
+  const x0 = Math.max(0, Math.floor(cx - rx - 1));
+  const x1 = Math.min(w - 1, Math.ceil(cx + rx + 1));
+  const y0 = Math.max(0, Math.floor(cy - ry - 1));
+  const y1 = Math.min(h - 1, Math.ceil(cy + ry + 1));
+  const invRx = 1 / Math.max(0.35, rx);
+  const invRy = 1 / Math.max(0.35, ry);
+  for (let y = y0; y <= y1; y++) {
+    const ny = (y + 0.5 - cy) * invRy;
+    for (let x = x0; x <= x1; x++) {
+      const nx = (x + 0.5 - cx) * invRx;
+      const r2 = nx * nx + ny * ny;
+      if (r2 >= 1) continue;
+      const fall = 1 - r2;
+      const a = (alpha * fall * fall) | 0;
+      const o = (y * w + x) * 4;
+      if (a > d[o + 3]!) {
+        d[o] = 0;
+        d[o + 1] = 0;
+        d[o + 2] = 0;
+        d[o + 3] = a;
+      }
+    }
+  }
+}
+
+function stampPrintMarks(
+  canvas: HTMLCanvasElement,
+  on: Uint8Array,
+  cols: number,
+  rows: number,
+  cell: number,
+  seed: number,
+  jitter: number,
+): void {
+  const w = canvas.width;
+  const h = canvas.height;
+  const ctx = canvas.getContext("2d")!;
+  if (!stampData || stampData.width !== w || stampData.height !== h) {
+    stampData = ctx.createImageData(w, h);
+  } else {
+    stampData.data.fill(0);
+  }
+  const d = stampData.data;
+  const rxBase = cell * 0.54;
+  const ryBase = cell * 0.47;
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      if (!on[cy * cols + cx]) continue;
+      const jx = (hash2(cx, cy, seed) - 0.5) * cell * jitter;
+      const jy = (hash2(cx, cy, seed + 9) - 0.5) * cell * jitter;
+      const rx = rxBase * (0.8 + hash2(cx, cy, seed + 21) * 0.4);
+      const ry = ryBase * (0.8 + hash2(cx, cy, seed + 27) * 0.4);
+      const mx = cx * cell + cell * 0.5 + jx;
+      const my = cy * cell + cell * 0.5 + jy;
+      const aMark = 168 + Math.round(hash2(cx, cy, seed + 33) * 78);
+      stampSoftDot(d, w, h, mx, my, rx, ry, aMark);
+    }
+  }
+  ctx.putImageData(stampData, 0, 0);
+}
+
+function inkSpread(canvas: HTMLCanvasElement, radius: number): void {
+  if (radius < 0.28) return;
+  if (!spreadScratch) spreadScratch = makeCanvas();
+  sizeCanvas(spreadScratch, canvas.width, canvas.height);
+  const sctx = spreadScratch.getContext("2d")!;
+  sctx.clearRect(0, 0, canvas.width, canvas.height);
+  sctx.filter = `blur(${radius.toFixed(2)}px)`;
+  sctx.drawImage(canvas, 0, 0);
+  sctx.filter = "none";
+  const pctx = canvas.getContext("2d")!;
+  pctx.clearRect(0, 0, canvas.width, canvas.height);
+  pctx.drawImage(spreadScratch, 0, 0);
+}
+
 function readLocal(source: HTMLCanvasElement): { data: Uint8ClampedArray; w: number; h: number } {
   if (!lumaCanvas) lumaCanvas = makeCanvas();
   const smallH = Math.max(1, Math.round(LUMA_W * (source.height / Math.max(1, source.width))));
@@ -165,6 +292,7 @@ function occupancyFromLocal(
   cols: number,
   rows: number,
   scale: number,
+  quantize: boolean,
 ): Float32Array {
   const occ = new Float32Array(cols * rows);
   for (let y = 0; y < rows; y++) {
@@ -175,7 +303,7 @@ function occupancyFromLocal(
       const yv = (local.data[i]! * 0.2126 + local.data[i + 1]! * 0.7152 + local.data[i + 2]! * 0.0722) / 255;
       const dark = 1 - yv;
       const raw = Math.min(0.62, 0.018 + dark * scale);
-      occ[y * cols + x] = Math.round(raw * 40) / 40;
+      occ[y * cols + x] = quantize ? Math.round(raw * 40) / 40 : raw;
     }
   }
   return occ;
@@ -255,6 +383,19 @@ function writeToneMaps(
   bctx.putImageData(colorDataB!, 0, 0);
 }
 
+function imageRelativeCell(width: number, height: number, freq: number): number {
+  const short = Math.min(width, height);
+  return Math.max(1.35, short * (markPeriodCss(freq) / PRINT_REFERENCE_SHORT));
+}
+
+function printOffset(baseAt1080: number, width: number, height: number): number {
+  return baseAt1080 * (Math.min(width, height) / PRINT_OFFSET_REF);
+}
+
+function isPrintMaterial(material: IdentityTextureMaterial): boolean {
+  return material !== "current";
+}
+
 export function prepareIdentityTexture(
   composed: HTMLCanvasElement,
   width: number,
@@ -262,28 +403,45 @@ export function prepareIdentityTexture(
   dpr: number,
   live = false,
   bw = false,
+  material: IdentityTextureMaterial = PRODUCT_TEXTURE_MATERIAL,
 ): void {
   if (!plateA) plateA = makeCanvas();
   if (!plateB) plateB = makeCanvas();
   sizeCanvas(plateA, width, height);
   sizeCanvas(plateB, width, height);
 
-  const cellA = markCellPx(REG_FREQ_A, dpr);
-  const cellB = markCellPx(REG_FREQ_B, dpr);
+  const print = isPrintMaterial(material);
+  const cellA = print ? imageRelativeCell(width, height, REG_FREQ_A) : markCellPx(REG_FREQ_A, dpr);
+  const cellB = print ? imageRelativeCell(width, height, REG_FREQ_B) : markCellPx(REG_FREQ_B, dpr);
   const colsA = Math.ceil(width / cellA);
   const rowsA = Math.ceil(height / cellA);
   const colsB = Math.ceil(width / cellB);
   const rowsB = Math.ceil(height / cellB);
 
   const local = readLocal(composed);
-  const occA = occupancyFromLocal(local, colsA, rowsA, 0.2);
-  const occB = occupancyFromLocal(local, colsB, rowsB, 0.12);
-  stampMarks(plateA, buildMarks(colsA, rowsA, occA, SEED_A), colsA, rowsA, cellA);
-  stampMarks(plateB, buildMarks(colsB, rowsB, occB, SEED_B), colsB, rowsB, cellB);
+  const occA = occupancyFromLocal(local, colsA, rowsA, 0.2, !print);
+  const occB = occupancyFromLocal(local, colsB, rowsB, 0.12, !print);
+  const marksA = buildMarks(colsA, rowsA, occA, SEED_A);
+  const marksB = buildMarks(colsB, rowsB, occB, SEED_B);
+
+  if (print) {
+    const jitter = material === "registration" ? 0.34 : 0.22;
+    stampPrintMarks(plateA, marksA, colsA, rowsA, cellA, SEED_A, jitter);
+    stampPrintMarks(plateB, marksB, colsB, rowsB, cellB, SEED_B, jitter);
+    const spread = (material === "registration" ? 0.82 : 0.48) * (cellA / 3.2);
+    inkSpread(plateA, spread);
+    inkSpread(plateB, spread * 0.86);
+  } else {
+    stampMarks(plateA, marksA, colsA, rowsA, cellA);
+    stampMarks(plateB, marksB, colsB, rowsB, cellB);
+  }
+
   writeToneMaps(local, live, bw);
   prepared = true;
   preparedW = width;
   preparedH = height;
+  preparedMaterial = material;
+  lastTextureAudit = { material, width, height, dpr, cellA, cellB, colsA, rowsA };
 }
 
 function blitTonalPlate(
@@ -295,6 +453,7 @@ function blitTonalPlate(
   dx: number,
   dy: number,
   mix: number,
+  smoothPlate: boolean,
 ): void {
   if (!toneScratch) toneScratch = makeCanvas();
   sizeCanvas(toneScratch, width, height);
@@ -303,7 +462,7 @@ function blitTonalPlate(
   tctx.imageSmoothingEnabled = true;
   tctx.drawImage(color, 0, 0, width, height);
   tctx.globalCompositeOperation = "destination-in";
-  tctx.imageSmoothingEnabled = false;
+  tctx.imageSmoothingEnabled = smoothPlate;
   tctx.drawImage(plate, dx, dy);
   tctx.globalCompositeOperation = "source-over";
   dest.save();
@@ -322,8 +481,21 @@ function blitTonalPlates(
   mixB: number,
 ): void {
   if (!prepared || !plateA || !plateB || !colorA || !colorB || preparedW !== width || preparedH !== height) return;
-  blitTonalPlate(ctx, plateA, colorA, width, height, off, -off * 0.35, mixA);
-  blitTonalPlate(ctx, plateB, colorB, width, height, -off, off * 0.35, mixB);
+  const smooth = isPrintMaterial(preparedMaterial);
+  blitTonalPlate(ctx, plateA, colorA, width, height, off, -off * 0.35, mixA, smooth);
+  blitTonalPlate(ctx, plateB, colorB, width, height, -off, off * 0.35, mixB, smooth);
+}
+
+function persistMix(material: IdentityTextureMaterial): { off: number; mixA: number; mixB: number } {
+  if (material === "registration") return { off: 2.35, mixA: 0.4, mixB: 0.26 };
+  if (material === "print-reactive") return { off: 1.45, mixA: 0.28, mixB: 0.16 };
+  if (material === "print") return { off: 1.55, mixA: 0.34, mixB: 0.2 };
+  return { off: 0.7 + IDENTITY_TEXTURE_PERSISTENT * 3, mixA: 0.34, mixB: 0.2 };
+}
+
+function reactiveMix(material: IdentityTextureMaterial): { off: number; mixA: number; mixB: number } {
+  if (material === "current") return { off: 1.8 + IDENTITY_TEXTURE_REACTIVE * 5, mixA: 0.72, mixB: 0.48 };
+  return { off: 3.8, mixA: 0.72, mixB: 0.48 };
 }
 
 export function paintIdentityTexturePersistent(
@@ -337,7 +509,11 @@ export function paintIdentityTexturePersistent(
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
-  blitTonalPlates(ictx, width, height, 0.7 + amount * 3, 0.34, 0.2);
+  const mix = persistMix(preparedMaterial);
+  const off = isPrintMaterial(preparedMaterial)
+    ? printOffset(mix.off, width, height)
+    : mix.off;
+  blitTonalPlates(ictx, width, height, off, mix.mixA, mix.mixB);
   ctx.drawImage(inkScratch, 0, 0);
 }
 
@@ -375,7 +551,11 @@ export function paintIdentityTextureReactive(
   sizeCanvas(inkScratch, width, height);
   const ictx = inkScratch.getContext("2d")!;
   ictx.clearRect(0, 0, width, height);
-  blitTonalPlates(ictx, width, height, 1.8 + amount * 5, 0.72, 0.48);
+  const mix = reactiveMix(preparedMaterial);
+  const off = isPrintMaterial(preparedMaterial)
+    ? printOffset(mix.off, width, height)
+    : mix.off;
+  blitTonalPlates(ictx, width, height, off, mix.mixA, mix.mixB);
 
   const boundary = buildBoundaryAlpha(maskLayer, width, height);
   ictx.save();
@@ -388,7 +568,7 @@ export function paintIdentityTextureReactive(
   ctx.drawImage(inkScratch, 0, 0);
 }
 
-/** Persistent + reactive. Matches e9 finalizeOutput. */
+/** Persistent + reactive. Matches e9 finalizeOutput amounts. */
 export function paintIdentityTexture(
   dest: CanvasRenderingContext2D,
   maskLayer: HTMLCanvasElement,

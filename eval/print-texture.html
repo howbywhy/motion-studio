@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Print Texture Eval</title>
+    <style>
+      body { margin: 20px 24px 64px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
+      h1 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 8px; }
+      p, .note { color: #888; max-width: 92em; }
+      .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
+      button { background: #1b1b20; color: #ddd; border: 1px solid #333; padding: 5px 9px; cursor: pointer; }
+      button.is-on { background: #eee; color: #111; }
+      table { border-collapse: collapse; margin-top: 18px; }
+      th, td { border: 1px solid #222; padding: 5px; vertical-align: top; }
+      th { color: #888; font-weight: 500; letter-spacing: 0.06em; }
+      canvas { display: block; background: #000; }
+      .zoom { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+      .zoom figure { margin: 0; }
+      .zoom figcaption { color: #777; margin-top: 4px; }
+      #hud, #perf { color: #9a9a9a; margin-top: 10px; white-space: pre-wrap; }
+      #stage { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Print / registration texture</h1>
+    <p>Eval only. Same photographic piece. A is the current digital cell stamp. B–D keep the authored plates and remove the raster. Product has no style selector.</p>
+    <div class="bar" id="opts"></div>
+    <div id="hud"></div>
+    <div id="sheets"></div>
+    <div id="perf"></div>
+    <div id="stage"></div>
+    <script type="module" src="/src/eval/printTexture.ts"></script>
+  </body>
+</html>

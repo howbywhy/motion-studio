@@ -22,10 +22,22 @@ function fail(msg) {
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const textureSrc = readFileSync(join(root, "src/core/identityTexture.ts"), "utf8");
 if (!textureSrc.includes('IDENTITY_TEXTURE_COMMIT = "e9e49f92ff0590ab3ba780bd64ba019a6be0b005"')) {
-  fail("Texture must restore the e9e49f9 plate engine");
+  fail("Texture must keep the e9e49f9 plate lineage");
 }
 if (!textureSrc.includes("IDENTITY_TEXTURE_PERSISTENT = 0.1")) fail("persistent amount is 0.1");
 if (!textureSrc.includes("IDENTITY_TEXTURE_REACTIVE = 0.4")) fail("reactive amount is 0.4");
+if (!textureSrc.includes('PRODUCT_TEXTURE_MATERIAL: IdentityTextureMaterial = "print-reactive"')) {
+  fail("product Texture must be print-reactive, not the digital cell stamp");
+}
+if (!textureSrc.includes("function stampPrintMarks")) fail("print plates must stamp soft ink, not only hard cells");
+if (!textureSrc.includes("function imageRelativeCell")) fail("print plates must size marks in image space");
+if (!textureSrc.includes("PRINT_REFERENCE_SHORT = 420")) fail("print frequency stays image-relative to a 420 short-side reference");
+if (!textureSrc.includes("Eval A CURRENT only. Product never stamps hard cells.")) {
+  fail("hard-square stampMarks must stay eval-only");
+}
+if (textureSrc.includes("tctx.imageSmoothingEnabled = false") && !textureSrc.includes("tctx.imageSmoothingEnabled = smoothPlate")) {
+  fail("print plate blit must be allowed to smooth");
+}
 if (!textureSrc.includes("return true")) fail("product Texture is ON unless eval binds OFF");
 if (BLOOM_OWNERSHIP_THRESHOLD !== 0.5) fail("ownership latch stays 50%");
 const markSrc = readFileSync(join(root, "src/core/markState.ts"), "utf8");
@@ -122,7 +134,11 @@ function mustNotContain(rel, needle) {
 
 mustContain("src/core/renderer.ts", "prepareIdentityTexture");
 mustContain("src/core/renderer.ts", "paintIdentityTexture");
+mustContain("src/core/renderer.ts", "resolveTextureMaterial(this)");
 mustContain("src/core/renderer.ts", "this.composedLayer");
+mustNotContain("src/main.ts", "bindEvalTextureMaterial");
+mustNotContain("src/main.ts", "setEvalTextureMaterial");
+mustNotContain("src/ui/typePanel.ts", "bindEvalTextureMaterial");
 mustContain("src/core/renderer.ts", "if (mapping.untreated)");
 mustContain("src/core/sequenceType.ts", "destination-out");
 mustContain("src/core/sequenceType.ts", "formation.present && hasB");

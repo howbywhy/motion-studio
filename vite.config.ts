@@ -30,6 +30,7 @@ export default defineConfig({
         identityFinal: resolve(root, "eval/identity-final.html"),
         finalUnity: resolve(root, "eval/final-unity.html"),
         typeOccupancy: resolve(root, "eval/type-occupancy.html"),
+        printTexture: resolve(root, "eval/print-texture.html"),
       },
     },
   },

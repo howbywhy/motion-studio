@@ -10,6 +10,7 @@ import {
   paintIdentityTexture,
   prepareIdentityTexture,
   resolveEvalIdentityTexture,
+  resolveTextureMaterial,
 } from "./identityTexture";
 import { lastBloomFieldMap, paintBloomOwnershipMask, withBloomFieldSampleBias, type BloomState } from "../behaviors/bloom/index";
 import { loopBloomOwnershipBias, loopBloomRenderBias } from "./bloomPairVariant";
@@ -207,7 +208,7 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number, opts?: { loop?
  * output-layer states on top of that, before copying the result onto the
  * visible canvas:
  *   Bloom compose (Clean)
- *   → identity Texture plates (e9e49f9 persistent + reactive)
+ *   → identity Texture plates (print-reactive; e9e49f9 occupancy + amounts)
  *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink; UI 50 = amount 0.4)
  *   → Sequence / Global Type
  *   → MARK
@@ -1914,6 +1915,7 @@ export class Renderer {
 
     const tPrep0 = mark();
     const textureOn = resolveEvalIdentityTexture(this);
+    const textureMaterial = resolveTextureMaterial(this);
     if (textureOn) {
       if (this.hasLiveSource() || this.printInkDirty) {
         prepareIdentityTexture(
@@ -1923,6 +1925,7 @@ export class Renderer {
           this.dpr,
           this.hasLiveSource(),
           this.bwMode === "both",
+          textureMaterial,
         );
         if (!this.hasLiveSource()) this.printInkDirty = false;
       }
