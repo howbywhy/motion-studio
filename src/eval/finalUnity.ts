@@ -11,9 +11,10 @@ import { bindEvalIdentityFinal } from "../core/identityFinal";
 import { bindEvalIdentityTexture } from "../core/identityTexture";
 import {
   bindEvalTypeIncoming,
-  typeIncomingTimeline,
-  TYPE_INCOMING_STRATEGIES,
-  type TypeIncomingStrategy,
+  bindEvalTypeIncomingFormation,
+  incomingTypeBFormation,
+  TYPE_INCOMING_FORMATIONS,
+  type TypeIncomingFormation,
 } from "../core/sequenceTypeIncoming";
 import { lastSequenceTypePaint, lastTypeBloomPaintMs } from "../core/sequenceType";
 import { lastIdentityTextureMs } from "../core/identityTexture";
@@ -140,7 +141,7 @@ renderer.setClockMode("auto");
 renderer.setProfiling(true);
 
 let textureOn = true;
-let incoming: TypeIncomingStrategy = "current";
+let formation: TypeIncomingFormation = "short";
 let flickerOn = false;
 let aspect: "4:5" | "9:16" = "4:5";
 let rhythm = "editorial";
@@ -156,7 +157,8 @@ function size(): { w: number; h: number } {
 
 function bind(): void {
   bindEvalIdentityTexture(renderer, textureOn);
-  bindEvalTypeIncoming(renderer, incoming);
+  bindEvalTypeIncoming(renderer, "ownership");
+  bindEvalTypeIncomingFormation(renderer, formation);
   bindEvalIdentityFinal(renderer, { treatment: "static", typeYield: "coexist" });
   renderer.setTransitionFlickerEnabled(flickerOn);
   renderer.setMarkState(clampMarkState({
@@ -251,11 +253,11 @@ function redrawBars(): void {
 
   incomingBar.innerHTML = "";
   const ilab = document.createElement("span");
-  ilab.textContent = "TYPE INCOMING";
+  ilab.textContent = "TYPE FORMATION";
   incomingBar.appendChild(ilab);
-  for (const id of TYPE_INCOMING_STRATEGIES) {
-    button(incomingBar, id === "current" ? "CURRENT" : id === "ownership" ? "OWNERSHIP" : "ANTICIPATED FLICK", incoming === id, () => {
-      incoming = id;
+  for (const id of TYPE_INCOMING_FORMATIONS) {
+    button(incomingBar, id === "current" ? "CURRENT" : id === "short" ? "SHORT" : "MATERIAL", formation === id, () => {
+      formation = id;
       bind();
       redrawBars();
     });
@@ -358,7 +360,7 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(a.href);
 }
 
-async function exportCurrent(label = `unity-${textureOn ? "tex" : "off"}-${incoming}-${flickerOn ? "flick" : "quiet"}-${aspect.replace(":", "x")}`): Promise<string> {
+async function exportCurrent(label = `unity-${textureOn ? "tex" : "off"}-${formation}-${flickerOn ? "flick" : "quiet"}-${aspect.replace(":", "x")}`): Promise<string> {
   const result = await runExport(
     renderer,
     {
@@ -449,47 +451,37 @@ async function textureProof(): Promise<Record<string, { mad: number; onHf: numbe
   return out;
 }
 
-function sampleIncoming(strategy: TypeIncomingStrategy, slotSeconds: number): ReturnType<typeof typeIncomingTimeline> {
-  return typeIncomingTimeline({
-    strategy,
-    slotSeconds,
-    ownershipFlipLocal: 0.58,
-    typeAGoneLocal: 0.72,
-  });
-}
-
-function incomingTables(): ReturnType<typeof typeIncomingTimeline>[] {
-  const slots = [1.2, 2.0, 2.8, 4.0];
-  const rows: ReturnType<typeof typeIncomingTimeline>[] = [];
-  for (const slot of slots) {
-    for (const strategy of TYPE_INCOMING_STRATEGIES) rows.push(sampleIncoming(strategy, slot));
+function formationTables(): string {
+  const rows: Array<[boolean, number]> = [
+    [false, 0],
+    [true, 0],
+    [true, 0.12],
+    [true, 0.28],
+    [true, 0.4],
+    [true, 0.9],
+  ];
+  const lines = ["FORM     OWN  RES   AMT   THR   FULL"];
+  for (const treatment of TYPE_INCOMING_FORMATIONS) {
+    for (const [ownedB, resolve] of rows) {
+      const f = incomingTypeBFormation({ treatment, ownedB, resolve });
+      lines.push(
+        [
+          treatment.padEnd(8),
+          ownedB ? " Y " : " n ",
+          resolve.toFixed(2).padStart(5),
+          f.amount.toFixed(2).padStart(5),
+          f.threshold.toFixed(2).padStart(5),
+          f.full ? " Y" : " n",
+        ].join(" "),
+      );
+    }
   }
-  rows.push(sampleIncoming(incoming, 0.8));
-  return rows;
-}
-
-function formatTables(rows: ReturnType<typeof typeIncomingTimeline>[]): string {
-  return [
-    "STRATEGY            SLOT   A-LAST   B-FIRST  OWN   FLICK-START  FLICK-PEAK  GAP-F  GAP-MS",
-    ...rows.map((r) =>
-      [
-        r.strategy.padEnd(18),
-        r.slotSeconds.toFixed(1).padStart(5),
-        (r.typeALastLocal ?? -1).toFixed(2).padStart(7),
-        (r.typeBFirstLocal ?? -1).toFixed(2).padStart(8),
-        (r.ownershipFlipLocal ?? -1).toFixed(2).padStart(5),
-        (r.flickerStartLocal ?? -1).toFixed(2).padStart(12),
-        r.flickerPeakLocal.toFixed(2).padStart(11),
-        r.emptyGapFrames.toFixed(1).padStart(6),
-        Math.round(r.emptyGapSec * 1000).toString().padStart(7),
-      ].join(" "),
-    ),
-  ].join("\n");
+  return lines.join("\n");
 }
 
 async function runProof(): Promise<string> {
   const tex = await textureProof();
-  const tables = incomingTables();
+  const tables = formationTables();
   const profile = renderer.lastProfile;
   const info = renderer.mediaInfo();
   const text = [
@@ -498,11 +490,11 @@ async function runProof(): Promise<string> {
       `${k.padEnd(8)} mad=${v.mad.toFixed(2)}  hfOn=${v.onHf.toFixed(2)}  hfOff=${v.offHf.toFixed(2)}  ${v.mad > 0.4 ? "PASS" : "FAIL"}`,
     ),
     "",
-    formatTables(tables),
+    tables,
     "",
     `profile total=${profile?.totalMs.toFixed(1) ?? "?"} texture=${profile?.textureMs.toFixed(1) ?? "?"} prep=${profile?.printPrepMs.toFixed(1) ?? "?"} typeBloom=${lastTypeBloomPaintMs.toFixed(1)} paintTex=${lastIdentityTextureMs.toFixed(1)}`,
     `ownership ${info.ownership} copy ${info.ownershipCopyIndex} contrib ${info.ownershipContribution.toFixed(2)}`,
-    `typePaint A=${lastSequenceTypePaint.paintedA} B=${lastSequenceTypePaint.paintedB} in=${lastSequenceTypePaint.incoming} ${lastSequenceTypePaint.strategy}`,
+    `typePaint A=${lastSequenceTypePaint.paintedA} B=${lastSequenceTypePaint.paintedB} form=${lastSequenceTypePaint.formation} amt=${lastSequenceTypePaint.amount.toFixed(2)}`,
   ].join("\n");
   proofEl.textContent = text;
   return text;
@@ -518,8 +510,11 @@ function tickHud(): void {
     `slot ${info.index}`,
     `local ${info.localPhase.toFixed(2)}`,
     `own ${v.ownership}`,
+    `contrib ${v.ownershipContribution.toFixed(2)}`,
+    `vis ${v.visibleContribution.toFixed(2)}`,
+    `res ${v.resolve.toFixed(2)}`,
     `tex ${textureOn ? "ON" : "OFF"}`,
-    `in ${incoming}`,
+    `form ${formation} ${lastSequenceTypePaint.amount.toFixed(2)} thr ${lastSequenceTypePaint.threshold.toFixed(2)}${lastSequenceTypePaint.full ? " FULL" : ""}`,
     `flick ${((flick?.envelope ?? 0) * 100).toFixed(0)}`,
     `A/B ${lastSequenceTypePaint.paintedA ? "A" : "-"}${lastSequenceTypePaint.paintedB ? "B" : "-"}`,
     v.A?.kind === "video" ? `vid ${Number(v.A.currentTime ?? 0).toFixed(2)}` : "",
@@ -549,9 +544,9 @@ void loadSwitzer().then(async () => {
         bind();
         redrawBars();
       },
-      incoming: () => incoming,
-      setIncoming(next: TypeIncomingStrategy) {
-        incoming = next;
+      formation: () => formation,
+      setFormation(next: TypeIncomingFormation) {
+        formation = next;
         bind();
         redrawBars();
       },
@@ -586,8 +581,32 @@ void loadSwitzer().then(async () => {
       },
       exportCurrent,
       textureProof,
-      incomingTables,
+      formationTables,
       runProof,
+      scanFormation(steps = 80) {
+        const rows = [];
+        for (let i = 0; i <= steps; i++) {
+          holdAt(i / steps);
+          const v = renderer.mediaInfo();
+          const flick = renderer.lastTransitionDiagnostics;
+          rows.push({
+            phase: Number((i / steps).toFixed(4)),
+            pair: v.pairIndex,
+            local: Number(v.localPhase.toFixed(3)),
+            owner: v.ownership,
+            contrib: Number(v.ownershipContribution.toFixed(3)),
+            visible: Number(v.visibleContribution.toFixed(3)),
+            resolve: Number(v.resolve.toFixed(3)),
+            amount: Number(lastSequenceTypePaint.amount.toFixed(3)),
+            threshold: Number(lastSequenceTypePaint.threshold.toFixed(3)),
+            full: lastSequenceTypePaint.full,
+            paintedA: lastSequenceTypePaint.paintedA,
+            paintedB: lastSequenceTypePaint.paintedB,
+            flick: Number((flick?.envelope ?? 0).toFixed(3)),
+          });
+        }
+        return rows;
+      },
       hud: () => ({
         phase: renderer.getLoopPhase(),
         timing: renderer.getSequenceTiming(),

@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  incomingTypeBFormation,
   incomingTypeBPresent,
+  PRODUCT_SEQUENCE_TYPE_FORMATION,
   PRODUCT_SEQUENCE_TYPE_INCOMING,
   secondsUntilCut,
   TYPE_INCOMING_ANTICIPATION_SEC,
+  TYPE_INCOMING_SHORT_END,
   typeIncomingTimeline,
 } from "../src/core/sequenceTypeIncoming.ts";
 import { BLOOM_OWNERSHIP_THRESHOLD } from "../src/core/sequenceOwnership.ts";
@@ -122,7 +125,7 @@ mustContain("src/core/renderer.ts", "paintIdentityTexture");
 mustContain("src/core/renderer.ts", "this.composedLayer");
 mustContain("src/core/renderer.ts", "if (mapping.untreated)");
 mustContain("src/core/sequenceType.ts", "destination-out");
-mustContain("src/core/sequenceType.ts", "incomingB && hasB");
+mustContain("src/core/sequenceType.ts", "formation.present && hasB");
 mustContain("src/core/sequenceType.ts", "SEQUENCE_TYPE_REVEAL_THRESHOLD = 0.42");
 mustContain("src/core/sequenceTypeIncoming.ts", 'PRODUCT_SEQUENCE_TYPE_INCOMING: TypeIncomingStrategy = "ownership"');
 mustNotContain("src/core/globalRegistration.ts", "prepareFieldPrintInk");
@@ -162,6 +165,47 @@ for (const pair of [0, 1, 2, 3, 4]) {
 }
 if (PRODUCT_SEQUENCE_TYPE_INCOMING !== "ownership") {
   fail("product incoming must lock OWNERSHIP after the empty-thought gap closed");
+}
+if (TYPE_INCOMING_SHORT_END !== 0.4) fail("SHORT finishes on Envelope B resolve 0.40");
+
+const beforeOwn = incomingTypeBFormation({ treatment: "short", ownedB: false, resolve: 0.9 });
+if (beforeOwn.present) fail("formation must not start before ownership");
+const atOwn = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.12 });
+if (!atOwn.present || atOwn.full || atOwn.amount > 0.25) fail("SHORT must begin incomplete at ownership");
+const currentAtOwn = incomingTypeBFormation({ treatment: "current", ownedB: true, resolve: 0 });
+if (!currentAtOwn.full) fail("CURRENT must still be complete at ownership");
+const shortMid = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.28 });
+const materialMid = incomingTypeBFormation({ treatment: "material", ownedB: true, resolve: 0.28 });
+if (!(shortMid.amount > materialMid.amount)) fail("SHORT must resolve faster than MATERIAL on the same Envelope B");
+const beforeFlick = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.4 });
+if (!beforeFlick.full) fail("SHORT must be complete at Envelope B resolve 0.40, before Flicker");
+const lateHold = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.9 });
+if (!lateHold.full) fail("long slots must stay complete once Envelope B has settled");
+const coverMustNotDrive = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.12 });
+if (coverMustNotDrive.full) fail("semantic cover must not complete SHORT");
+const short07 = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.12 });
+const short40 = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.12 });
+if (short07.amount !== short40.amount) fail("uneven Rhythm must not change the Envelope B formation relationship");
+for (const variant of [0, 1, 2, 3]) {
+  void variant;
+  const a = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.2 });
+  const b = incomingTypeBFormation({ treatment: "short", ownedB: true, resolve: 0.2 });
+  if (a.amount !== b.amount) fail("visible Bloom variant must not change semantic SHORT grammar");
+}
+if (PRODUCT_SEQUENCE_TYPE_FORMATION !== "short") {
+  fail("product incoming formation must lock SHORT after the ownership pop");
+}
+mustContain("src/core/sequenceType.ts", "destination-in");
+mustContain("src/core/sequenceType.ts", "buildSafeTypeMatte");
+mustContain("src/core/sequenceType.ts", "destination-out");
+mustNotContain("src/core/sequenceTypeIncoming.ts", "TYPE_INCOMING_FULL_BEFORE_CUT_SEC");
+mustNotContain("src/core/sequenceTypeIncoming.ts", "cover > 0.68");
+mustContain("src/core/bloomPulse.ts", "inert");
+mustContain("src/core/sequenceType.ts", "formation.present && hasB");
+
+const incomingSrc = readFileSync(join(root, "src/core/sequenceTypeIncoming.ts"), "utf8");
+if (incomingSrc.includes("secondsUntilCut") && incomingSrc.includes("let amount")) {
+  fail("SHORT amount must not use a second wall-clock timeline");
 }
 
 if (failures.length) {

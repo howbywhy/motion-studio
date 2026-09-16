@@ -28,8 +28,13 @@ import {
 import { resolveEvalSequenceWeights } from "./sequenceRhythm";
 import { transitionFlickerEnvelope, transitionFlickerHalfSpan } from "./transitionFlicker";
 import {
+  incomingTypeBFormation,
   incomingTypeBPresent,
   resolveEvalTypeIncoming,
+  resolveEvalTypeIncomingFormation,
+  TYPE_INCOMING_MATERIAL_BIAS,
+  TYPE_INCOMING_SHORT_BIAS,
+  type TypeIncomingFormation,
   type TypeIncomingStrategy,
 } from "./sequenceTypeIncoming";
 
@@ -100,6 +105,10 @@ export interface SequenceTypePaintTrace {
   copyA: boolean;
   copyB: boolean;
   strategy: TypeIncomingStrategy;
+  formation: TypeIncomingFormation;
+  amount: number;
+  threshold: number;
+  full: boolean;
 }
 
 export const emptySequenceTypePaintTrace = (): SequenceTypePaintTrace => ({
@@ -109,6 +118,10 @@ export const emptySequenceTypePaintTrace = (): SequenceTypePaintTrace => ({
   copyA: false,
   copyB: false,
   strategy: "current",
+  formation: "current",
+  amount: 0,
+  threshold: 1,
+  full: false,
 });
 
 export let lastSequenceTypePaint: SequenceTypePaintTrace = emptySequenceTypePaintTrace();
@@ -138,6 +151,10 @@ export interface SequenceTypeEvalConfig {
   ownedB?: boolean;
   /** Eval incoming strategy. Product uses the locked relationship. */
   incoming?: TypeIncomingStrategy;
+  /** Eval incoming formation. Product uses the locked relationship. */
+  incomingFormation?: TypeIncomingFormation;
+  /** Envelope B resolve 0..1. Drives incoming B formation, not video time. */
+  bloomResolve?: number;
 }
 
 let evalConfig: SequenceTypeEvalConfig | null = null;
@@ -303,6 +320,11 @@ export function paintEvalSequenceType(
       cut: flick.cut,
       loopSeconds,
     });
+    const formation = incomingTypeBFormation({
+      treatment: config.incomingFormation ?? resolveEvalTypeIncomingFormation(config.owner),
+      ownedB: incoming,
+      resolve: config.bloomResolve ?? 0,
+    });
     paintSequenceTypeThroughBloom(
       dest,
       width,
@@ -317,6 +339,7 @@ export function paintEvalSequenceType(
       config.matteKind ?? PRODUCT_TYPE_BLOOM_MATTE,
       incoming,
       strategy,
+      formation,
     );
     return;
   }
@@ -376,6 +399,7 @@ export function paintEvalSequenceType(
 
 let paintScratch: HTMLCanvasElement | null = null;
 let typeAScratch: HTMLCanvasElement | null = null;
+let typeBScratch: HTMLCanvasElement | null = null;
 let typeMatteScratch: HTMLCanvasElement | null = null;
 let typeMatteAScratch: HTMLCanvasElement | null = null;
 let typeMatteBScratch: HTMLCanvasElement | null = null;
@@ -564,6 +588,42 @@ function buildSafeTypeMattes(
   return { matteA: typeMatteAScratch, matteB: typeMatteBScratch };
 }
 
+/** Output-resolution Type-safe matte. Incoming B opens from just above the local field. */
+function buildSafeTypeMatte(
+  width: number,
+  height: number,
+  imageMask: HTMLCanvasElement,
+  resolveMask: HTMLCanvasElement | undefined,
+  threshold: number,
+  fontSize: number,
+  box: { l: number; t: number; r: number; b: number },
+  amount?: number,
+  bias?: number,
+): { matte: HTMLCanvasElement; threshold: number } {
+  typeMatteBScratch = ensureScratch(typeMatteBScratch, width, height);
+  const ctx = typeMatteBScratch.getContext("2d", { willReadFrequently: true })!;
+  stampBloomField(ctx, width, height, imageMask, resolveMask);
+  if (box.r <= box.l || box.b <= box.t) return { matte: typeMatteBScratch, threshold };
+  const bw = Math.max(1, box.r - box.l);
+  const bh = Math.max(1, box.b - box.t);
+  const img = ctx.getImageData(box.l, box.t, bw, bh);
+  let cut = threshold;
+  if (amount != null && bias != null) {
+    let sum = 0;
+    let n = 0;
+    for (let i = 3; i < img.data.length; i += 4) {
+      sum += img.data[i] ?? 0;
+      n += 1;
+    }
+    const mean = n > 0 ? sum / (n * 255) : 0;
+    const start = Math.min(1.12, Math.max(SEQUENCE_TYPE_REVEAL_THRESHOLD, mean + bias));
+    cut = start + (0.28 - start) * clamp01(amount);
+  }
+  remapMaskAlpha(img.data, cut, typeMatteSoftBand(fontSize));
+  ctx.putImageData(img, box.l, box.t);
+  return { matte: typeMatteBScratch, threshold: cut };
+}
+
 function compositeTypeThroughMatte(
   dest: CanvasRenderingContext2D,
   scratch: HTMLCanvasElement,
@@ -580,8 +640,8 @@ function compositeTypeThroughMatte(
 
 /**
  * Type A is consumed by the visible Bloom field.
- * Type B is not bloomed in — it becomes present when the incoming
- * relationship says the new state owns the thought.
+ * Type B starts at semantic ownership. Formation may condense B through
+ * a restrained Type-safe contour of the same field — not a reverse of A.
  */
 export function paintSequenceTypeThroughBloom(
   dest: CanvasRenderingContext2D,
@@ -597,6 +657,7 @@ export function paintSequenceTypeThroughBloom(
   kind: TypeBloomMatteKind = PRODUCT_TYPE_BLOOM_MATTE,
   incomingB = false,
   strategy: TypeIncomingStrategy = "current",
+  formation = incomingTypeBFormation({ treatment: "current", ownedB: incomingB, resolve: incomingB ? 1 : 0 }),
 ): void {
   const t0 = performance.now();
   const n = Math.max(1, pairCount);
@@ -613,6 +674,10 @@ export function paintSequenceTypeThroughBloom(
     copyA: hasA,
     copyB: hasB,
     strategy,
+    formation: formation.treatment,
+    amount: formation.amount,
+    threshold: formation.threshold,
+    full: formation.full,
   };
 
   if (hasA) {
@@ -636,8 +701,32 @@ export function paintSequenceTypeThroughBloom(
     }
   }
 
-  if (incomingB && hasB) {
-    lastSequenceTypePaint.paintedB = paintSequenceCopy(dest, width, height, style, copyB, next);
+  if (formation.present && hasB) {
+    if (formation.full || kind !== "safe") {
+      lastSequenceTypePaint.paintedB = paintSequenceCopy(dest, width, height, style, copyB, next);
+    } else {
+      const box = typeInkUnion(width, height, style, [{ copy: copyB, index: next }]);
+      const bias = formation.treatment === "short" ? TYPE_INCOMING_SHORT_BIAS : TYPE_INCOMING_MATERIAL_BIAS;
+      const matteB = buildSafeTypeMatte(
+        width,
+        height,
+        imageMask,
+        resolveMask,
+        formation.threshold,
+        box.fontSize,
+        box,
+        formation.amount,
+        bias,
+      );
+      lastSequenceTypePaint.threshold = matteB.threshold;
+      typeBScratch = ensureScratch(typeBScratch, width, height);
+      const bCtx = typeBScratch.getContext("2d")!;
+      bCtx.clearRect(0, 0, width, height);
+      if (paintSequenceCopy(bCtx, width, height, style, copyB, next)) {
+        compositeTypeThroughMatte(dest, typeBScratch, matteB.matte, "destination-in");
+        lastSequenceTypePaint.paintedB = true;
+      }
+    }
   }
   lastTypeBloomPaintMs = performance.now() - t0;
 }

@@ -1973,6 +1973,7 @@ export class Renderer {
             masterPhase: this.getLoopPhase(),
             owner: this,
             ownedB: this.lastBloomOwnership.owner === "B",
+            bloomResolve: this.lastSequenceResolve,
           },
           this.typeState.enabled ? this.typeState : undefined,
         );
@@ -1995,6 +1996,7 @@ export class Renderer {
             owner: this,
             ownershipCopyIndex: this.lastBloomOwnership.copyIndex,
             ownedB: this.lastBloomOwnership.owner === "B",
+            bloomResolve: this.lastSequenceResolve,
             imageMask: this.maskLayer,
             imageResolveMask: this.lastSequenceResolve >= 0.008 ? this.resolveSmall : undefined,
           },

@@ -1,12 +1,9 @@
 /**
- * Incoming Sequence Type visibility.
+ * Incoming Sequence Type visibility and formation.
  *
- * Outgoing Type A stays Bloom-consumed. This module only decides when
- * Type B becomes present — no fade, crop, slide, or Type Bloom-in.
- *
- * CURRENT      B after the pair cut (today's late arrival)
- * OWNERSHIP    B when canonical semantic ownership flips to B
- * ANTICIPATED  B slightly before the existing Flicker peak
+ * Outgoing Type A stays Bloom-consumed. Type B starts at semantic
+ * ownership. Formation may condense B through the remaining Type-safe
+ * Bloom settle — not a fade, crop, slide, or a second Type system.
  */
 
 export const TYPE_INCOMING_STRATEGIES = ["current", "ownership", "anticipated"] as const;
@@ -20,6 +17,91 @@ export const TYPE_INCOMING_FPS = 30;
 const FLICKER_DURATION_SEC = 0.12;
 
 export const PRODUCT_SEQUENCE_TYPE_INCOMING: TypeIncomingStrategy = "ownership";
+
+/**
+ * How incoming Type B becomes visible AFTER ownership.
+ * Ownership timing is unchanged. These are not product controls.
+ *
+ * CURRENT   full B at the flip
+ * SHORT     B condenses through a tight remaining Bloom contour
+ * MATERIAL  B uses more of the remaining contour before it is complete
+ */
+export const TYPE_INCOMING_FORMATIONS = ["current", "short", "material"] as const;
+export type TypeIncomingFormation = (typeof TYPE_INCOMING_FORMATIONS)[number];
+
+/** Incoming B condenses through a short remaining Bloom settle after ownership. */
+export const PRODUCT_SEQUENCE_TYPE_FORMATION: TypeIncomingFormation = "short";
+
+/** Envelope B resolve that finishes SHORT / MATERIAL. */
+export const TYPE_INCOMING_SHORT_END = 0.4;
+export const TYPE_INCOMING_MATERIAL_END = 0.72;
+/** How far above the local Type-safe field B starts. Not a reverse of A. */
+export const TYPE_INCOMING_SHORT_BIAS = 0.1;
+export const TYPE_INCOMING_MATERIAL_BIAS = 0.18;
+/** Fully formed B opens to the approved Type-safe floor. */
+export const TYPE_INCOMING_OPEN = 0.28;
+
+let evalFormation: TypeIncomingFormation | null = null;
+const formationByOwner = new WeakMap<object, TypeIncomingFormation | null>();
+
+export function clampTypeIncomingFormation(raw: unknown): TypeIncomingFormation {
+  return TYPE_INCOMING_FORMATIONS.includes(raw as TypeIncomingFormation)
+    ? (raw as TypeIncomingFormation)
+    : "current";
+}
+
+export function setEvalTypeIncomingFormation(formation: TypeIncomingFormation | null): void {
+  evalFormation = formation;
+}
+
+export function bindEvalTypeIncomingFormation(owner: object, formation: TypeIncomingFormation | null): void {
+  formationByOwner.set(owner, formation);
+}
+
+export function resolveEvalTypeIncomingFormation(owner?: object): TypeIncomingFormation {
+  if (owner && formationByOwner.has(owner)) {
+    return clampTypeIncomingFormation(formationByOwner.get(owner) ?? PRODUCT_SEQUENCE_TYPE_FORMATION);
+  }
+  return clampTypeIncomingFormation(evalFormation ?? PRODUCT_SEQUENCE_TYPE_FORMATION);
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+function smooth01(t: number): number {
+  const u = clamp01(t);
+  return u * u * (3 - 2 * u);
+}
+
+export interface TypeIncomingFormationState {
+  present: boolean;
+  amount: number;
+  threshold: number;
+  full: boolean;
+  treatment: TypeIncomingFormation;
+}
+
+export function incomingTypeBFormation(args: {
+  treatment: TypeIncomingFormation;
+  ownedB: boolean;
+  resolve?: number;
+}): TypeIncomingFormationState {
+  const treatment = clampTypeIncomingFormation(args.treatment);
+  if (!args.ownedB) {
+    return { present: false, amount: 0, threshold: 1, full: false, treatment };
+  }
+  if (treatment === "current") {
+    return { present: true, amount: 1, threshold: TYPE_INCOMING_OPEN, full: true, treatment };
+  }
+  const end = treatment === "short" ? TYPE_INCOMING_SHORT_END : TYPE_INCOMING_MATERIAL_END;
+  const bias = treatment === "short" ? TYPE_INCOMING_SHORT_BIAS : TYPE_INCOMING_MATERIAL_BIAS;
+  const amount = smooth01(clamp01(args.resolve ?? 0) / Math.max(1e-6, end));
+  const full = amount >= 0.97;
+  const threshold = TYPE_INCOMING_OPEN + bias * (1 - (full ? 1 : amount));
+  return { present: true, amount: full ? 1 : amount, threshold: full ? TYPE_INCOMING_OPEN : threshold, full, treatment };
+}
 
 let evalIncoming: TypeIncomingStrategy | null = null;
 const evalByOwner = new WeakMap<object, TypeIncomingStrategy | null>();

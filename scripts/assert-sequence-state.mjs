@@ -72,6 +72,21 @@ if (removedM.join(",") !== "auto,auto") fail("remove must drop Type Size mode");
 if (removedS.join(",") !== "48,62") fail("remove must drop Type Size value");
 if (removedA.join(",") !== "inherit,br") fail("remove must drop position");
 
+let grownCopies = ["Stay", "Listen"];
+let grownModes = ["auto", "manual"];
+let grownSizes = [48, 32];
+let grownAnchors = ["inherit", "tl"];
+for (let n = 3; n <= 8; n++) {
+  grownCopies = applySequenceCopyChange(grownCopies, n, { kind: "add" });
+  grownModes = applySequenceFieldChange(grownModes, n, { kind: "add" }, "auto");
+  grownSizes = applySequenceFieldChange(grownSizes, n, { kind: "add" }, 48);
+  grownAnchors = applySequenceFieldChange(grownAnchors, n, { kind: "add" }, "inherit");
+  if (grownCopies[0] !== "Stay" || grownCopies[1] !== "Listen") fail(`add to ${n} must not rewrite 01→02 copy`);
+  if (grownModes[1] !== "manual" || grownSizes[1] !== 32 || grownAnchors[1] !== "tl") fail(`add to ${n} must not rewrite 02 Type Size/Position`);
+  if (grownCopies[n - 1] !== "") fail(`add to ${n} must pad a blank copy`);
+  if (grownModes[n - 1] !== "auto" || grownAnchors[n - 1] !== "inherit") fail(`add to ${n} must pad AUTO/INHERIT`);
+}
+
 if (failures.length) {
   console.error("SEQUENCE STATE FAILED:");
   for (const f of failures) console.error(" -", f);
