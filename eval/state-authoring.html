@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>State authoring UX</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      :root {
+        --eval-ink: #ece8e1;
+        --eval-mute: #8a8680;
+        --eval-line: #2a2926;
+        --eval-wash: #161512;
+      }
+      html, body {
+        margin: 0;
+        background: #0c0c0c;
+        color: var(--eval-ink);
+        font: 12px/1.4 "Switzer", ui-sans-serif, system-ui, sans-serif;
+      }
+      body { padding: 20px 22px 48px; }
+      h1, h2 {
+        margin: 0 0 8px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 11px;
+      }
+      .lede {
+        max-width: 72em;
+        color: var(--eval-mute);
+        margin: 0 0 16px;
+      }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 0 0 10px;
+      }
+      .bar span.k {
+        color: #666;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 10px;
+        margin-right: 2px;
+      }
+      .bar button, .task button {
+        background: #161512;
+        color: #ddd;
+        border: 1px solid #333;
+        padding: 6px 10px;
+        font: inherit;
+        cursor: pointer;
+      }
+      .bar button.is-on, .task button.is-on {
+        border-color: #eee;
+        color: #fff;
+      }
+      .stage-wrap { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+      .stage canvas { display: block; background: #000; }
+      .strip-host { max-width: 720px; margin: 14px 0 18px; }
+      .panels {
+        display: grid;
+        grid-template-columns: minmax(280px, 340px) minmax(240px, 300px);
+        gap: 20px;
+        align-items: start;
+      }
+      .panel-col { min-width: 0; }
+      .panel-col h2 { margin-bottom: 10px; }
+      #state-inspector {
+        display: none;
+        border: 1px solid var(--eval-line);
+        background: var(--eval-wash);
+        padding: 12px 14px 14px;
+      }
+      body.model-b #state-inspector { display: block; }
+      body.model-b .type-sequence-slots { display: none; }
+      .state-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .state-index {
+        letter-spacing: 0.08em;
+        font-variant-numeric: tabular-nums;
+      }
+      .state-meta {
+        color: var(--eval-mute);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .state-inspector label {
+        display: block;
+        color: var(--eval-mute);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 10px;
+        margin: 10px 0 4px;
+      }
+      .state-inspector textarea {
+        width: 100%;
+        min-height: 56px;
+        resize: vertical;
+        background: #0c0c0c;
+        color: var(--eval-ink);
+        border: 1px solid #333;
+        padding: 7px 8px;
+        font: inherit;
+      }
+      .state-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      .state-row button, .state-inspector .replace-btn {
+        height: 22px;
+        padding: 0 7px;
+        border: 1px solid #333;
+        background: transparent;
+        color: var(--eval-mute);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+      .state-row button.active {
+        color: var(--eval-ink);
+        border-color: var(--eval-ink);
+      }
+      .state-inspector input[type="number"] {
+        width: 48px;
+        height: 22px;
+        padding: 0 6px;
+        border: 1px solid #333;
+        background: transparent;
+        color: var(--eval-ink);
+        font: inherit;
+      }
+      .blank-note { color: #666; font-size: 11px; margin-top: 6px; }
+      body.model-a .type-sequence-slots {
+        max-height: 52vh;
+        overflow: auto;
+      }
+      body.model-a .type-sequence-slot.is-active {
+        background: transparent;
+      }
+      body.model-a .type-sequence-slot.is-active .type-sequence-slot-meta {
+        color: var(--eval-ink);
+      }
+      body.model-a .eval-state-dur {
+        margin-left: auto;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
+        color: var(--eval-ink);
+      }
+      body.model-a .type-sequence-slot:not(.is-active) .eval-state-dur {
+        color: transparent;
+      }
+      .hud {
+        margin-top: 22px;
+        color: #aaa;
+        white-space: pre-wrap;
+        max-width: 92em;
+        font: 11px/1.45 ui-monospace, monospace;
+      }
+      .task { margin: 12px 0 0; }
+      body.watch-only .chrome,
+      body.watch-only .panels,
+      body.watch-only .strip-host,
+      body.watch-only .sequence-rhythm-strip,
+      body.watch-only .hud,
+      body.watch-only .task { display: none; }
+    </style>
+  </head>
+  <body class="model-current">
+    <div class="chrome">
+      <h1>State authoring</h1>
+      <p class="lede">
+        UX evaluation only. Same product composition and authored state in every model.
+        Switching models must not restart playback. CURRENT is the control.
+        A keeps the existing surfaces and binds them through one selection.
+        B tests a compact State surface for moment-owned properties.
+        No timeline. No keyframes. No product promotion.
+      </p>
+      <div class="bar" id="models"></div>
+      <div class="bar" id="pieces"></div>
+      <div class="bar" id="opts"></div>
+      <div class="bar" id="actions"></div>
+    </div>
+    <div class="stage-wrap">
+      <div class="stage" id="stage"></div>
+    </div>
+    <div class="strip-host" id="strip"></div>
+    <div class="panels">
+      <div class="panel-col">
+        <h2>Typography</h2>
+        <div id="type-panel"></div>
+      </div>
+      <div class="panel-col">
+        <div id="state-inspector" class="state-inspector"></div>
+        <h2>Signature</h2>
+        <div id="mark-panel"></div>
+      </div>
+    </div>
+    <div class="task chrome" id="task"></div>
+    <pre class="hud" id="hud"></pre>
+    <script type="module" src="/src/eval/stateAuthoring.ts"></script>
+  </body>
+</html>
