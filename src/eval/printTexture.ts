@@ -7,14 +7,24 @@ import { clampTypeState } from "../core/typeState";
 import { clampMarkState } from "../core/markState";
 import { loadSwitzer } from "../core/typeFont";
 import { bindEvalIdentityTexture, bindEvalTextureMaterial, lastIdentityTextureMs, lastTextureAudit, type IdentityTextureMaterial } from "../core/identityTexture";
+import { lastPrintAudit, lastPrintTiming, printScreenPeriod } from "../core/identityPrintMaterial";
 import { runExport } from "../core/exportSession";
 
-const MATERIALS: { id: IdentityTextureMaterial; label: string }[] = [
-  { id: "current", label: "A CURRENT" },
-  { id: "print", label: "B PRINT" },
-  { id: "registration", label: "C REGISTRATION" },
-  { id: "print-reactive", label: "D PRINT+REACTIVE" },
+const SCREEN_MATERIALS: { id: IdentityTextureMaterial; label: string }[] = [
+  { id: "reactive-registration", label: "A CLEAN" },
+  { id: "halftone-dot", label: "B FINE DOT" },
+  { id: "halftone-elliptical", label: "C FINE ELLIPSE" },
+  { id: "halftone-soft", label: "D FINE SOFT" },
 ];
+
+const PRINT_MATERIALS: { id: IdentityTextureMaterial; label: string }[] = [
+  { id: "halftone-soft", label: "A SCREEN" },
+  { id: "halftone-registration", label: "B SCREEN+REG" },
+  { id: "halftone-registration-strong", label: "C STRONGER REG" },
+  { id: "print-identity", label: "D PRINT+BLOOM" },
+];
+
+const MATERIALS = PRINT_MATERIALS;
 
 const PHASES: { id: string; phase: number }[] = [
   { id: "HOLD", phase: 0.04 },
@@ -26,12 +36,22 @@ const PHASES: { id: string; phase: number }[] = [
 ];
 
 const ZOOMS: { label: string; nx: number; ny: number }[] = [
-  { label: "skin", nx: 0.52, ny: 0.22 },
-  { label: "hair", nx: 0.5, ny: 0.12 },
-  { label: "garment", nx: 0.42, ny: 0.42 },
   { label: "flat bg", nx: 0.82, ny: 0.18 },
+  { label: "cheek", nx: 0.52, ny: 0.22 },
+  { label: "white fabric", nx: 0.42, ny: 0.42 },
+  { label: "hair", nx: 0.5, ny: 0.12 },
+  { label: "pattern", nx: 0.48, ny: 0.58 },
   { label: "bloom edge", nx: 0.5, ny: 0.5 },
 ];
+
+const FLOOR_MATERIALS: { id: IdentityTextureMaterial; label: string }[] = [
+  { id: "print-floor-00", label: "D0 CURRENT" },
+  { id: "print-floor-10", label: "F10" },
+  { id: "print-floor-15", label: "F15" },
+  { id: "print-floor-20", label: "F20" },
+];
+
+const PRODUCT_MATERIAL: IdentityTextureMaterial = "print-identity";
 
 function bloomParams() {
   const found = presetsForTreatment("clean").find((p) => p.label === "Balanced");
@@ -144,7 +164,7 @@ renderer.setEndBehaviour({ mode: "off" });
 renderer.setClockMode("hold");
 renderer.setProfiling(true);
 renderer.setRegistrationEnabled(true);
-renderer.setTransitionFlickerEnabled(false);
+renderer.setTransitionFlickerEnabled(true);
 
 let aspect: "4:5" | "9:16" = "4:5";
 let mediaKind: "portrait" | "dark" | "light" | "video" = "portrait";
@@ -197,7 +217,7 @@ async function buildMedia(): Promise<void> {
   const size = dim();
   renderer.resizeExact(size.w, size.h);
   renderer.setSequence(items, items[0]!.id);
-  bindMaterial("print-reactive");
+  bindMaterial(PRODUCT_MATERIAL);
 }
 
 function capture(material: IdentityTextureMaterial, phase: number, size = dim()): HTMLCanvasElement {
@@ -222,21 +242,26 @@ function capture(material: IdentityTextureMaterial, phase: number, size = dim())
   return copyFrame(live, live.width, live.height);
 }
 
-function addSheet(title: string, size: { w: number; h: number }, phases = PHASES): void {
+function addSheet(
+  title: string,
+  size: { w: number; h: number },
+  phases = PHASES,
+  materials = MATERIALS,
+): void {
   const wrap = document.createElement("section");
   const h = document.createElement("h2");
   h.textContent = title;
   wrap.appendChild(h);
   const table = document.createElement("table");
   const head = document.createElement("tr");
-  head.innerHTML = `<th>Phase</th>${MATERIALS.map((m) => `<th>${m.label}</th>`).join("")}`;
+  head.innerHTML = `<th>Phase</th>${materials.map((m) => `<th>${m.label}</th>`).join("")}`;
   table.appendChild(head);
   for (const row of phases) {
     const tr = document.createElement("tr");
     const lab = document.createElement("td");
     lab.textContent = row.id;
     tr.appendChild(lab);
-    for (const material of MATERIALS) {
+    for (const material of materials) {
       const td = document.createElement("td");
       const shot = capture(material.id, row.phase, size);
       const shown = copyFrame(shot, Math.min(210, size.w), Math.round(Math.min(210, size.w) * (size.h / size.w)));
@@ -262,20 +287,94 @@ function addSheet(title: string, size: { w: number; h: number }, phases = PHASES
   sheets.appendChild(wrap);
 }
 
+function renderTypePrint(): void {
+  const host = document.getElementById("type-print");
+  if (!host) return;
+  host.innerHTML = "";
+  const modes: { id: string; label: string; split: number; blur: number }[] = [
+    { id: "A", label: "A CRISP", split: 0, blur: 0 },
+    { id: "B", label: "B SPLIT", split: 0.45, blur: 0 },
+    { id: "C", label: "C SPLIT+INK", split: 0.45, blur: 0.35 },
+  ];
+  for (const mode of modes) {
+    const fig = document.createElement("figure");
+    const c = document.createElement("canvas");
+    c.width = 320;
+    c.height = 120;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#111214";
+    ctx.fillRect(0, 0, 320, 120);
+    ctx.fillStyle = "#f3efe6";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "600 42px Switzer, sans-serif";
+    if (mode.blur > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.filter = `blur(${mode.blur}px)`;
+      ctx.fillText("MADELEN", 160 + mode.split, 60 - mode.split * 0.3);
+      ctx.restore();
+    }
+    if (mode.split > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.fillText("MADELEN", 160 + mode.split, 60 - mode.split * 0.3);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillText("MADELEN", 160, 60);
+    const cap = document.createElement("figcaption");
+    cap.textContent = mode.label;
+    fig.appendChild(c);
+    fig.appendChild(cap);
+    host.appendChild(fig);
+  }
+}
+
+function renderUx(): void {
+  const host = document.getElementById("ux");
+  if (!host) return;
+  host.innerHTML = `
+    <div class="ux-card">
+      <h3>Model A — controls</h3>
+      <div class="ux-row"><span>Print</span><span>On</span></div>
+      <div class="ux-row"><span>Halftone</span><span>On / Off</span></div>
+      <div class="ux-row"><span>Registration</span><span>On / Off</span></div>
+      <p class="note">Invites an effects generator. A designer can remove the identity screen.</p>
+    </div>
+    <div class="ux-card">
+      <h3>Model B — authored</h3>
+      <div class="ux-row"><span>Print</span><span>On / Off</span></div>
+      <div class="ux-row"><span>Bloom</span><span>existing</span></div>
+      <div class="ux-row"><span>Flicker</span><span>On / Off</span></div>
+      <div class="ux-row"><span>Signature</span><span>On / Off</span></div>
+      <p class="note">Halftone and print registration stay inside Print. Product now uses this.</p>
+    </div>
+  `;
+}
+
 function renderSheets(): void {
   sheets.innerHTML = "";
   const preview = dim();
-  addSheet(`${aspect} preview ${preview.w}×${preview.h}  ${mediaKind}`, preview);
+  addSheet(`Screen structure  ${aspect} ${preview.w}×${preview.h}`, preview, [
+    { id: "HOLD", phase: 0.04 },
+    { id: "MID BLOOM", phase: 0.5 },
+  ], SCREEN_MATERIALS);
+  addSheet(`Print combination  ${aspect} ${preview.w}×${preview.h}  ${mediaKind}`, preview);
+  renderTypePrint();
+  renderUx();
+  const period = printScreenPeriod(preview.w, preview.h);
+  const p1080 = printScreenPeriod(1080, aspect === "9:16" ? 1920 : 1350);
   hud.textContent = [
-    `material audit  cellA ${lastTextureAudit.cellA.toFixed(2)}  cellB ${lastTextureAudit.cellB.toFixed(2)}`,
-    `canvas ${lastTextureAudit.width}×${lastTextureAudit.height}  dpr ${lastTextureAudit.dpr}`,
-    `product default PRINT+REACTIVE   Registration remains ring-only`,
+    `screen period  preview ${period.toFixed(2)}px  1080 ${p1080.toFixed(2)}px  ref ${lastPrintAudit.period.toFixed(2)}px`,
+    `canvas ${lastTextureAudit.width}×${lastTextureAudit.height}  kind ${lastPrintAudit.kind}`,
+    `product default PRINT IDENTITY   occupancy stamps stay eval-historical`,
     exportStatus,
   ].filter(Boolean).join("\n");
   perfEl.textContent = Object.entries(timings)
-    .map(([k, v]) => `${k}  prep ${v.prep.toFixed(1)}ms  paint ${v.paint.toFixed(1)}ms  frame ${v.total.toFixed(1)}ms  cell ${v.cellA.toFixed(2)}/${v.cellB.toFixed(2)}`)
+    .map(([k, v]) => `${k}  prep ${v.prep.toFixed(1)}ms  paint ${v.paint.toFixed(1)}ms  frame ${v.total.toFixed(1)}ms  screen ${lastPrintAudit.period.toFixed(2)}`)
     .join("\n");
-  bindMaterial("print-reactive");
+  bindMaterial(PRODUCT_MATERIAL);
 }
 
 function button(parent: HTMLElement, label: string, on: boolean, click: () => void): void {
@@ -286,13 +385,19 @@ function button(parent: HTMLElement, label: string, on: boolean, click: () => vo
   parent.appendChild(b);
 }
 
-async function exportPiece(label: string, size: "preview" | "1080", pieceAspect: "4:5" | "9:16"): Promise<void> {
+async function exportPiece(
+  label: string,
+  size: "preview" | "1080",
+  pieceAspect: "4:5" | "9:16",
+  material: IdentityTextureMaterial = PRODUCT_MATERIAL,
+  download = true,
+): Promise<{ filename: string; bytes: number; width: number; height: number; blob: Blob }> {
   aspect = pieceAspect;
   const preview = dim();
   renderer.resizeExact(preview.w, preview.h);
-  bindMaterial("print-reactive");
+  bindMaterial(material);
   renderer.setClockMode("auto");
-  renderer.setHoldPhase(0);
+  renderer.seekLoopPhase(0);
   const result = await runExport(
     renderer,
     { format: "mp4", fps: 30, size, quality: "standard", aspect: pieceAspect, includeAudio: false },
@@ -303,11 +408,36 @@ async function exportPiece(label: string, size: "preview" | "1080", pieceAspect:
     },
     new AbortController().signal,
   );
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(result.blob);
-  a.download = result.filename;
-  a.click();
+  if (download) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(result.blob);
+    a.download = result.filename;
+    a.click();
+  }
   exportStatus = `${label}  ${result.width}×${result.height}  ${(result.bytes / 1024).toFixed(0)}kb`;
+  return result;
+}
+
+async function exportMaterialBlob(
+  material: IdentityTextureMaterial,
+  label: string,
+  pieceAspect: "4:5" | "9:16",
+): Promise<{ filename: string; bytes: number; width: number; height: number; b64: string }> {
+  const result = await exportPiece(label, "1080", pieceAspect, material, false);
+  const buf = await result.blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return {
+    filename: result.filename,
+    bytes: result.bytes,
+    width: result.width,
+    height: result.height,
+    b64: btoa(binary),
+  };
 }
 
 function redrawBars(): void {
@@ -368,6 +498,9 @@ Object.assign(window, {
     capture,
     timings: () => timings,
     audit: () => lastTextureAudit,
+    materials: MATERIALS,
+    screenMaterials: SCREEN_MATERIALS,
+    printAudit: () => lastPrintAudit,
     setMedia: async (kind: typeof mediaKind) => {
       mediaKind = kind;
       await buildMedia();
@@ -377,6 +510,12 @@ Object.assign(window, {
       renderer.resizeExact(dim().w, dim().h);
     },
     bindMaterial,
+    floorMaterials: FLOOR_MATERIALS,
+    printTiming: () => lastPrintTiming,
+    exportMaterialBlob,
+    capturePng: (material: IdentityTextureMaterial, phase: number, size = dim("1080")): string => {
+      return capture(material, phase, size).toDataURL("image/png");
+    },
     renderer,
   },
 });

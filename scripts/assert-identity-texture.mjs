@@ -26,19 +26,28 @@ if (!textureSrc.includes('IDENTITY_TEXTURE_COMMIT = "e9e49f92ff0590ab3ba780bd64b
 }
 if (!textureSrc.includes("IDENTITY_TEXTURE_PERSISTENT = 0.1")) fail("persistent amount is 0.1");
 if (!textureSrc.includes("IDENTITY_TEXTURE_REACTIVE = 0.4")) fail("reactive amount is 0.4");
-if (!textureSrc.includes('PRODUCT_TEXTURE_MATERIAL: IdentityTextureMaterial = "print-reactive"')) {
-  fail("product Texture must be print-reactive, not the digital cell stamp");
+if (!textureSrc.includes('PRODUCT_TEXTURE_MATERIAL: IdentityTextureMaterial = "print-identity"')) {
+  fail("product Texture must be print-identity, one print language");
 }
-if (!textureSrc.includes("function stampPrintMarks")) fail("print plates must stamp soft ink, not only hard cells");
-if (!textureSrc.includes("function imageRelativeCell")) fail("print plates must size marks in image space");
-if (!textureSrc.includes("PRINT_REFERENCE_SHORT = 420")) fail("print frequency stays image-relative to a 420 short-side reference");
+if (!textureSrc.includes("isPrintImpressionMaterial")) fail("product must dispatch to impression print material");
+const printSrc = readFileSync(join(root, "src/core/identityPrintMaterial.ts"), "utf8");
+if (printSrc.includes("hash2") || printSrc.includes("stampMarks") || printSrc.includes("markCellPx")) {
+  fail("impression print material must not generate a mark field");
+}
+if (!printSrc.includes("buildEdgeMap")) fail("impressions must be edge-weighted");
+if (!printSrc.includes("applyHalftone")) fail("print identity must include a coherent AM screen");
+if (!printSrc.includes("PRINT_SCREEN_PERIOD_AT_1080")) fail("screen frequency must be composition-relative");
+if (!printSrc.includes("PRINT_HIGHLIGHT_FLOOR")) fail("pale areas need a highlight floor on the same AM screen");
+if (!printSrc.includes("screenDist")) fail("AM screen geometry must be cached, not recomputed every frame");
+if (!printSrc.includes("printRegistration")) fail("print registration must stay distinct from golden-master Registration");
+if (printSrc.includes("hash2")) fail("print identity must not hash a mark field");
 if (!textureSrc.includes("Eval A CURRENT only. Product never stamps hard cells.")) {
   fail("hard-square stampMarks must stay eval-only");
 }
 if (textureSrc.includes("tctx.imageSmoothingEnabled = false") && !textureSrc.includes("tctx.imageSmoothingEnabled = smoothPlate")) {
   fail("print plate blit must be allowed to smooth");
 }
-if (!textureSrc.includes("return true")) fail("product Texture is ON unless eval binds OFF");
+if (!textureSrc.includes("return productPrintOn")) fail("product Print is ON unless the author turns it off");
 if (BLOOM_OWNERSHIP_THRESHOLD !== 0.5) fail("ownership latch stays 50%");
 const markSrc = readFileSync(join(root, "src/core/markState.ts"), "utf8");
 if (!markSrc.includes("MARK_SCALE_DEFAULT = 40")) fail("STATIC SIGNATURE scale default stays 40");
@@ -135,6 +144,7 @@ function mustNotContain(rel, needle) {
 mustContain("src/core/renderer.ts", "prepareIdentityTexture");
 mustContain("src/core/renderer.ts", "paintIdentityTexture");
 mustContain("src/core/renderer.ts", "resolveTextureMaterial(this)");
+mustContain("src/core/renderer.ts", "isPrintImpressionMaterial");
 mustContain("src/core/renderer.ts", "this.composedLayer");
 mustNotContain("src/main.ts", "bindEvalTextureMaterial");
 mustNotContain("src/main.ts", "setEvalTextureMaterial");

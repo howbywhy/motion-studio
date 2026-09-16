@@ -6,12 +6,16 @@ import { clampTransform, disposeMediaAsset, parkMediaAsset, videoMayOwnAudio, ty
 import { getRegistrationStrategy, setRegistrationStrategy as setGlobalRegistrationStrategy, type RegistrationStrategy } from "./registrationInk";
 import { paintGoldenMasterRegistration, clampRegistrationAmount, REGISTRATION_AMOUNT_DEFAULT } from "./globalRegistration";
 import {
+  identityTexturePrepared,
   invalidateIdentityTexture,
+  isProductPrintEnabled,
   paintIdentityTexture,
   prepareIdentityTexture,
   resolveEvalIdentityTexture,
   resolveTextureMaterial,
+  setProductPrintEnabled,
 } from "./identityTexture";
+import { isPrintImpressionMaterial } from "./identityPrintMaterial";
 import { lastBloomFieldMap, paintBloomOwnershipMask, withBloomFieldSampleBias, type BloomState } from "../behaviors/bloom/index";
 import { loopBloomOwnershipBias, loopBloomRenderBias } from "./bloomPairVariant";
 import { clampTypeState, defaultTypeState, type TypeState } from "./typeState";
@@ -208,7 +212,7 @@ function seekVideoFrame(video: HTMLVideoElement, timeSec: number, opts?: { loop?
  * output-layer states on top of that, before copying the result onto the
  * visible canvas:
  *   Bloom compose (Clean)
- *   → identity Texture plates (print-reactive; e9e49f9 occupancy + amounts)
+ *   → identity print material (print-identity: screen + registration)
  *   → paintGoldenMasterRegistration (728ff08 Bloom-ring ink; UI 50 = amount 0.4)
  *   → Sequence / Global Type
  *   → MARK
@@ -690,6 +694,16 @@ export class Renderer {
 
   getRegistrationStrategy(): RegistrationStrategy {
     return getRegistrationStrategy();
+  }
+
+  setPrintEnabled(on: boolean): void {
+    setProductPrintEnabled(on);
+    this.invalidatePrintInk();
+    this.renderFrame();
+  }
+
+  isPrintEnabled(): boolean {
+    return isProductPrintEnabled();
   }
 
   setRegistrationEnabled(on: boolean): void {
@@ -1917,7 +1931,8 @@ export class Renderer {
     const textureOn = resolveEvalIdentityTexture(this);
     const textureMaterial = resolveTextureMaterial(this);
     if (textureOn) {
-      if (this.hasLiveSource() || this.printInkDirty) {
+      const impression = isPrintImpressionMaterial(textureMaterial);
+      if (this.hasLiveSource() || this.printInkDirty || impression || !identityTexturePrepared()) {
         prepareIdentityTexture(
           this.composedLayer,
           width,
@@ -1927,7 +1942,7 @@ export class Renderer {
           this.bwMode === "both",
           textureMaterial,
         );
-        if (!this.hasLiveSource()) this.printInkDirty = false;
+        if (!this.hasLiveSource() && !impression) this.printInkDirty = false;
       }
     }
     const tPrep = mark();

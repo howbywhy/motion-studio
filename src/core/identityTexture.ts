@@ -9,20 +9,34 @@
  * sampling space changed.
  *
  * Authored order: Bloom compose → plates → Type.
- * Product material is print-reactive: quiet print on holds, same reactive
- * tent during Bloom. Eval may bind current / print / registration.
+ * Product material is print-identity: fine AM screen + registration + Bloom
+ * reactive disagreement. Eval may still bind historical mark fields.
  */
 
 import { hash2, markCellPx, markPeriodCss } from "../sources/field";
+import {
+  invalidatePrintImpressions,
+  isPrintImpressionMaterial,
+  paintPrintImpressions,
+  preparePrintImpressions,
+  lastPrintImpressionMs,
+  lastPrintAudit,
+  type PrintImpressionMaterial,
+} from "./identityPrintMaterial";
 
 export const IDENTITY_TEXTURE_COMMIT = "e9e49f92ff0590ab3ba780bd64ba019a6be0b005";
 export const IDENTITY_TEXTURE_PERSISTENT = 0.1;
 export const IDENTITY_TEXTURE_REACTIVE = 0.4;
 
-export type IdentityTextureMaterial = "current" | "print" | "registration" | "print-reactive";
+export type IdentityTextureMaterial =
+  | "current"
+  | "print"
+  | "registration"
+  | "print-reactive"
+  | PrintImpressionMaterial;
 
-/** Product Texture. Eval may bind another material on a renderer. */
-export const PRODUCT_TEXTURE_MATERIAL: IdentityTextureMaterial = "print-reactive";
+/** Product Texture. One print language: screen + registration + reactive. */
+export const PRODUCT_TEXTURE_MATERIAL: IdentityTextureMaterial = "print-identity";
 
 function makeCanvas(): HTMLCanvasElement {
   return document.createElement("canvas");
@@ -76,8 +90,10 @@ export let lastTextureAudit = {
   cellB: 0,
   colsA: 0,
   rowsA: 0,
+  screenPeriod: 0,
 };
 
+let productPrintOn = true;
 let evalTexture: boolean | null = null;
 const evalByOwner = new WeakMap<object, boolean | null>();
 let evalMaterial: IdentityTextureMaterial | null = null;
@@ -101,7 +117,16 @@ export function bindEvalTextureMaterial(owner: object, material: IdentityTexture
   invalidateIdentityTexture();
 }
 
-/** Product Texture is ON. Eval may bind OFF for comparison. */
+/** Product Print is ON. Eval may bind OFF for comparison. */
+export function setProductPrintEnabled(on: boolean): void {
+  productPrintOn = on;
+  invalidateIdentityTexture();
+}
+
+export function isProductPrintEnabled(): boolean {
+  return productPrintOn;
+}
+
 export function resolveEvalIdentityTexture(owner?: object): boolean {
   if (owner && evalByOwner.has(owner)) {
     const bound = evalByOwner.get(owner);
@@ -109,7 +134,7 @@ export function resolveEvalIdentityTexture(owner?: object): boolean {
     if (bound === true) return true;
   }
   if (evalTexture === false) return false;
-  return true;
+  return productPrintOn;
 }
 
 export function resolveTextureMaterial(owner?: object): IdentityTextureMaterial {
@@ -129,6 +154,7 @@ export function invalidateIdentityTexture(): void {
   prepared = false;
   preparedW = 0;
   preparedH = 0;
+  invalidatePrintImpressions();
 }
 
 function neighbor4(on: Uint8Array, cols: number, rows: number, x: number, y: number): number {
@@ -405,6 +431,25 @@ export function prepareIdentityTexture(
   bw = false,
   material: IdentityTextureMaterial = PRODUCT_TEXTURE_MATERIAL,
 ): void {
+  if (isPrintImpressionMaterial(material)) {
+    preparePrintImpressions(composed, width, height);
+    prepared = true;
+    preparedW = width;
+    preparedH = height;
+    preparedMaterial = material;
+    lastTextureAudit = {
+      material,
+      width,
+      height,
+      dpr,
+      cellA: 0,
+      cellB: 0,
+      colsA: 0,
+      rowsA: 0,
+      screenPeriod: lastPrintAudit.period,
+    };
+    return;
+  }
   if (!plateA) plateA = makeCanvas();
   if (!plateB) plateB = makeCanvas();
   sizeCanvas(plateA, width, height);
@@ -441,7 +486,7 @@ export function prepareIdentityTexture(
   preparedW = width;
   preparedH = height;
   preparedMaterial = material;
-  lastTextureAudit = { material, width, height, dpr, cellA, cellB, colsA, rowsA };
+  lastTextureAudit = { material, width, height, dpr, cellA, cellB, colsA, rowsA, screenPeriod: 0 };
 }
 
 function blitTonalPlate(
@@ -576,6 +621,21 @@ export function paintIdentityTexture(
   height: number,
 ): void {
   const t0 = performance.now();
+  if (isPrintImpressionMaterial(preparedMaterial)) {
+    paintPrintImpressions(
+      dest,
+      maskLayer,
+      width,
+      height,
+      preparedMaterial,
+      IDENTITY_TEXTURE_PERSISTENT,
+      IDENTITY_TEXTURE_REACTIVE,
+      buildBoundaryAlpha,
+    );
+    lastIdentityTextureMs = lastPrintImpressionMs;
+    lastTextureAudit.screenPeriod = lastPrintAudit.period;
+    return;
+  }
   paintIdentityTexturePersistent(dest, width, height, IDENTITY_TEXTURE_PERSISTENT);
   paintIdentityTextureReactive(dest, maskLayer, width, height, IDENTITY_TEXTURE_REACTIVE);
   lastIdentityTextureMs = performance.now() - t0;

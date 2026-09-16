@@ -2,10 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Print Texture Eval</title>
+    <title>Print Identity Eval</title>
     <style>
       body { margin: 20px 24px 64px; background: #0c0c0e; color: #eee; font: 12px/1.45 ui-monospace, monospace; }
       h1 { font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 8px; }
+      h2 { font-weight: 500; letter-spacing: 0.06em; margin: 28px 0 8px; }
       p, .note { color: #888; max-width: 92em; }
       .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
       button { background: #1b1b20; color: #ddd; border: 1px solid #333; padding: 5px 9px; cursor: pointer; }
@@ -19,14 +20,25 @@
       .zoom figcaption { color: #777; margin-top: 4px; }
       #hud, #perf { color: #9a9a9a; margin-top: 10px; white-space: pre-wrap; }
       #stage { display: none; }
+      .ux { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; }
+      .ux-card { width: 240px; border: 1px solid #2a2a30; padding: 12px 14px; background: #141418; }
+      .ux-card h3 { margin: 0 0 8px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; }
+      .ux-row { display: flex; justify-content: space-between; padding: 5px 0; border-top: 1px solid #222; }
+      .type-row { display: flex; gap: 16px; flex-wrap: wrap; }
+      .type-row figure { margin: 0; }
     </style>
   </head>
   <body>
-    <h1>Print / registration texture</h1>
-    <p>Eval only. Same photographic piece. A is the current digital cell stamp. B–D keep the authored plates and remove the raster. Product has no style selector.</p>
+    <h1>Print identity</h1>
+    <p>Eval only. One print language: fine AM screen, then registration, then Bloom reactivity. Historical occupancy stamps stay off the product path.</p>
     <div class="bar" id="opts"></div>
     <div id="hud"></div>
     <div id="sheets"></div>
+    <h2>Type / Signature — eval only</h2>
+    <p>Do not promote. Sequence Type motion is unchanged. A crisp, B tiny registration split, C split + ink softness.</p>
+    <div class="type-row" id="type-print"></div>
+    <h2>UX models</h2>
+    <div class="ux" id="ux"></div>
     <div id="perf"></div>
     <div id="stage"></div>
     <script type="module" src="/src/eval/printTexture.ts"></script>

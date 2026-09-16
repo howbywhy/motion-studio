@@ -53,6 +53,9 @@ app.innerHTML = `
       <div class="brand">Motion Studio <span class="brand-sub">—</span></div>
       <div class="topbar-right">
         <div class="behavior-tabs" id="behavior-tabs"></div>
+        <button type="button" class="diagnostic-toggle" id="print-toggle" title="Identity print: fine halftone reproduction and registration. An authored material, not an effect.">
+          Print
+        </button>
         <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global surface language: Registration — a quiet material impression over the complete composition">
           Registration
         </button>
@@ -1178,6 +1181,13 @@ function resolveSavedBwMode(state: { bwMode?: BwMode; bwOn: boolean }): BwMode {
   return state.bwOn ? "both" : "off";
 }
 
+const printBtn = document.querySelector<HTMLButtonElement>("#print-toggle")!;
+printBtn.classList.toggle("active", renderer.isPrintEnabled());
+printBtn.addEventListener("click", () => {
+  renderer.setPrintEnabled(!renderer.isPrintEnabled());
+  printBtn.classList.toggle("active", renderer.isPrintEnabled());
+});
+
 // --- global output-layer toggles: Registration, selective B&W. ---
 function syncRegistrationAmountUi(): void {
   const on = renderer.isRegistrationEnabled();
@@ -1624,6 +1634,8 @@ function applyProductDefault(): void {
   rebuildGraphicPanel();
   rebuildCompositionPanel();
   sequenceStrip.refresh();
+  renderer.setPrintEnabled(true);
+  printBtn.classList.toggle("active", true);
   renderer.setRegistrationEnabled(true);
   renderer.setRegistrationAmount(REGISTRATION_AMOUNT_DEFAULT);
   syncRegistrationAmountUi();
