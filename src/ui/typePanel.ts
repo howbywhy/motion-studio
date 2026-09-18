@@ -366,6 +366,12 @@ function styleLabel(style: TypeStyle): string {
   return "Headline";
 }
 
+function textPlaceholder(style: TypeStyle): string {
+  if (style === "subtitle") return "One line = one cue";
+  if (style === "paragraph") return "Type paragraph copy…";
+  return "Type headline copy…";
+}
+
 function blockSummary(block: TypeBlock): string {
   const parts = [styleLabel(block.composition)];
   if (block.composition === "headline" && authoredLineCount(block.text) >= 2 && block.distribution === "between") {
@@ -463,7 +469,7 @@ function buildBlock(
   const textarea = document.createElement("textarea");
   textarea.className = "type-text";
   textarea.rows = initial.composition === "subtitle" ? 4 : 2;
-  textarea.placeholder = initial.composition === "subtitle" ? "One line = one cue" : "";
+  textarea.placeholder = textPlaceholder(initial.composition);
   textarea.value = initial.text;
   textarea.addEventListener("input", () => {
     fitTextarea(textarea);
@@ -630,7 +636,7 @@ function buildBlock(
     widthSeg.parentElement!.hidden = style !== "paragraph" && style !== "subtitle";
     padding.row.hidden = style === "subtitle";
     textLab.textContent = style === "subtitle" ? "Cues" : "Copy";
-    textarea.placeholder = style === "subtitle" ? "One line = one cue" : "";
+    textarea.placeholder = textPlaceholder(style);
     textarea.rows = style === "subtitle" ? 4 : 2;
   }
 
@@ -1008,6 +1014,7 @@ export function buildTypePanel(
     const ta = document.createElement("textarea");
     ta.className = "type-text";
     ta.rows = 2;
+    ta.placeholder = "Frame copy…";
     ta.value = copy;
     ta.addEventListener("focus", () => onSelectState?.(index));
     ta.addEventListener("input", () => {

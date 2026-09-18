@@ -1146,7 +1146,18 @@ body {
 }
 
 .type-block:not(.is-collapsed):not(.is-off) .type-block-body {
-  margin-top: 9px;
+  margin-top: 11px;
+  padding-left: 11px;
+  padding-bottom: 2px;
+  border-left: 1px solid var(--panel-border);
+}
+
+.type-block-body .control-row {
+  margin-bottom: 12px;
+}
+
+.type-block-body .control-row:last-child {
+  margin-bottom: 0;
 }
 
 .type-ctx[hidden],
@@ -1529,15 +1540,91 @@ body {
 
 .control-input-row input[type="range"] {
   flex: 1;
-  accent-color: var(--text);
 }
 
 .control-value {
   font-size: var(--fs-md);
   color: var(--text-dim);
-  min-width: 42px;
+  min-width: 34px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Custom range-input rendering, used everywhere (Composition, Registration,
+   Type, Mark, Bloom, Phase/Loop). The unstyled native track+thumb render
+   inconsistently across browsers and, in Chromium with only accent-color
+   set, as an oversized blunt bar -- this reuses the thin-track/round-dot
+   language already established by the sequence-window and XY-pad handles
+   so every slider in the app reads as the same control. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--panel-border);
+  border-radius: 1px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--bg);
+  transition: transform 0.12s ease;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 2px;
+  background: var(--panel-border);
+  border-radius: 1px;
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 2px;
+  background: var(--panel-border);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+input[type="range"]:focus {
+  outline: none;
+}
+
+input[type="range"]:disabled {
+  cursor: default;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  background: var(--text-dim);
+}
+
+input[type="range"]:disabled::-moz-range-thumb {
+  background: var(--text-dim);
 }
 
 .control-row-inert {
