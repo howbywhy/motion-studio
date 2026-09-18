@@ -1235,6 +1235,56 @@ body {
   fill: var(--text);
 }
 
+.type-pos-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.type-pos-label-row label {
+  margin-bottom: 0;
+}
+
+.type-pos-reset {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
+}
+
+.type-pos-reset:hover {
+  color: var(--text);
+}
+
+.type-pos-svg {
+  display: block;
+  margin-top: 7px;
+  border-radius: var(--radius-sm);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.type-pos-frame {
+  fill: var(--bg);
+  stroke: var(--panel-border);
+}
+
+.type-pos-grid {
+  stroke: var(--panel-border);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+.type-pos-puck {
+  fill: var(--text);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
 @font-face {
   font-family: "Switzer";
   src: url("/fonts/Switzer-Variable.woff2") format("woff2"),

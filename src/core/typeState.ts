@@ -36,6 +36,12 @@ export interface TypeBlock {
   textAlign: TypeTextAlign;
   /** Frame align inside the padded optical frame. COMPAT name `anchor`. */
   anchor: TypeAnchor;
+  /** Fine nudge from the anchor's own position, as % of frame width/height
+   * (-50..50, same scale as `alignFromAnchor`'s x/y). Applied as a pixel
+   * translate at paint time -- never affects text-fit/wrap, so it stays
+   * safe (and frame-clipped) at any value. */
+  offsetX: number;
+  offsetY: number;
   scale: number;
   tracking: number;
   gap: number;
@@ -374,6 +380,8 @@ export function defaultTypeBlock(enabled: boolean, style: TypeStyle = "headline"
     composition: style,
     textAlign: style === "subtitle" ? "center" : "left",
     anchor: defs.anchor,
+    offsetX: 0,
+    offsetY: 0,
     scale: defs.scale,
     tracking: defs.tracking,
     gap: defs.gap,
@@ -416,6 +424,8 @@ export function clampTypeBlock(raw: Partial<TypeBlock> | null | undefined, fallb
     composition,
     textAlign: parseTextAlign((raw as { textAlign?: unknown }).textAlign, d.textAlign),
     anchor,
+    offsetX: num((raw as { offsetX?: unknown }).offsetX, -50, 50, d.offsetX),
+    offsetY: num((raw as { offsetY?: unknown }).offsetY, -50, 50, d.offsetY),
     scale: num(raw.scale, 0, 100, d.scale),
     tracking,
     gap: num((raw as { gap?: unknown }).gap, 0, 100, d.gap),
@@ -467,6 +477,8 @@ const BLOCK_PATCH_KEYS = [
   "composition",
   "textAlign",
   "anchor",
+  "offsetX",
+  "offsetY",
   "scale",
   "tracking",
   "gap",

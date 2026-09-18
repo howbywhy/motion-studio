@@ -236,89 +236,114 @@ function nearestAnchor(nx: number, ny: number): TypeAnchor {
   return `${row}${col}` as TypeAnchor;
 }
 
-function frameAlignPad(
+/** Zone x/y for the anchor's own column/row, in the same -50..50 space as
+ * `alignFromAnchor` -- the nudge is always stored as the remainder past
+ * this, so a drag landing dead-center of a zone yields offset 0 and an
+ * old save (offsetX/offsetY absent, defaulting to 0) renders at exactly
+ * the classic anchor position. */
+function zoneOf(anchor: TypeAnchor): { x: number; y: number } {
+  const x = anchor[1] === "l" ? -50 : anchor[1] === "r" ? 50 : 0;
+  const y = anchor[0] === "t" ? -50 : anchor[0] === "b" ? 50 : 0;
+  return { x, y };
+}
+
+function positionPad(
   parent: HTMLElement,
   current: TypeAnchor,
-  onChange: (anchor: TypeAnchor) => void,
-): { set: (anchor: TypeAnchor) => void } {
+  currentOffsetX: number,
+  currentOffsetY: number,
+  onChange: (anchor: TypeAnchor, offsetX: number, offsetY: number) => void,
+): { set: (anchor: TypeAnchor, offsetX: number, offsetY: number) => void } {
   const row = document.createElement("div");
-  row.className = "control-row type-xy-row";
+  row.className = "control-row type-pos-row";
+  const labRow = document.createElement("div");
+  labRow.className = "type-pos-label-row";
   const lab = document.createElement("label");
-  lab.textContent = "Frame Align";
-  row.appendChild(lab);
+  lab.textContent = "Position";
+  labRow.appendChild(lab);
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "type-pos-reset";
+  reset.title = "Snap back to the exact anchor position";
+  reset.textContent = "Reset";
+  labRow.appendChild(reset);
+  row.appendChild(labRow);
 
-  const SIZE = 84;
-  const PAD = 12;
-  const CELL = (SIZE - PAD * 2) / 2;
+  const W = 84;
+  const H = 105;
+  const PAD = 10;
+  const halfW = W / 2 - PAD;
+  const halfH = H / 2 - PAD;
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${SIZE} ${SIZE}`);
-  svg.setAttribute("width", String(SIZE));
-  svg.setAttribute("height", String(SIZE));
-  svg.classList.add("type-xy-svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  svg.classList.add("type-pos-svg");
   svg.setAttribute("role", "group");
-  svg.setAttribute("aria-label", "Frame Align");
+  svg.setAttribute("aria-label", "Type position");
 
   const bg = document.createElementNS(svgNS, "rect");
   bg.setAttribute("x", "1");
   bg.setAttribute("y", "1");
-  bg.setAttribute("width", String(SIZE - 2));
-  bg.setAttribute("height", String(SIZE - 2));
+  bg.setAttribute("width", String(W - 2));
+  bg.setAttribute("height", String(H - 2));
   bg.setAttribute("rx", "5");
-  bg.setAttribute("class", "type-xy-frame");
+  bg.setAttribute("class", "type-pos-frame");
   svg.appendChild(bg);
 
-  const cells = new Map<TypeAnchor, SVGRectElement>();
-  const dots = new Map<TypeAnchor, SVGCircleElement>();
-  for (const anchor of TYPE_ANCHORS) {
-    const col = anchor[1] === "l" ? 0 : anchor[1] === "r" ? 2 : 1;
-    const rowI = anchor[0] === "t" ? 0 : anchor[0] === "b" ? 2 : 1;
-    const cx = PAD + (col * (SIZE - PAD * 2)) / 2;
-    const cy = PAD + (rowI * (SIZE - PAD * 2)) / 2;
-    const cell = document.createElementNS(svgNS, "rect");
-    const half = CELL * 0.42;
-    cell.setAttribute("x", String(cx - half));
-    cell.setAttribute("y", String(cy - half));
-    cell.setAttribute("width", String(half * 2));
-    cell.setAttribute("height", String(half * 2));
-    cell.setAttribute("rx", "3");
-    cell.setAttribute("class", "type-anchor-cell");
-    cell.setAttribute("data-anchor", anchor);
-    svg.appendChild(cell);
-    cells.set(anchor, cell);
-
-    const dot = document.createElementNS(svgNS, "circle");
-    dot.setAttribute("cx", String(cx));
-    dot.setAttribute("cy", String(cy));
-    dot.setAttribute("r", "3.5");
-    dot.setAttribute("data-anchor", anchor);
-    dot.setAttribute("class", "type-anchor-dot");
-    svg.appendChild(dot);
-    dots.set(anchor, dot);
+  for (const fx of [1 / 3, 2 / 3]) {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", String(W * fx));
+    line.setAttribute("y1", "1");
+    line.setAttribute("x2", String(W * fx));
+    line.setAttribute("y2", String(H - 1));
+    line.setAttribute("class", "type-pos-grid");
+    svg.appendChild(line);
+  }
+  for (const fy of [1 / 3, 2 / 3]) {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", "1");
+    line.setAttribute("y1", String(H * fy));
+    line.setAttribute("x2", String(W - 1));
+    line.setAttribute("y2", String(H * fy));
+    line.setAttribute("class", "type-pos-grid");
+    svg.appendChild(line);
   }
 
-  function mark(anchor: TypeAnchor): void {
-    for (const [id, cell] of cells) cell.classList.toggle("active", id === anchor);
-    for (const [id, dot] of dots) dot.classList.toggle("active", id === anchor);
-  }
-  mark(current);
+  const puck = document.createElementNS(svgNS, "circle");
+  puck.setAttribute("r", "4.5");
+  puck.setAttribute("class", "type-pos-puck");
+  svg.appendChild(puck);
 
-  function hover(anchor: TypeAnchor | null): void {
-    for (const [id, cell] of cells) cell.classList.toggle("hover", id === anchor);
-    for (const [id, dot] of dots) dot.classList.toggle("hover", id === anchor);
+  function place(nx: number, ny: number): void {
+    const px = W / 2 + (nx / 50) * halfW;
+    const py = H / 2 + (ny / 50) * halfH;
+    puck.setAttribute("cx", String(px));
+    puck.setAttribute("cy", String(py));
   }
+
+  let liveAnchor = current;
+
+  function set(anchor: TypeAnchor, offsetX: number, offsetY: number): void {
+    liveAnchor = anchor;
+    const zone = zoneOf(anchor);
+    place(zone.x + offsetX, zone.y + offsetY);
+  }
+  set(current, currentOffsetX, currentOffsetY);
 
   function fromPointer(clientX: number, clientY: number, commit: boolean): void {
     const rect = svg.getBoundingClientRect();
-    const px = ((clientX - rect.left) / rect.width) * SIZE - SIZE / 2;
-    const py = ((clientY - rect.top) / rect.height) * SIZE - SIZE / 2;
-    const nx = (px / (SIZE / 2 - PAD)) * 50;
-    const ny = (py / (SIZE / 2 - PAD)) * 50;
-    const next = nearestAnchor(nx, ny);
-    hover(next);
+    const px = ((clientX - rect.left) / rect.width) * W - W / 2;
+    const py = ((clientY - rect.top) / rect.height) * H - H / 2;
+    const nx = Math.min(50, Math.max(-50, (px / halfW) * 50));
+    const ny = Math.min(50, Math.max(-50, (py / halfH) * 50));
+    place(nx, ny);
     if (commit) {
-      mark(next);
-      onChange(next);
+      const anchor = nearestAnchor(nx, ny);
+      liveAnchor = anchor;
+      const zone = zoneOf(anchor);
+      onChange(anchor, nx - zone.x, ny - zone.y);
     }
   }
 
@@ -329,23 +354,25 @@ function frameAlignPad(
     fromPointer(e.clientX, e.clientY, true);
   });
   svg.addEventListener("pointermove", (e) => {
-    fromPointer(e.clientX, e.clientY, dragging);
-  });
-  svg.addEventListener("pointerleave", () => {
-    if (!dragging) hover(null);
+    if (!dragging) return;
+    fromPointer(e.clientX, e.clientY, true);
   });
   const stop = (e: PointerEvent): void => {
     if (!dragging) return;
     dragging = false;
     svg.releasePointerCapture(e.pointerId);
-    hover(null);
   };
   svg.addEventListener("pointerup", stop);
   svg.addEventListener("pointercancel", stop);
 
+  reset.addEventListener("click", () => {
+    set(liveAnchor, 0, 0);
+    onChange(liveAnchor, 0, 0);
+  });
+
   row.appendChild(svg);
   parent.appendChild(row);
-  return { set: mark };
+  return { set };
 }
 
 function markSeg(el: HTMLDivElement, value: string): void {
@@ -483,6 +510,8 @@ function buildBlock(
 
   let currentStyle = initial.composition;
   let currentAnchor = initial.anchor;
+  let currentOffsetX = initial.offsetX;
+  let currentOffsetY = initial.offsetY;
   let currentDist: TypeDistribution = initial.distribution;
 
   const styleSeg = seg(body, "Style", [
@@ -525,10 +554,12 @@ function buildBlock(
     { value: "right", label: "Right" },
   ], initial.textAlign, (v) => onChange({ activeIndex: index, textAlign: v as TypeTextAlign }));
 
-  const pos = frameAlignPad(body, initial.anchor, (anchor) => {
+  const pos = positionPad(body, initial.anchor, initial.offsetX, initial.offsetY, (anchor, offsetX, offsetY) => {
     currentAnchor = anchor;
+    currentOffsetX = offsetX;
+    currentOffsetY = offsetY;
     refreshSummary();
-    onChange({ activeIndex: index, anchor });
+    onChange({ activeIndex: index, anchor, offsetX, offsetY });
   });
 
   const widthSeg = seg(body, "Width", [
@@ -617,7 +648,7 @@ function buildBlock(
     if (patch.column) markSeg(widthSeg, patch.column);
     if (patch.anchor) {
       currentAnchor = patch.anchor;
-      pos.set(patch.anchor);
+      pos.set(patch.anchor, currentOffsetX, currentOffsetY);
     }
     if (patch.blendMode) blend.value = patch.blendMode;
     if (patch.color) color.value = patch.color;
@@ -688,7 +719,9 @@ function buildBlock(
       padding.input.value = String(block.padding);
       padding.valueEl.textContent = String(block.padding);
       currentAnchor = block.anchor;
-      pos.set(block.anchor);
+      currentOffsetX = block.offsetX;
+      currentOffsetY = block.offsetY;
+      pos.set(block.anchor, block.offsetX, block.offsetY);
       color.value = block.color;
       blend.value = block.blendMode;
       paintContext();
