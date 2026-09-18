@@ -200,7 +200,7 @@ export function buildSequenceRhythmStrip(
     add.addEventListener("click", () => opts.onAdd());
     const reset = document.createElement("button");
     reset.type = "button";
-    reset.className = "sequence-rhythm-reset";
+    reset.className = "reset-link";
     reset.textContent = "Reset timing";
     reset.addEventListener("click", () => opts.onResetTiming());
     tools.appendChild(add);

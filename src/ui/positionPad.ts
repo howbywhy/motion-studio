@@ -29,6 +29,7 @@ export function buildPositionPad(
   currentOffsetX: number,
   currentOffsetY: number,
   onChange: (anchor: TypeAnchor, offsetX: number, offsetY: number) => void,
+  extraControl?: HTMLElement,
 ): { set: (anchor: TypeAnchor, offsetX: number, offsetY: number) => void } {
   const row = document.createElement("div");
   row.className = "control-row type-pos-row";
@@ -37,12 +38,16 @@ export function buildPositionPad(
   const lab = document.createElement("label");
   lab.textContent = "Position";
   labRow.appendChild(lab);
+  const actions = document.createElement("div");
+  actions.className = "type-pos-actions";
+  if (extraControl) actions.appendChild(extraControl);
   const reset = document.createElement("button");
   reset.type = "button";
-  reset.className = "type-pos-reset";
+  reset.className = "reset-link";
   reset.title = "Snap back to the exact anchor position";
   reset.textContent = "Reset";
-  labRow.appendChild(reset);
+  actions.appendChild(reset);
+  labRow.appendChild(actions);
   row.appendChild(labRow);
 
   const W = 84;

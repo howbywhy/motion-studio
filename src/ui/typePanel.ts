@@ -3,10 +3,10 @@ import {
   authoredLineCount,
   clampTypeState,
   defaultTypeState,
-  TYPE_ANCHORS,
   TYPE_BLEND_MODES,
   TYPE_WEIGHT_MAX,
   TYPE_WEIGHT_MIN,
+  type TypeAnchor,
   type TypeBlendMode,
   type TypeBlock,
   type TypeColumn,
@@ -32,6 +32,7 @@ import {
   typePageCuts,
 } from "../core/typePages";
 import { buildPositionPad } from "./positionPad";
+import { buildEditableValue } from "./editableValue";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
   normal: "Normal",
@@ -100,33 +101,31 @@ function slider(
   step: number,
   value: number,
   onInput: (v: number) => void,
-): { row: HTMLDivElement; input: HTMLInputElement; valueEl: HTMLSpanElement } {
+): { row: HTMLDivElement; input: HTMLInputElement; sync: (v: number) => void } {
   const row = document.createElement("div");
   row.className = "control-row";
   const lab = document.createElement("label");
   lab.textContent = label;
   row.appendChild(lab);
-  const valueEl = document.createElement("span");
-  valueEl.className = "control-value";
-  valueEl.textContent = String(value);
   const input = document.createElement("input");
   input.type = "range";
   input.min = String(min);
   input.max = String(max);
   input.step = String(step);
   input.value = String(value);
+  const { row: valueRow, sync } = buildEditableValue(input, onInput, label === "Hold Length" ? "×" : undefined);
   input.addEventListener("input", () => {
     const v = parseFloat(input.value);
-    valueEl.textContent = `${Number(v.toFixed(step < 1 ? 2 : 0))}${label === "Hold Length" ? "×" : ""}`;
+    sync(v);
     onInput(v);
   });
   const inputRow = document.createElement("div");
   inputRow.className = "control-input-row";
   inputRow.appendChild(input);
-  inputRow.appendChild(valueEl);
+  inputRow.appendChild(valueRow);
   row.appendChild(inputRow);
   parent.appendChild(row);
-  return { row, input, valueEl };
+  return { row, input, sync };
 }
 
 function pct(v: number): string {
@@ -488,34 +487,34 @@ function buildBlock(
 
   function setTracking(v: number): void {
     trackingH.input.value = String(v);
-    trackingH.valueEl.textContent = String(v);
+    trackingH.sync(v);
     trackingP.input.value = String(v);
-    trackingP.valueEl.textContent = String(v);
+    trackingP.sync(v);
     trackingF.input.value = String(v);
-    trackingF.valueEl.textContent = String(v);
+    trackingF.sync(v);
   }
 
   function applyPatchToControls(patch: Partial<TypeBlock>): void {
     if (patch.scale !== undefined) {
       scale.input.value = String(patch.scale);
-      scale.valueEl.textContent = String(patch.scale);
+      scale.sync(patch.scale);
     }
     if (patch.weight !== undefined) {
       weight.input.value = String(patch.weight);
-      weight.valueEl.textContent = String(patch.weight);
+      weight.sync(patch.weight);
     }
     if (patch.tracking !== undefined) setTracking(patch.tracking);
     if (patch.gap !== undefined) {
       gap.input.value = String(patch.gap);
-      gap.valueEl.textContent = String(patch.gap);
+      gap.sync(patch.gap);
     }
     if (patch.leading !== undefined) {
       leading.input.value = String(patch.leading);
-      leading.valueEl.textContent = String(patch.leading);
+      leading.sync(patch.leading);
     }
     if (patch.padding !== undefined) {
       padding.input.value = String(patch.padding);
-      padding.valueEl.textContent = String(patch.padding);
+      padding.sync(patch.padding);
     }
     if (patch.distribution) markSeg(distSeg, patch.distribution);
     if (patch.column) markSeg(widthSeg, patch.column);
@@ -581,16 +580,16 @@ function buildBlock(
       markSeg(distSeg, block.distribution);
       markSeg(widthSeg, block.column);
       scale.input.value = String(block.scale);
-      scale.valueEl.textContent = String(block.scale);
+      scale.sync(block.scale);
       weight.input.value = String(block.weight);
-      weight.valueEl.textContent = String(block.weight);
+      weight.sync(block.weight);
       setTracking(block.tracking);
       gap.input.value = String(block.gap);
-      gap.valueEl.textContent = String(block.gap);
+      gap.sync(block.gap);
       leading.input.value = String(block.leading);
-      leading.valueEl.textContent = String(block.leading);
+      leading.sync(block.leading);
       padding.input.value = String(block.padding);
-      padding.valueEl.textContent = String(block.padding);
+      padding.sync(block.padding);
       currentAnchor = block.anchor;
       currentOffsetX = block.offsetX;
       currentOffsetY = block.offsetY;
@@ -676,6 +675,11 @@ export function buildTypePanel(
   container.appendChild(head);
   container.classList.toggle("type-disabled", !state.enabled);
 
+  const desc = document.createElement("p");
+  desc.className = "behavior-desc";
+  desc.textContent = "Editorial typography -- headlines, paragraphs and captions composed over the frame, tied to the shared clock.";
+  container.appendChild(desc);
+
   const modeHost = document.createElement("div");
   modeHost.className = "type-mode-host";
   container.appendChild(modeHost);
@@ -705,6 +709,10 @@ export function buildTypePanel(
   const slotsHost = document.createElement("div");
   slotsHost.className = "type-sequence-slots";
   body.appendChild(slotsHost);
+  const slotPosPads = new Map<
+    number,
+    { set: (anchor: TypeAnchor, offsetX: number, offsetY: number) => void; inheritBtn: HTMLButtonElement }
+  >();
 
   const statesHost = document.createElement("div");
   statesHost.className = "type-states";
@@ -878,7 +886,7 @@ export function buildTypePanel(
     holdOn.classList.toggle("active", held);
     holdLen.row.hidden = !held;
     holdLen.input.value = String(len);
-    holdLen.valueEl.textContent = `${len % 1 === 0 ? len.toFixed(1) : len.toFixed(2)}×`;
+    holdLen.sync(len);
     const canPin = n > 1 && state.selected >= 1;
     const pin = canPin ? state.pinnedCutPhases[state.selected] : null;
     const pinned = typeof pin === "number";
@@ -889,13 +897,13 @@ export function buildTypePanel(
     if (pinned) {
       const v = Math.round(pin * 100);
       pinPhase.input.value = String(v);
-      pinPhase.valueEl.textContent = String(v);
+      pinPhase.sync(v);
     }
     windowUi.row.hidden = false;
     speed.row.hidden = n <= 1;
     windowUi.set(state.sequenceStart, state.sequenceStop);
     speed.input.value = String(Math.round(state.sequenceSpeed));
-    speed.valueEl.textContent = String(Math.round(state.sequenceSpeed));
+    speed.sync(Math.round(state.sequenceSpeed));
   }
 
   function sequenceUiActive(): boolean {
@@ -972,12 +980,7 @@ export function buildTypePanel(
     row.appendChild(sizeRow);
 
     const posRow = document.createElement("div");
-    posRow.className = "control-row type-sequence-compose";
-    const posLab = document.createElement("label");
-    posLab.textContent = "Position";
-    posRow.appendChild(posLab);
-    const posWrap = document.createElement("div");
-    posWrap.className = "type-sequence-pos";
+    posRow.className = "type-sequence-pos-row";
     const inheritBtn = document.createElement("button");
     inheritBtn.type = "button";
     inheritBtn.className = "type-sequence-inherit";
@@ -988,21 +991,19 @@ export function buildTypePanel(
       onSelectState?.(index);
       onChange({ sequenceAnchorAt: { index, anchor: "inherit" } });
     });
-    posWrap.appendChild(inheritBtn);
-    for (const a of TYPE_ANCHORS) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "type-sequence-anchor";
-      btn.textContent = a.toUpperCase();
-      btn.setAttribute("data-anchor", a);
-      btn.classList.toggle("active", anchor === a);
-      btn.addEventListener("click", () => {
+
+    const pad = buildPositionPad(
+      posRow,
+      anchor === "inherit" ? "mc" : anchor,
+      0,
+      0,
+      (nextAnchor) => {
         onSelectState?.(index);
-        onChange({ sequenceAnchorAt: { index, anchor: a } });
-      });
-      posWrap.appendChild(btn);
-    }
-    posRow.appendChild(posWrap);
+        onChange({ sequenceAnchorAt: { index, anchor: nextAnchor } });
+      },
+      inheritBtn,
+    );
+    slotPosPads.set(index, { ...pad, inheritBtn });
     row.appendChild(posRow);
 
     fitTextarea(ta);
@@ -1026,6 +1027,7 @@ export function buildTypePanel(
       labels.every((label, i) => label === (sources[i]?.label ?? ""));
     if (!same) {
       slotsHost.innerHTML = "";
+      slotPosPads.clear();
       for (let i = 0; i < sources.length; i++) {
         slotsHost.appendChild(buildSlot(i, sources[i]!.label, copies[i] ?? ""));
       }
@@ -1047,10 +1049,11 @@ export function buildTypePanel(
         if (sizeInput && document.activeElement !== sizeInput && sizeInput.value !== String(stored)) {
           sizeInput.value = String(stored);
         }
-        row.querySelector(".type-sequence-inherit")?.classList.toggle("active", anchor === "inherit");
-        row.querySelectorAll<HTMLButtonElement>(".type-sequence-anchor").forEach((btn) => {
-          btn.classList.toggle("active", btn.getAttribute("data-anchor") === anchor);
-        });
+        const pad = slotPosPads.get(i);
+        if (pad) {
+          pad.inheritBtn.classList.toggle("active", anchor === "inherit");
+          pad.set(anchor === "inherit" ? "mc" : anchor, 0, 0);
+        }
       });
     }
     paintActivePair();

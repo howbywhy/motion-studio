@@ -6,6 +6,7 @@ import {
   type MarkState,
 } from "../core/markState";
 import { buildPositionPad } from "./positionPad";
+import { buildEditableValue } from "./editableValue";
 
 function seg(
   parent: HTMLElement,
@@ -48,35 +49,32 @@ function slider(
   max: number,
   step: number,
   value: number,
-  format: (v: number) => string,
   onInput: (v: number) => void,
-): { row: HTMLDivElement; input: HTMLInputElement; valueEl: HTMLSpanElement } {
+): { row: HTMLDivElement; input: HTMLInputElement } {
   const row = document.createElement("div");
   row.className = "control-row";
   const lab = document.createElement("label");
   lab.textContent = label;
   row.appendChild(lab);
-  const valueEl = document.createElement("span");
-  valueEl.className = "control-value";
-  valueEl.textContent = format(value);
   const input = document.createElement("input");
   input.type = "range";
   input.min = String(min);
   input.max = String(max);
   input.step = String(step);
   input.value = String(value);
+  const { row: valueRow, sync } = buildEditableValue(input, onInput);
   input.addEventListener("input", () => {
     const v = parseFloat(input.value);
-    valueEl.textContent = format(v);
+    sync(v);
     onInput(v);
   });
   const inputRow = document.createElement("div");
   inputRow.className = "control-input-row";
   inputRow.appendChild(input);
-  inputRow.appendChild(valueEl);
+  inputRow.appendChild(valueRow);
   row.appendChild(inputRow);
   parent.appendChild(row);
-  return { row, input, valueEl };
+  return { row, input };
 }
 
 export function mountMarkPanel(
@@ -101,6 +99,11 @@ export function mountMarkPanel(
     label.textContent = "Mark";
     labelRow.appendChild(label);
     host.appendChild(labelRow);
+
+    const desc = document.createElement("p");
+    desc.className = "behavior-desc";
+    desc.textContent = "An animated identity event -- the wordmark or symbol cutting into the frame at a chosen moment.";
+    host.appendChild(desc);
 
     seg(host, "Mark", [
       { value: "off", label: "Off" },
@@ -139,13 +142,13 @@ export function mountMarkPanel(
       apply({ source: v as MarkSource });
     });
 
-    slider(fields, "Mark Start", 0, 100, 1, Math.round(state.sequenceStart * 100), (n) => String(Math.round(n)), (v) => {
+    slider(fields, "Mark Start", 0, 100, 1, Math.round(state.sequenceStart * 100), (v) => {
       set(clampMarkState({ ...get(), sequenceStart: v / 100 }));
     });
-    slider(fields, "Mark Stop", 0, 100, 1, Math.round(state.sequenceStop * 100), (n) => String(Math.round(n)), (v) => {
+    slider(fields, "Mark Stop", 0, 100, 1, Math.round(state.sequenceStop * 100), (v) => {
       set(clampMarkState({ ...get(), sequenceStop: v / 100 }));
     });
-    slider(fields, "Scale", 0, 100, 1, state.scale, (n) => String(Math.round(n)), (v) => {
+    slider(fields, "Scale", 0, 100, 1, state.scale, (v) => {
       set(clampMarkState({ ...get(), scale: v }));
     });
     buildPositionPad(fields, state.anchor, state.offsetX, state.offsetY, (anchor, offsetX, offsetY) => {

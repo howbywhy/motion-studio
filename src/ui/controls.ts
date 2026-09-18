@@ -1,4 +1,5 @@
 import type { ParamDef, ParamValues } from "../core/types";
+import { buildEditableValue } from "./editableValue";
 
 /** Builds a control panel for a param schema into `container`. `values` is
  * read ONLY to set each control's initial displayed value at build time —
@@ -38,11 +39,6 @@ export function buildControls(
     row.appendChild(labelEl);
 
     if (def.type === "range") {
-      const valueEl = document.createElement("span");
-      valueEl.className = "control-value";
-      const fmt = (v: number) => `${Number(v.toFixed(2))}${def.unit ?? ""}`;
-      valueEl.textContent = fmt(values[def.key] as number);
-
       const input = document.createElement("input");
       input.type = "range";
       input.min = String(def.min);
@@ -50,16 +46,22 @@ export function buildControls(
       input.step = String(def.step);
       input.value = String(values[def.key]);
 
+      const { row: valueRow, sync } = buildEditableValue(
+        input,
+        (v) => onChange({ [def.key]: v }),
+        def.unit,
+      );
+
       input.addEventListener("input", () => {
         const v = parseFloat(input.value);
-        valueEl.textContent = fmt(v);
+        sync(v);
         onChange({ [def.key]: v });
       });
 
       const inputRow = document.createElement("div");
       inputRow.className = "control-input-row";
       inputRow.appendChild(input);
-      inputRow.appendChild(valueEl);
+      inputRow.appendChild(valueRow);
 
       row.appendChild(inputRow);
     } else {

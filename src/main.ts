@@ -6,6 +6,8 @@ import { loadMediaFile } from "./ui/mediaInput";
 import type { ExportFormat, ExportFps, ExportQuality, ExportSize } from "./core/exportTypes";
 import { buildControls } from "./ui/controls";
 import { buildXYPad } from "./ui/xyPad";
+import { buildEditableValue } from "./ui/editableValue";
+import { buildCartesianPad } from "./ui/cartesianPad";
 import { buildPhaseControl } from "./ui/phaseControl";
 import { buildLoopLengthControl } from "./ui/loopLengthControl";
 import { buildSequenceRhythmStrip } from "./ui/sequenceRhythmStrip";
@@ -29,7 +31,7 @@ import { asGraphic, createGraphicAsset } from "./sources/graphicAsset";
 import { DEFAULT_FIELD, FIELD_TERRITORIES } from "./sources/field";
 import { BEHAVIORS, PRODUCT_BEHAVIORS } from "./behaviors/index";
 import { SHIFT_EXPRESSION_COPY } from "./behaviors/shift";
-import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type SelectParamDef } from "./core/types";
+import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type RangeParamDef, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
 import { generateRandomisation, newRandomisationSeed } from "./core/randomise";
 import { clampSequenceWeights } from "./core/sequenceRhythm";
@@ -51,15 +53,17 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
   <div class="app">
     <header class="topbar">
-      <div class="brand">Motion Studio <span class="brand-sub">—</span></div>
+      <div class="brand">Made By Madelen <span class="brand-sub">—</span></div>
       <div class="topbar-right">
         <div class="behavior-tabs" id="behavior-tabs"></div>
+        <div class="topbar-divider"></div>
         <button type="button" class="diagnostic-toggle" id="print-toggle" title="Identity print: fine halftone reproduction and registration. An authored material, not an effect.">
           Print
         </button>
         <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global surface language: Registration — a quiet material impression over the complete composition">
           Registration
         </button>
+        <div class="topbar-divider"></div>
         <div class="seg-toggle bw-toggle" id="bw-toggle" title="Selective B&amp;W on the active pair, applied before Bloom">
           <span class="bw-label">B&amp;W</span>
           <button type="button" data-value="off" class="active">Off</button>
@@ -164,7 +168,6 @@ app.innerHTML = `
               <label for="registration-amount">Amount</label>
               <div class="control-input-row">
                 <input type="range" id="registration-amount" min="0" max="100" step="1" value="50" />
-                <span class="control-value" id="registration-amount-value">50</span>
               </div>
             </div>
           </div>
@@ -183,8 +186,9 @@ app.innerHTML = `
           <div class="saved-panel">
             <div class="panel-label-row">
               <label class="panel-label">Saved States</label>
-              <button type="button" class="reset-btn" id="save-state-btn">Save Current</button>
+              <button type="button" class="reset-btn" id="save-state-btn" title="Session-only -- cleared when you close this tab.">Save Current</button>
             </div>
+            <p class="control-note">Cleared when you close this tab -- use Save Project above to keep your work.</p>
             <div id="saved-states-list" class="saved-states-list"></div>
             <p class="saved-states-empty" id="saved-states-empty">No saved states yet.</p>
           </div>
@@ -242,7 +246,11 @@ const sourceRemoveBtn = document.querySelector<HTMLButtonElement>("#source-remov
 const registrationBtn = document.querySelector<HTMLButtonElement>("#registration-toggle")!;
 const registrationAmountPanel = document.querySelector<HTMLDivElement>("#registration-amount-panel")!;
 const registrationAmountInput = document.querySelector<HTMLInputElement>("#registration-amount")!;
-const registrationAmountValue = document.querySelector<HTMLSpanElement>("#registration-amount-value")!;
+const { row: registrationAmountValueRow, sync: syncRegistrationAmountValue } = buildEditableValue(
+  registrationAmountInput,
+  (v) => renderer.setRegistrationAmount(clampRegistrationAmount(v)),
+);
+registrationAmountInput.parentElement!.appendChild(registrationAmountValueRow);
 const bwToggle = document.querySelector<HTMLDivElement>("#bw-toggle")!;
 const treatmentPanel = document.querySelector<HTMLDivElement>("#treatment-panel")!;
 const treatmentLabel = document.querySelector<HTMLLabelElement>("#treatment-label")!;
@@ -567,11 +575,9 @@ renderer.onFrame = () => {
   typeUi.setContext(typePanelContext());
 };
 
-const transformParamDefs: ParamDef[] = [
-  { type: "range", key: "scale", label: "Source Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" },
-  { type: "range", key: "x", label: "Source Position X", min: -100, max: 100, step: 1, default: 0, unit: "%" },
-  { type: "range", key: "y", label: "Source Position Y", min: -100, max: 100, step: 1, default: 0, unit: "%" },
-];
+const scaleParamDef: ParamDef = { type: "range", key: "scale", label: "Source Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" };
+const sourceXDef: RangeParamDef = { type: "range", key: "x", label: "X", min: -100, max: 100, step: 1, default: 0, unit: "%" };
+const sourceYDef: RangeParamDef = { type: "range", key: "y", label: "Y", min: -100, max: 100, step: 1, default: 0, unit: "%" };
 
 function compositionValues(): ParamValues {
   const item = selectedItem();
@@ -596,7 +602,8 @@ function rebuildCompositionPanel(): void {
   compositionControlsEl.hidden = isField;
   compositionResetBtn.hidden = isField;
   if (isField) return;
-  buildControls(compositionControlsEl, transformParamDefs, compositionValues(), onCompositionChange);
+  buildControls(compositionControlsEl, [scaleParamDef], compositionValues(), onCompositionChange);
+  buildCartesianPad(compositionControlsEl, "Source Position", sourceXDef, sourceYDef, compositionValues(), onCompositionChange);
 }
 
 compositionResetBtn.addEventListener("click", () => {
@@ -1018,12 +1025,24 @@ function selectBehavior(id: string, paramsOverride?: ParamValues): void {
   });
 }
 
-for (const behavior of PRODUCT_BEHAVIORS) {
-  const btn = document.createElement("button");
-  btn.textContent = `${behavior.index} ${behavior.name}`;
-  btn.setAttribute("data-value", behavior.id);
-  btn.addEventListener("click", () => selectBehavior(behavior.id));
-  behaviorTabs.appendChild(btn);
+// A single product behavior isn't a choice -- rendering it as a bordered,
+// hoverable, "active" tab (identical styling to a real multi-option
+// switcher) implies a decision the panel doesn't actually offer. Once a
+// second behavior ships, this reverts to real clickable tabs.
+if (PRODUCT_BEHAVIORS.length > 1) {
+  for (const behavior of PRODUCT_BEHAVIORS) {
+    const btn = document.createElement("button");
+    btn.textContent = `${behavior.index} ${behavior.name}`;
+    btn.setAttribute("data-value", behavior.id);
+    btn.addEventListener("click", () => selectBehavior(behavior.id));
+    behaviorTabs.appendChild(btn);
+  }
+} else if (PRODUCT_BEHAVIORS.length === 1) {
+  const behavior = PRODUCT_BEHAVIORS[0]!;
+  const label = document.createElement("span");
+  label.className = "behavior-tabs-label";
+  label.textContent = `${behavior.index} ${behavior.name}`;
+  behaviorTabs.appendChild(label);
 }
 selectBehavior("bloom");
 
@@ -1220,7 +1239,7 @@ function syncRegistrationAmountUi(): void {
   if (!on) return;
   const v = renderer.getRegistrationAmount();
   registrationAmountInput.value = String(v);
-  registrationAmountValue.textContent = String(Math.round(v));
+  syncRegistrationAmountValue(v);
 }
 
 registrationBtn.classList.toggle("active", renderer.isRegistrationEnabled());
@@ -1231,7 +1250,7 @@ registrationBtn.addEventListener("click", () => {
 
 registrationAmountInput.addEventListener("input", () => {
   const v = clampRegistrationAmount(parseFloat(registrationAmountInput.value));
-  registrationAmountValue.textContent = String(Math.round(v));
+  syncRegistrationAmountValue(v);
   renderer.setRegistrationAmount(v);
 });
 

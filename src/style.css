@@ -74,7 +74,14 @@ body {
 
 .behavior-tabs {
   display: flex;
+  align-items: center;
   gap: 6px;
+}
+
+.behavior-tabs-label {
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  letter-spacing: 0.02em;
 }
 
 .diagnostic-toggle {
@@ -409,9 +416,14 @@ body {
   margin-bottom: 0;
 }
 
-.sequence-rhythm-reset {
+/* Shared inline-reset style: a small, borderless, uppercase text link --
+   used for any widget-scoped reset that sits right next to its own label
+   (Position pad, Sequence timing). Distinct from .reset-btn, the bordered
+   button used for panel-level actions (Source transform, Save Project). */
+.reset-link {
   font-size: var(--fs-2xs);
   letter-spacing: 0.04em;
+  text-transform: uppercase;
   border: 0;
   background: transparent;
   color: var(--text-dim);
@@ -419,7 +431,7 @@ body {
   padding: 0;
 }
 
-.sequence-rhythm-reset:hover {
+.reset-link:hover {
   color: var(--text);
 }
 
@@ -1002,17 +1014,19 @@ body {
   min-width: 64px;
 }
 
-.type-sequence-size,
-.type-sequence-pos {
+.type-sequence-size {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
 }
 
+.type-sequence-pos-row {
+  margin-top: 8px;
+}
+
 .type-sequence-auto,
-.type-sequence-inherit,
-.type-sequence-anchor {
+.type-sequence-inherit {
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--panel-border);
@@ -1024,8 +1038,7 @@ body {
 }
 
 .type-sequence-auto.active,
-.type-sequence-inherit.active,
-.type-sequence-anchor.active {
+.type-sequence-inherit.active {
   color: var(--text);
   border-color: var(--text);
 }
@@ -1039,11 +1052,6 @@ body {
   background: transparent;
   color: var(--text);
   font-size: var(--fs-sm);
-}
-
-.type-sequence-anchor {
-  min-width: 28px;
-  padding: 0 4px;
 }
 
 .type-text {
@@ -1239,19 +1247,10 @@ body {
   margin-bottom: 0;
 }
 
-.type-pos-reset {
-  background: transparent;
-  border: 0;
-  color: var(--text-dim);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-  padding: 0;
-}
-
-.type-pos-reset:hover {
-  color: var(--text);
+.type-pos-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .type-pos-svg {
@@ -1586,12 +1585,48 @@ body {
   flex: 1;
 }
 
+/* The value next to a slider is a real input (click to type an exact
+   number), not read-only text -- so it needs a click/edit affordance a
+   plain span didn't. Borderless at rest so it still reads as a label at a
+   glance; a border and background appear on hover/focus, same language as
+   .xy-pad-number's editable readouts. */
 .control-value {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  width: 40px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
   font-size: var(--fs-md);
   color: var(--text-dim);
-  min-width: 34px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.control-value::-webkit-outer-spin-button,
+.control-value::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.control-value:hover {
+  border-color: var(--panel-border);
+  background: var(--panel);
+}
+
+.control-value:focus {
+  outline: none;
+  border-color: var(--text-dim);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.control-value-unit {
+  font-size: var(--fs-md);
+  color: var(--text-dim);
   flex-shrink: 0;
 }
 
