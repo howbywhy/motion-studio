@@ -5,12 +5,11 @@ import type { RangeParamDef, ParamValues } from "../core/types";
  * "center"/"right"), just a literal 2D offset, so dragging maps straight
  * to the two values with no quantization. Reuses the same frame+thirds-
  * guide+puck visual language as Type/Mark's Position pad (a rule-of-
- * thirds guide reads naturally for panning too), and the same editable
- * number-field layout as the polar xyPad.ts.
+ * thirds guide reads naturally for panning too).
  *
- * Same non-ownership contract as buildControls/buildXYPad: `values` is
- * read only at build time; every interaction recomputes fresh and emits
- * a two-key patch via `onChange`. */
+ * Same non-ownership contract as buildControls: `values` is read only at
+ * build time; every interaction recomputes fresh and emits a two-key
+ * patch via `onChange`. */
 export function buildCartesianPad(
   container: HTMLElement,
   label: string,

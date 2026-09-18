@@ -5,14 +5,11 @@ import { wrapCanvasAsPlaceholder, defaultTransform, type MediaAsset, type MediaK
 import { loadMediaFile } from "./ui/mediaInput";
 import type { ExportFormat, ExportFps, ExportQuality, ExportSize } from "./core/exportTypes";
 import { buildControls } from "./ui/controls";
-import { buildXYPad } from "./ui/xyPad";
 import { buildEditableValue } from "./ui/editableValue";
 import { buildCartesianPad } from "./ui/cartesianPad";
 import { buildPhaseControl } from "./ui/phaseControl";
 import { buildLoopLengthControl } from "./ui/loopLengthControl";
 import { buildSequenceRhythmStrip } from "./ui/sequenceRhythmStrip";
-import { buildSpreadControl } from "./ui/spreadControl";
-import { buildFragmentControl } from "./ui/fragmentControl";
 import { buildBloomFieldMap } from "./ui/bloomFieldMap";
 import { hideGraphicPanel } from "./ui/graphicPanel";
 import { buildTypePanel } from "./ui/typePanel";
@@ -684,10 +681,6 @@ let currentParams: ParamValues = {};
 let currentBehavior: MaskBehavior<unknown> = BEHAVIORS[0];
 let visibleKeysCache = "";
 
-// Shift's Direction+Overlap are really one polar displacement quantity --
-// see ui/xyPad.ts. This is the one prototype control group called for
-// before any wider propagation of the visual-control system; every other
-// behavior still renders through the plain generic panel.
 function appendFamily(parent: HTMLElement, title: string): HTMLElement {
   const fam = document.createElement("div");
   fam.className = "control-family";
@@ -703,26 +696,6 @@ function appendFamily(parent: HTMLElement, title: string): HTMLElement {
 
 function renderControlDefs(container: HTMLElement, defs: ParamDef[], values: ParamValues, onChange: (patch: ParamValues) => void): void {
   container.innerHTML = "";
-  if (currentBehavior.id === "shift") {
-    const fragmentDef = defs.find((d) => d.key === "fragment");
-    const spreadDef = defs.find((d) => d.key === "spread");
-    const angleDef = defs.find((d) => d.key === "direction");
-    const radiusDef = defs.find((d) => d.key === "overlap");
-    const rest = defs.filter((d) => d.key !== "fragment" && d.key !== "spread" && d.key !== "direction" && d.key !== "overlap");
-
-    const structure = appendFamily(container, "Structure");
-    if (fragmentDef && fragmentDef.type === "range") buildFragmentControl(structure, fragmentDef, values, onChange);
-    if (spreadDef && spreadDef.type === "range") buildSpreadControl(structure, spreadDef, values, onChange);
-
-    if (angleDef && angleDef.type === "range" && radiusDef && radiusDef.type === "range") {
-      const displacement = appendFamily(container, "Displacement");
-      buildXYPad(displacement, angleDef, radiusDef, values, onChange);
-    }
-
-    const time = appendFamily(container, "Time");
-    buildControls(time, rest, values, onChange);
-    return;
-  }
 
   if (currentBehavior.id === "bloom") {
     const fieldKeys = new Set(["fieldCount", "fieldSize", "softness", "drift", "overlap"]);
