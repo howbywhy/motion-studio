@@ -31,6 +31,7 @@ import { SHIFT_EXPRESSION_COPY } from "./behaviors/shift";
 import { defaultParamValues, type MaskBehavior, type ParamDef, type ParamValues, type RangeParamDef, type SelectParamDef } from "./core/types";
 import { matchingPreset, presetsForTreatment, type Preset } from "./core/presets";
 import { generateRandomisation, newRandomisationSeed } from "./core/randomise";
+import { randomiseTypeBlock } from "./core/randomiseType";
 import { clampSequenceWeights } from "./core/sequenceRhythm";
 import type { ClockMode } from "./core/phaseClock";
 import {
@@ -54,15 +55,15 @@ app.innerHTML = `
       <div class="topbar-right">
         <div class="behavior-tabs" id="behavior-tabs"></div>
         <div class="topbar-divider"></div>
-        <button type="button" class="diagnostic-toggle" id="print-toggle" title="Identity print: fine halftone reproduction and registration. An authored material, not an effect.">
+        <button type="button" class="diagnostic-toggle" id="print-toggle" title="Identity print: fine halftone reproduction and registration. An authored material, not an effect." data-tooltip="Identity print: fine halftone reproduction and registration. An authored material, not an effect.">
           Print
         </button>
-        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global surface language: Registration — a quiet material impression over the complete composition">
+        <button type="button" class="diagnostic-toggle" id="registration-toggle" title="Global surface language: Registration — a quiet material impression over the complete composition" data-tooltip="Global surface language: Registration — a quiet material impression over the complete composition">
           Registration
         </button>
         <div class="topbar-divider"></div>
         <div class="seg-toggle bw-toggle" id="bw-toggle" title="Selective B&amp;W on the active pair, applied before Bloom">
-          <span class="bw-label">B&amp;W</span>
+          <span class="bw-label" data-tooltip="Selective B&amp;W on the active pair, applied before Bloom" tabindex="0">B&amp;W</span>
           <button type="button" data-value="off" class="active">Off</button>
           <button type="button" data-value="A">A</button>
           <button type="button" data-value="B">B</button>
@@ -104,7 +105,7 @@ app.innerHTML = `
           <button type="button" class="diagnostic-toggle" id="audio-toggle" title="Hear source video audio, or mute. Independent of HOLD.">Audio</button>
           <button id="swap" title="Reverse the source sequence">Reverse</button>
           <button type="button" id="randomise" title="Curated Bloom variation. Freezes as a still if already paused/held, otherwise keeps playing.">Randomise</button>
-          <button type="button" id="randomise-undo" disabled title="Restore the previous composition">Undo</button>
+          <button type="button" id="randomise-undo" disabled title="Undo the last change (Ctrl/Cmd+Z)">Undo</button>
         </div>
         <div class="export-panel" id="export-panel">
           <div class="export-row">
@@ -140,8 +141,8 @@ app.innerHTML = `
       <aside class="control-panel">
         <div class="inspector-tabs" id="inspector-tabs">
           <button type="button" data-tab="composition" class="active">Composition</button>
-          <button type="button" data-tab="type">Type</button>
-          <button type="button" data-tab="mark">Mark</button>
+          <button type="button" data-tab="type">Type<span class="tab-dot" id="type-tab-dot" hidden title="Type is on"></span></button>
+          <button type="button" data-tab="mark">Mark<span class="tab-dot" id="mark-tab-dot" hidden title="Mark is on"></span></button>
           <button type="button" data-tab="bloom">Bloom</button>
         </div>
         <div class="tab-page" data-page="composition">
@@ -285,6 +286,16 @@ let placeholderBg = PLACEHOLDER_DEFAULT_BG;
 void loadSwitzer().then(() => renderer.renderFrame());
 
 const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
+  if (patch.randomiseBlock) {
+    pushUndoNow();
+    const index = patch.activeIndex ?? renderer.getTypeState().activeIndex;
+    const result = randomiseTypeBlock(newRandomisationSeed());
+    renderer.patchTypeState({ activeIndex: index, ...result });
+    typeUi.sync(renderer.getTypeState());
+    typeUi.setContext(typePanelContext());
+    return;
+  }
+  noteBeforeChange();
   renderer.patchTypeState(patch);
   if (
     patch.selected !== undefined ||
@@ -338,10 +349,15 @@ const endUi = mountEndBehaviourPanel(
 const markUi = mountMarkPanel(
   markPanelEl,
   () => renderer.getMarkState(),
-  (next) => renderer.setMarkState(next),
+  (next) => {
+    noteBeforeChange();
+    renderer.setMarkState(next);
+  },
 );
 
 const inspectorTabs = document.querySelector<HTMLDivElement>("#inspector-tabs")!;
+const typeTabDot = document.querySelector<HTMLSpanElement>("#type-tab-dot")!;
+const markTabDot = document.querySelector<HTMLSpanElement>("#mark-tab-dot")!;
 inspectorTabs.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest("button");
   const tab = btn?.getAttribute("data-tab");
@@ -382,7 +398,7 @@ function selectedItem() {
 }
 
 function showSourceMeta(label: string, kind: MediaKind, error?: boolean): void {
-  sourceName.textContent = label;
+  sourceName.textContent = error ? `⚠ ${label}` : label;
   sourceName.classList.toggle("has-error", Boolean(error));
   sourceType.classList.toggle("type-image", kind === "image");
   sourceType.classList.toggle("type-video", kind === "video");
@@ -503,6 +519,7 @@ replaceInput.addEventListener("change", () => {
 sourceRemoveBtn.addEventListener("click", () => {
   const item = selectedItem();
   if (!item || renderer.getSequence().length <= 1) return;
+  if (!window.confirm(`Remove "${item.asset.label}"? This can't be undone.`)) return;
   const dispose = !isAssetReferencedBySavedState(item.asset);
   lastMediaById.delete(item.id);
   renderer.removeSource(item.id, { dispose });
@@ -570,6 +587,8 @@ renderer.onFrame = () => {
   sequenceStrip.syncMarks();
   bloomFieldMap.sync();
   typeUi.setContext(typePanelContext());
+  typeTabDot.hidden = !renderer.getTypeState().enabled;
+  markTabDot.hidden = !renderer.getMarkState().enabled;
 };
 
 const scaleParamDef: ParamDef = { type: "range", key: "scale", label: "Source Scale", min: 100, max: 250, step: 1, default: 100, unit: "%" };
@@ -585,6 +604,7 @@ function compositionValues(): ParamValues {
 function onCompositionChange(patch: ParamValues): void {
   const item = selectedItem();
   if (!item) return;
+  noteBeforeChange();
   const merged = { ...compositionValues(), ...patch };
   renderer.setItemTransform(item.id, {
     scale: (merged.scale as number) / 100,
@@ -611,6 +631,7 @@ compositionResetBtn.addEventListener("click", () => {
 });
 
 bgColourInput.addEventListener("input", () => {
+  noteBeforeChange();
   placeholderBg = bgColourInput.value;
   rebuildPlaceholderAssets();
 });
@@ -799,6 +820,7 @@ function rebuildControlsPanel(): void {
 // stale snapshot from elsewhere. Every caller (control panel, treatment
 // toggle, Image Aware button) goes through this same merge.
 function onParamsChange(patch: ParamValues): void {
+  noteBeforeChange();
   if (currentBehavior.id === "shift" && patch.treatment !== undefined && patch.treatment !== currentParams.treatment) {
     switchShiftExpression(String(patch.treatment));
     return;
@@ -1061,32 +1083,7 @@ audioBtn.addEventListener("click", () => {
 
 swapBtn.addEventListener("click", () => renderer.swap());
 
-interface ExploreSnapshot {
-  params: ParamValues;
-  clockMode: ClockMode;
-  holdPhase: number;
-  elapsed: number;
-  graphicElapsed: number;
-  frozen: boolean;
-  playing: boolean;
-  randomisationSeed: number;
-}
-
 let randomisationSeed = 0;
-let undoSnapshot: ExploreSnapshot | null = null;
-
-function captureExploreSnapshot(): ExploreSnapshot {
-  return {
-    params: { ...currentParams },
-    clockMode: renderer.getClockMode(),
-    holdPhase: renderer.getLoopPhase(),
-    elapsed: renderer.getElapsed(),
-    graphicElapsed: renderer.getGraphicElapsed(),
-    frozen: renderer.isFrozen(),
-    playing: renderer.isPlaying(),
-    randomisationSeed,
-  };
-}
 
 function syncFreezeButton(): void {
   const frozen = renderer.isFrozen();
@@ -1099,31 +1096,96 @@ function restoreClockUi(mode: ClockMode, phase: number): void {
   phaseUi.setDisplayedPhase(phase);
 }
 
-function applyExploreSnapshot(snap: ExploreSnapshot): void {
-  currentParams = { ...snap.params };
-  lastParamsByBehavior.set(currentBehavior.id, currentParams);
-  rememberCurrentExpression();
-  renderer.setBehavior(currentBehavior, currentParams);
-  renderer.setGraphicElapsed(snap.graphicElapsed);
-  renderer.restoreClock(snap.clockMode, snap.holdPhase, snap.elapsed);
-  if (snap.playing) renderer.play();
-  else renderer.pause();
-  renderer.setFrozen(snap.frozen);
-  randomisationSeed = snap.randomisationSeed;
-  restoreClockUi(snap.clockMode, renderer.getPhase());
-  rebuildControlsPanel();
-  rebuildGraphicPanel();
-  syncTreatmentUI();
-  syncPresetUI();
-  syncFreezeButton();
-  updatePlayPauseLabel();
-  renderer.renderExploreFrame();
+// General undo -- covers any edit that goes through gatherCurrentSaveInput's
+// state (behavior params, Composition, Type, Mark, Registration, Background,
+// sources), not just Randomise. A drag or a burst of rapid edits coalesces
+// into ONE undo step: noteBeforeChange() captures the state as it was
+// before the burst started, then (re)starts a short idle timer: dragging
+// keeps pushing that timer back, so the checkpoint only actually lands on
+// the stack once the burst goes quiet. Single-shot actions (Randomise) use
+// pushUndoNow() instead, so they always land as their own distinct step.
+const UNDO_STACK_LIMIT = 25;
+const UNDO_COMMIT_DELAY_MS = 650;
+let undoStack: SavedStateInput[] = [];
+let pendingUndoBefore: SavedStateInput | null = null;
+let undoCommitTimer: number | null = null;
+
+function syncUndoButton(): void {
+  randomiseUndoBtn.disabled = undoStack.length === 0;
 }
+
+function flushPendingUndo(): void {
+  if (undoCommitTimer !== null) {
+    window.clearTimeout(undoCommitTimer);
+    undoCommitTimer = null;
+  }
+  if (pendingUndoBefore) {
+    undoStack.push(pendingUndoBefore);
+    if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+    pendingUndoBefore = null;
+    syncUndoButton();
+  }
+}
+
+function noteBeforeChange(): void {
+  if (pendingUndoBefore === null) {
+    pendingUndoBefore = gatherCurrentSaveInput("__undo__");
+  }
+  if (undoCommitTimer !== null) window.clearTimeout(undoCommitTimer);
+  undoCommitTimer = window.setTimeout(flushPendingUndo, UNDO_COMMIT_DELAY_MS);
+}
+
+function pushUndoNow(): void {
+  flushPendingUndo();
+  undoStack.push(gatherCurrentSaveInput("__undo__"));
+  if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+  syncUndoButton();
+}
+
+function performUndo(): boolean {
+  flushPendingUndo();
+  const snap = undoStack.pop();
+  if (!snap) return false;
+  loadSavedState({ ...snap, id: "__undo__", createdAt: Date.now() });
+  syncUndoButton();
+  return true;
+}
+
+function hasUnsavedRisk(): boolean {
+  return undoStack.length > 0 || pendingUndoBefore !== null || listSavedStates().length > 0;
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (!hasUnsavedRisk()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+function isEditableTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+window.addEventListener("keydown", (e) => {
+  const editing = isEditableTarget(e.target);
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+    if (editing) return;
+    e.preventDefault();
+    performUndo();
+    return;
+  }
+  if (editing) return;
+  if (e.key === " " || e.code === "Space") {
+    e.preventDefault();
+    playPauseBtn.click();
+  }
+});
 
 function applyRandomise(): void {
   if (currentBehavior.id !== "bloom") return;
-  undoSnapshot = captureExploreSnapshot();
-  randomiseUndoBtn.disabled = false;
+  pushUndoNow();
   const seed = newRandomisationSeed();
   randomisationSeed = seed;
   const pair = renderer.getActivePair();
@@ -1158,15 +1220,6 @@ function applyRandomise(): void {
   renderer.renderExploreFrame();
 }
 
-function undoRandomise(): boolean {
-  if (!undoSnapshot) return false;
-  const snap = undoSnapshot;
-  undoSnapshot = null;
-  randomiseUndoBtn.disabled = true;
-  applyExploreSnapshot(snap);
-  return true;
-}
-
 pauseAllBtn.addEventListener("click", () => {
   renderer.setFrozen(!renderer.isFrozen());
   syncFreezeButton();
@@ -1177,7 +1230,7 @@ randomiseBtn.addEventListener("click", () => {
 });
 
 randomiseUndoBtn.addEventListener("click", () => {
-  undoRandomise();
+  performUndo();
 });
 
 function parseBwMode(value: string | null): BwMode {
@@ -1222,6 +1275,7 @@ registrationBtn.addEventListener("click", () => {
 });
 
 registrationAmountInput.addEventListener("input", () => {
+  noteBeforeChange();
   const v = clampRegistrationAmount(parseFloat(registrationAmountInput.value));
   syncRegistrationAmountValue(v);
   renderer.setRegistrationAmount(v);
@@ -1795,7 +1849,8 @@ Object.assign(window, {
       applyRandomise();
       return { seed: randomisationSeed, phase: renderer.getLoopPhase(), frozen: renderer.isFrozen(), params: { ...currentParams } };
     },
-    undoRandomise: () => undoRandomise(),
+    undoRandomise: () => performUndo(),
+    undo: () => performUndo(),
     canvasSha: async () => {
       const img = renderer.getVisibleImageData();
       const digest = await crypto.subtle.digest("SHA-256", img.data);

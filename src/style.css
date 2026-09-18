@@ -114,6 +114,47 @@ body {
   background: var(--panel-border);
 }
 
+/* `title` alone never appears on a touch device (there's no hover) -- this
+   mirrors the same explanatory text visibly on :focus, which DOES fire
+   when a touch tap lands on a button/tabindex element. Kept alongside
+   `title`, not instead of it, so desktop hover still works natively. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 30;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:focus::after,
+[data-tooltip]:focus-within::after {
+  opacity: 1;
+  visibility: visible;
+}
+
 .bw-toggle .bw-label {
   display: flex;
   align-items: center;
@@ -522,9 +563,14 @@ body {
 
 .media-slot-name.has-error {
   color: #e8827a;
+  background: rgba(232, 130, 122, 0.12);
+  border: 1px solid rgba(232, 130, 122, 0.4);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
   white-space: normal;
   text-overflow: clip;
   line-height: 1.4;
+  font-weight: 600;
 }
 
 .media-slot-hint {
@@ -624,6 +670,7 @@ body {
 }
 
 .inspector-tabs button {
+  position: relative;
   flex: 1;
   appearance: none;
   background: transparent;
@@ -642,6 +689,18 @@ body {
 .inspector-tabs button.active {
   color: var(--text);
   border-bottom-color: var(--text);
+}
+
+/* On when that tab's own master toggle is on -- lets you see Type/Mark's
+   configured state without switching tabs to check. */
+.tab-dot {
+  position: absolute;
+  top: 8px;
+  right: calc(50% - 26px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text);
 }
 
 .tab-page[hidden] {
@@ -1123,8 +1182,15 @@ body {
   display: none;
 }
 
-.type-block-on {
+.type-block-randomise {
   margin-left: auto;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.type-block-on {
   font-size: var(--fs-xs);
   cursor: pointer;
 }

@@ -288,7 +288,7 @@ function buildBlock(
   index: TypeSlot,
   initial: TypeBlock,
   expanded: boolean,
-  onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean }) => void,
+  onChange: (patch: Partial<TypeState> & Partial<TypeBlock> & { blockEnabled?: boolean; randomiseBlock?: boolean }) => void,
   onExpand: (next: TypeSlot | null) => void,
   onEnabled: (on: boolean) => void,
 ): {
@@ -336,6 +336,18 @@ function buildBlock(
     onEnabled(next);
     onChange({ activeIndex: index, blockEnabled: next });
   });
+
+  const randomiseBtn = document.createElement("button");
+  randomiseBtn.type = "button";
+  randomiseBtn.className = "diagnostic-toggle type-block-randomise";
+  randomiseBtn.textContent = "🎲";
+  randomiseBtn.setAttribute("aria-label", "Randomise this block's size, weight, tracking and position");
+  randomiseBtn.setAttribute("data-tooltip", "Randomise size, weight, tracking & position");
+  randomiseBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onChange({ activeIndex: index, randomiseBlock: true });
+  });
+  head.appendChild(randomiseBtn);
   head.appendChild(onBtn);
 
   const chevron = document.createElement("span");
@@ -604,6 +616,7 @@ function buildBlock(
 
 export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
   blockEnabled?: boolean;
+  randomiseBlock?: boolean;
   typePage?: "add" | "remove";
   typePageMove?: { from: number; to: number };
   frameHold?: boolean;
