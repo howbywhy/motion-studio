@@ -217,8 +217,8 @@ export function mountMarkPanel(
     }
 
     seg(fields, "Mode", [
-      { value: "intro", label: "Intro" },
       { value: "interrupt", label: "Interrupt" },
+      { value: "intro", label: "Intro" },
       { value: "end", label: "End" },
     ], state.mode, (v) => {
       const mode = v as MarkMode;
@@ -226,10 +226,14 @@ export function mountMarkPanel(
       apply({ mode, sequenceStart: win.start, sequenceStop: win.stop });
     });
 
+    // "Horizontal" is gone here -- it rendered identical to Stacked, a
+    // duplicate choice, not a second lockup. "Emblem" reads as "Symbol" in
+    // the product vocabulary. "Stacked > Symbol" is the authored cut from
+    // wordmark to symbol within one Mark window.
     seg(fields, "Source", [
       { value: "stacked", label: "Stacked" },
-      { value: "horizontal", label: "Horizontal" },
-      { value: "emblem", label: "Emblem" },
+      { value: "emblem", label: "Symbol" },
+      { value: "stackedToSymbol", label: "Stacked > Symbol" },
     ], state.source, (v) => {
       apply({ source: v as MarkSource });
     });

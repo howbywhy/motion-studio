@@ -3,7 +3,13 @@ import { TYPE_ANCHORS, type TypeAnchor } from "./typeState";
 /** Isolated identity-event document. Not a Type State. */
 
 export type MarkMode = "intro" | "interrupt" | "end";
-export type MarkSource = "stacked" | "horizontal" | "emblem";
+// "horizontal" is kept as a parseable value (old saved states, eval/mark.ts
+// robustness fixtures) but is no longer offered in the product UI -- it
+// rendered pixel-identical to "stacked" there (planMark never read the
+// distinct Horizontal artwork), so it was a dead duplicate choice, not a
+// real second lockup. "stackedToSymbol" is a new authored transition: the
+// wordmark cutting to the symbol within one Mark window.
+export type MarkSource = "stacked" | "horizontal" | "emblem" | "stackedToSymbol";
 
 export interface MarkState {
   enabled: boolean;
@@ -25,7 +31,7 @@ export const MARK_MODE_WINDOW: Record<MarkMode, { start: number; stop: number }>
 };
 
 const MODES: MarkMode[] = ["intro", "interrupt", "end"];
-const SOURCES: MarkSource[] = ["stacked", "horizontal", "emblem"];
+const SOURCES: MarkSource[] = ["stacked", "horizontal", "emblem", "stackedToSymbol"];
 
 function clamp01(n: unknown, fallback: number): number {
   if (typeof n !== "number" || !Number.isFinite(n)) return fallback;
@@ -61,7 +67,7 @@ export function clampMarkWindow(startRaw: unknown, stopRaw: unknown): { start: n
   return { start, stop };
 }
 
-export function parseMarkMode(raw: unknown, fallback: MarkMode = "intro"): MarkMode {
+export function parseMarkMode(raw: unknown, fallback: MarkMode = "interrupt"): MarkMode {
   return typeof raw === "string" && (MODES as string[]).includes(raw) ? (raw as MarkMode) : fallback;
 }
 
@@ -76,7 +82,10 @@ export function parseMarkAnchor(raw: unknown, fallback: TypeAnchor = "mc"): Type
 export function defaultMarkState(): MarkState {
   return {
     enabled: false,
-    mode: "intro",
+    // Lean into Interrupt: it is the primary, most-used way the Mark
+    // appears (a decisive Stacked -> Symbol cut), not a third parallel
+    // option alongside a static Intro/End dock.
+    mode: "interrupt",
     source: "stacked",
     sequenceStart: 0,
     sequenceStop: 1,

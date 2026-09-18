@@ -293,6 +293,16 @@ function interruptSeq(local: number): { kind: MarkKind; madeLenX: number } {
   return { kind: "absent", madeLenX: MARK_ALIGN_X };
 }
 
+/** Product "Stacked > Symbol": the wordmark holds, then cuts to the symbol
+ * -- one decisive event, not a dock or a hold-only static lockup. Visible
+ * for the whole Mark window (unlike the eval-only interruptSeq, which pads
+ * absent at both ends to demonstrate entry/exit as part of a motion study). */
+const STACKED_TO_SYMBOL_CUT = 0.5;
+
+function stackedToSymbolKind(local: number): MarkKind {
+  return local < STACKED_TO_SYMBOL_CUT ? "logotype" : "emblem";
+}
+
 /** Previous dock choreography — eval CURRENT only. Product uses planMark. */
 export function planMarkDock(
   raw: MarkState | Partial<MarkState>,
@@ -340,7 +350,6 @@ export function planMark(
   height: number,
   loopSeconds: number,
 ): MarkPlan {
-  void loopSeconds;
   const state = clampMarkState(raw);
   const empty = emptyPlan(state, width, height);
   if (!state.enabled) return empty;
@@ -351,8 +360,9 @@ export function planMark(
   const span = Math.max(1e-6, stop - start);
   const local = clamp01((p - start) / span);
   const layout = layoutMarkRect(width, height, state.scale, state.anchor);
-  const kind = state.source === "emblem" ? "emblem" : "logotype";
-  return {
+  const isTransition = state.source === "stackedToSymbol";
+  const kind = isTransition ? stackedToSymbolKind(local) : state.source === "emblem" ? "emblem" : "logotype";
+  const plan: MarkPlan = {
     visible: true,
     kind,
     local,
@@ -367,6 +377,11 @@ export function planMark(
     source: state.source,
     mode: state.mode,
   };
+  // Punctuate the Stacked -> Symbol cut with the same Transition Flicker
+  // grammar used elsewhere for a decisive change of state, rather than a
+  // silent swap.
+  if (!isTransition) return plan;
+  return applyCenters(plan, [STACKED_TO_SYMBOL_CUT], loopSeconds, span, width, height);
 }
 
 export function emptyMarkDiagnostics(): MarkDiagnostics {

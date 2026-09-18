@@ -66,7 +66,7 @@ export interface SavedState {
   /** Identity event. Legacy omits these and loads Off. */
   markEnabled?: boolean;
   markMode?: "intro" | "interrupt" | "end";
-  markSource?: "stacked" | "horizontal" | "emblem";
+  markSource?: "stacked" | "horizontal" | "emblem" | "stackedToSymbol";
   markStart?: number;
   markStop?: number;
   markScale?: number;
