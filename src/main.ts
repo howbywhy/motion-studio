@@ -287,6 +287,7 @@ const typeUi = buildTypePanel(typePanelEl, renderer.getTypeState(), (patch) => {
     patch.typePageMove !== undefined ||
     patch.frameHold !== undefined ||
     patch.holdLength !== undefined ||
+    patch.pinnedCutPhase !== undefined ||
     patch.typeMode !== undefined ||
     patch.sequenceSizeModeAt !== undefined ||
     patch.sequenceSizeAt !== undefined ||

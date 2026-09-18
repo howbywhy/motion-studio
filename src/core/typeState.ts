@@ -3,6 +3,7 @@ import {
   clampSequenceWindow,
   cloneFrameHoldEnabled,
   cloneFrameHoldLength,
+  clonePinnedCutPhases,
   cloneTypePage,
   FRAME_HOLD_LENGTH_DEFAULT,
   SEQUENCE_SPEED_DEFAULT,
@@ -76,6 +77,12 @@ export interface TypeState {
   frameHoldEnabled: boolean[];
   /** Relative beat length while Hold is On. 1.0–3.0, default 2.0. Irrelevant while Off. */
   frameHoldLength: number[];
+  /** Per-frame absolute cut phase (0–1), overriding the proportional
+   * Speed/Hold placement so a frame can be pinned to a specific moment
+   * instead of only relatively. Index 0 (page 0) is never meaningful —
+   * kept so this always matches frameHoldEnabled/Length in length and
+   * per-page indexing. null = unpinned (proportional, as before). */
+  pinnedCutPhases: (number | null)[];
   /** Cadence of Type sequence cuts while typography is present. 0–100, default 50. */
   sequenceSpeed: number;
   /** Master phase where Type appears. */
@@ -443,6 +450,7 @@ export function defaultTypeState(): TypeState {
     selected: 0,
     frameHoldEnabled: [false],
     frameHoldLength: [FRAME_HOLD_LENGTH_DEFAULT],
+    pinnedCutPhases: [null],
     sequenceSpeed: SEQUENCE_SPEED_DEFAULT,
     sequenceStart: SEQUENCE_START_DEFAULT,
     sequenceStop: SEQUENCE_STOP_DEFAULT,
@@ -566,6 +574,10 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       ? fromBeats.length
       : legacyHolds.map(() => FRAME_HOLD_LENGTH_DEFAULT);
   let frameHoldLength = cloneFrameHoldLength(lengthRaw, pages.length);
+  let pinnedCutPhases = clonePinnedCutPhases(
+    Array.isArray(rec.pinnedCutPhases) ? (rec.pinnedCutPhases as (number | null)[]) : undefined,
+    pages.length,
+  );
 
   if (rec.typePage === "add" && pages.length < TYPE_PAGE_MAX) {
     const copy = cloneTypePage(pages[selected]!);
@@ -580,11 +592,17 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       FRAME_HOLD_LENGTH_DEFAULT,
       ...frameHoldLength.slice(selected + 1),
     ];
+    pinnedCutPhases = [
+      ...pinnedCutPhases.slice(0, selected + 1),
+      null,
+      ...pinnedCutPhases.slice(selected + 1),
+    ];
     selected = selected + 1;
   } else if (rec.typePage === "remove" && pages.length > 1 && selected > 0) {
     pages = pages.filter((_, i) => i !== selected).map(cloneTypePage);
     frameHoldEnabled = frameHoldEnabled.filter((_, i) => i !== selected);
     frameHoldLength = frameHoldLength.filter((_, i) => i !== selected);
+    pinnedCutPhases = pinnedCutPhases.filter((_, i) => i !== selected);
     selected = Math.min(selected, pages.length - 1);
   }
 
@@ -610,25 +628,41 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
       const nextLen = frameHoldLength.slice();
       const [len] = nextLen.splice(from, 1);
       nextLen.splice(to, 0, clampHoldLength(len));
+      const nextPins = pinnedCutPhases.slice();
+      const [pin] = nextPins.splice(from, 1);
+      nextPins.splice(to, 0, typeof pin === "number" ? pin : null);
       if (selected === from) selected = to;
       else if (from < selected && to >= selected) selected -= 1;
       else if (from > selected && to <= selected) selected += 1;
       pages = next;
       frameHoldEnabled = nextOn;
       frameHoldLength = nextLen;
+      pinnedCutPhases = nextPins;
     }
   }
 
   frameHoldEnabled = cloneFrameHoldEnabled(frameHoldEnabled, pages.length);
   frameHoldLength = cloneFrameHoldLength(frameHoldLength, pages.length);
+  pinnedCutPhases = clonePinnedCutPhases(pinnedCutPhases, pages.length);
   if (rec.frameHold === true || rec.frameHold === false) {
     if (selected < pages.length - 1) frameHoldEnabled[selected] = rec.frameHold;
   }
   if (typeof rec.holdLength === "number") {
     if (selected < pages.length - 1) frameHoldLength[selected] = clampHoldLength(rec.holdLength);
   }
+  // Pins a page's own START to an absolute phase (unlike Hold, which
+  // governs how long the PREVIOUS page holds) -- meaningful for any page
+  // but the first, which always begins at Sequence Start.
+  if (typeof rec.pinnedCutPhase === "number" || rec.pinnedCutPhase === null) {
+    if (selected >= 1) {
+      pinnedCutPhases[selected] = typeof rec.pinnedCutPhase === "number"
+        ? Math.min(1, Math.max(0, rec.pinnedCutPhase))
+        : null;
+    }
+  }
   frameHoldEnabled = cloneFrameHoldEnabled(frameHoldEnabled, pages.length);
   frameHoldLength = cloneFrameHoldLength(frameHoldLength, pages.length);
+  pinnedCutPhases = clonePinnedCutPhases(pinnedCutPhases, pages.length);
 
   blocks = cloneTypePage(pages[selected]!);
   const blockPatch = pickBlockPatch(rec);
@@ -690,6 +724,7 @@ export function clampTypeState(raw: Partial<TypeState> | Record<string, unknown>
     selected,
     frameHoldEnabled,
     frameHoldLength,
+    pinnedCutPhases,
     sequenceSpeed: rec.sequenceSpeed === undefined || rec.sequenceSpeed === null
       ? SEQUENCE_SPEED_DEFAULT
       : num(rec.sequenceSpeed, 0, 100, SEQUENCE_SPEED_DEFAULT),
@@ -756,6 +791,7 @@ export function cloneTypeState(state: TypeState): TypeState {
     selected,
     frameHoldEnabled: cloneFrameHoldEnabled(state.frameHoldEnabled, pages.length),
     frameHoldLength: cloneFrameHoldLength(state.frameHoldLength, pages.length),
+    pinnedCutPhases: clonePinnedCutPhases(state.pinnedCutPhases, pages.length),
     sequenceSpeed: typeof state.sequenceSpeed === "number" && Number.isFinite(state.sequenceSpeed)
       ? Math.min(100, Math.max(0, state.sequenceSpeed))
       : SEQUENCE_SPEED_DEFAULT,

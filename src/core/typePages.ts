@@ -49,6 +49,42 @@ export function cloneFrameHoldLength(lengths: number[] | undefined, count: numbe
   return out;
 }
 
+/** Index i = the absolute master phase (0–1) at which page i begins.
+ * Index 0 is never meaningful (page 0 always begins at Sequence Start) but
+ * is kept so this array's length always matches frameHoldEnabled/Length,
+ * following the exact same per-page pad/add/remove/move pattern. null =
+ * unpinned — that page's cut stays proportional (Speed + Frame Hold). */
+export function clonePinnedCutPhases(pins: (number | null)[] | undefined, count: number): (number | null)[] {
+  const n = Math.min(TYPE_PAGE_MAX, Math.max(1, count));
+  const out: (number | null)[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = Array.isArray(pins) ? pins[i] : null;
+    out.push(typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
+  }
+  return out;
+}
+
+/** Pushes pinned cuts apart just enough to stay monotonic and inside the
+ * presence window, preserving every unpinned cut's relative position as
+ * closely as the remaining room allows. Small n (at most 5 cuts) makes two
+ * linear passes plenty. */
+function enforceMonotonicCuts(cuts: number[], winStart: number, winStop: number, minGap: number): number[] {
+  const out = cuts.slice();
+  for (let i = 0; i < out.length; i++) {
+    const floor = (i === 0 ? winStart : out[i - 1]!) + minGap;
+    if (out[i]! < floor) out[i] = floor;
+  }
+  for (let i = out.length - 1; i >= 0; i--) {
+    const ceiling = (i === out.length - 1 ? winStop : out[i + 1]!) - minGap;
+    if (out[i]! > ceiling) out[i] = ceiling;
+  }
+  for (let i = 0; i < out.length; i++) {
+    const floor = (i === 0 ? winStart : out[i - 1]!) + minGap;
+    if (out[i]! < floor) out[i] = floor;
+  }
+  return out;
+}
+
 /** @deprecated Use cloneFrameHoldEnabled. Last-frame values are preserved for reversible reorder. */
 export function cloneFrameHolds(holds: boolean[] | undefined, count: number): boolean[] {
   return cloneFrameHoldEnabled(holds, count);
@@ -211,6 +247,12 @@ export function sequenceLastCutLocal(
 /**
  * Absolute master-phase cuts inside the presence window.
  * Last cut is when the final page is reached — at or before Stop.
+ *
+ * `pins` (same length/indexing as frameHoldEnabled/Length: index i is
+ * page i's start) lets specific cuts override the proportional Speed +
+ * Frame Hold placement with an exact master phase — index 0 is ignored
+ * (page 0 always begins at Sequence Start). Omitted or all-null pins
+ * reproduce the original proportional-only cuts exactly.
  */
 export function typePageCuts(
   count: number,
@@ -219,6 +261,7 @@ export function typePageCuts(
   stop: number = SEQUENCE_STOP_DEFAULT,
   enabled?: boolean[],
   lengths?: number[],
+  pins?: (number | null)[],
 ): number[] {
   const n = Math.min(TYPE_PAGE_MAX, Math.max(1, Math.round(count)));
   if (n <= 1) return [];
@@ -232,10 +275,15 @@ export function typePageCuts(
     cum += b;
     cuts.push(win.start + span * lastCut * (cum / W));
   }
-  return cuts;
+  if (!pins || !pins.some((p) => typeof p === "number")) return cuts;
+  const pinned = cuts.map((c, i) => {
+    const pin = pins[i + 1];
+    return typeof pin === "number" ? Math.min(win.stop, Math.max(win.start, pin)) : c;
+  });
+  return enforceMonotonicCuts(pinned, win.start, win.stop, SEQUENCE_MIN_BEAT_LOCAL * span);
 }
 
-/** Hard cuts from local phase + Speed + Frame Hold. Meaningful while Type is present. */
+/** Hard cuts from local phase + Speed + Frame Hold (+ any pins). Meaningful while Type is present. */
 export function typePageIndexAtPhase(
   phase: number,
   count: number,
@@ -244,16 +292,14 @@ export function typePageIndexAtPhase(
   stop: number = SEQUENCE_STOP_DEFAULT,
   enabled?: boolean[],
   lengths?: number[],
+  pins?: (number | null)[],
 ): number {
   const n = Math.min(TYPE_PAGE_MAX, Math.max(1, Math.round(count)));
   if (n <= 1) return 0;
-  const local = typeLocalPhase(phase, start, stop);
-  const { weights, lastCut } = sequencePlan(n, speed, enabled, lengths);
-  const W = sum(weights);
-  let cum = 0;
-  for (let i = 0; i < weights.length; i++) {
-    cum += weights[i]!;
-    if (local < lastCut * (cum / W)) return i;
+  const p = masterPhase(phase);
+  const cuts = typePageCuts(n, speed, start, stop, enabled, lengths, pins);
+  for (let i = 0; i < cuts.length; i++) {
+    if (p < cuts[i]!) return i;
   }
   return n - 1;
 }
@@ -267,6 +313,7 @@ export function typePageIndexForState(state: TypeState, phase: number): number {
     state.sequenceStop,
     state.frameHoldEnabled,
     state.frameHoldLength,
+    state.pinnedCutPhases,
   );
 }
 
@@ -280,28 +327,25 @@ export function typePageBeatLocal(state: TypeState, phase: number): number {
   if (local < 0 || local >= 1) return 0;
   const n = typePageCount(state);
   if (n <= 1) return local;
-  const { weights, lastCut } = sequencePlan(
+  const win = clampSequenceWindow(state.sequenceStart, state.sequenceStop);
+  const span = win.stop - win.start;
+  if (!(span > 0)) return 0;
+  const p = masterPhase(phase);
+  const cuts = typePageCuts(
     n,
     state.sequenceSpeed,
+    state.sequenceStart,
+    state.sequenceStop,
     state.frameHoldEnabled,
     state.frameHoldLength,
+    state.pinnedCutPhases,
   );
   const i = typePageIndexForState(state, phase);
-  const W = sum(weights);
-  let startL = 0;
-  let endL = 1;
-  if (W > 0 && i < n - 1) {
-    let cum = 0;
-    for (let k = 0; k < i; k++) cum += weights[k]!;
-    startL = lastCut * (cum / W);
-    endL = lastCut * ((cum + weights[i]!) / W);
-  } else if (W > 0) {
-    startL = lastCut;
-    endL = 1;
-  }
-  const span = endL - startL;
-  if (!(span > 0)) return 0;
-  const t = (local - startL) / span;
+  const segStart = i === 0 ? win.start : cuts[i - 1]!;
+  const segEnd = i < cuts.length ? cuts[i]! : win.stop;
+  const segSpan = segEnd - segStart;
+  if (!(segSpan > 0)) return 0;
+  const t = (p - segStart) / segSpan;
   if (t <= 0) return 0;
   if (t >= 1) return 1;
   return t;

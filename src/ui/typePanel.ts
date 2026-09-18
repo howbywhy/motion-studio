@@ -30,6 +30,7 @@ import {
   FRAME_HOLD_LENGTH_STEP,
   SEQUENCE_WINDOW_MIN,
   TYPE_PAGE_MAX,
+  typePageCuts,
 } from "../core/typePages";
 
 const BLEND_LABEL: Record<TypeBlendMode, string> = {
@@ -696,6 +697,7 @@ export type TypePanelPatch = Partial<TypeState> & Partial<TypeBlock> & {
   typePageMove?: { from: number; to: number };
   frameHold?: boolean;
   holdLength?: number;
+  pinnedCutPhase?: number | null;
   typeMode?: TypeSystemMode;
   sequenceCopyAt?: { index: number; text: string };
   sequenceSizeModeAt?: { index: number; mode: SequenceTypeSizeMode };
@@ -904,6 +906,43 @@ export function buildTypePanel(
   holdLen.row.classList.add("type-hold-length");
   holdLen.input.title = "Relative sequence time for this frame. 1.0× — 3.0×.";
 
+  // Pin: an absolute loop position where THIS frame begins, overriding
+  // the proportional Speed/Hold placement -- unlike Hold Length (how long
+  // the PREVIOUS frame holds), Pin is about where the frame you're
+  // looking at starts, so it's only meaningful for any frame but the
+  // first (which always begins at Sequence Start).
+  const pinRow = document.createElement("div");
+  pinRow.className = "control-row type-frame-hold type-pin-row";
+  const pinLab = document.createElement("label");
+  pinLab.textContent = "Pin Start";
+  pinRow.appendChild(pinLab);
+  const pinSeg = document.createElement("div");
+  pinSeg.className = "seg-toggle";
+  const pinOff = document.createElement("button");
+  pinOff.type = "button";
+  pinOff.textContent = "Off";
+  const pinOn = document.createElement("button");
+  pinOn.type = "button";
+  pinOn.textContent = "On";
+  pinSeg.appendChild(pinOff);
+  pinSeg.appendChild(pinOn);
+  pinRow.appendChild(pinSeg);
+  statesHost.appendChild(pinRow);
+
+  const pinPhase = slider(statesHost, "Start At", 0, 100, 1, 50, (v) => onChange({ pinnedCutPhase: v / 100 }));
+  pinPhase.row.classList.add("type-pin-phase");
+  pinPhase.input.title = "Absolute loop position where this frame begins. Scrub Hold to find the moment, then Pin it here.";
+
+  pinOff.addEventListener("click", () => onChange({ pinnedCutPhase: null }));
+  pinOn.addEventListener("click", () => {
+    // Turning Pin on shouldn't jump the cut -- default to wherever it
+    // currently, proportionally, already lands.
+    const n = state.pages.length;
+    const defaultCuts = typePageCuts(n, state.sequenceSpeed, state.sequenceStart, state.sequenceStop, state.frameHoldEnabled, state.frameHoldLength);
+    const fallback = defaultCuts[state.selected - 1] ?? state.sequenceStart;
+    onChange({ pinnedCutPhase: fallback });
+  });
+
   const windowUi = buildSequenceWindow(
     statesHost,
     state.sequenceStart,
@@ -928,6 +967,18 @@ export function buildTypePanel(
     holdLen.row.hidden = !held;
     holdLen.input.value = String(len);
     holdLen.valueEl.textContent = `${len % 1 === 0 ? len.toFixed(1) : len.toFixed(2)}×`;
+    const canPin = n > 1 && state.selected >= 1;
+    const pin = canPin ? state.pinnedCutPhases[state.selected] : null;
+    const pinned = typeof pin === "number";
+    pinRow.hidden = !canPin;
+    pinOff.classList.toggle("active", canPin && !pinned);
+    pinOn.classList.toggle("active", pinned);
+    pinPhase.row.hidden = !pinned;
+    if (pinned) {
+      const v = Math.round(pin * 100);
+      pinPhase.input.value = String(v);
+      pinPhase.valueEl.textContent = String(v);
+    }
     windowUi.row.hidden = false;
     speed.row.hidden = n <= 1;
     windowUi.set(state.sequenceStart, state.sequenceStop);
