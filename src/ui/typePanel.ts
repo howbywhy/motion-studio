@@ -124,7 +124,7 @@ function buildSequenceWindow(
   const row = document.createElement("div");
   row.className = "control-row type-sequence-window";
   const lab = document.createElement("label");
-  lab.textContent = "Sequence";
+  lab.textContent = "Window";
   row.appendChild(lab);
 
   const legend = document.createElement("div");
@@ -138,7 +138,7 @@ function buildSequenceWindow(
   const rail = document.createElement("div");
   rail.className = "type-seq-rail";
   rail.setAttribute("role", "group");
-  rail.setAttribute("aria-label", "Sequence window");
+  rail.setAttribute("aria-label", "Window");
   const track = document.createElement("div");
   track.className = "type-seq-track";
   const span = document.createElement("div");
@@ -668,7 +668,7 @@ export function buildTypePanel(
 
   const modeSeg = seg(modeHost, "Type", [
     { value: "global", label: "Global" },
-    { value: "sequence", label: "Sequence" },
+    { value: "sequence", label: "Per Frame" },
   ], state.typeMode, (value) => {
     if (value === "sequence") {
       toggle.classList.add("active");
@@ -681,7 +681,7 @@ export function buildTypePanel(
 
   const pulseNote = document.createElement("p");
   pulseNote.className = "type-sequence-note";
-  pulseNote.textContent = "Sequence Type is associated with Loop. Pulse uses Global Type.";
+  pulseNote.textContent = "Per Frame Type is associated with Loop. Pulse uses Global Type.";
   body.appendChild(pulseNote);
 
   const slotsHost = document.createElement("div");
@@ -927,6 +927,7 @@ export function buildTypePanel(
     autoBtn.type = "button";
     autoBtn.className = "type-sequence-auto";
     autoBtn.textContent = "Auto";
+    autoBtn.title = "Use the block's own Type Size, set above.";
     autoBtn.classList.toggle("active", mode === "auto");
     autoBtn.addEventListener("click", () => {
       onSelectState?.(index);
@@ -962,8 +963,8 @@ export function buildTypePanel(
     const inheritBtn = document.createElement("button");
     inheritBtn.type = "button";
     inheritBtn.className = "type-sequence-inherit";
-    inheritBtn.textContent = "Composition";
-    inheritBtn.title = "Authored Sequence Type position.";
+    inheritBtn.textContent = "Auto";
+    inheritBtn.title = "Use the block's own Position, set above.";
     inheritBtn.classList.toggle("active", anchor === "inherit");
     inheritBtn.addEventListener("click", () => {
       onSelectState?.(index);
@@ -1043,7 +1044,7 @@ export function buildTypePanel(
     markSeg(modeSeg, state.typeMode);
     if (sequenceBtn) {
       sequenceBtn.disabled = pulse;
-      sequenceBtn.title = pulse ? "Sequence Type is available in Loop" : "";
+      sequenceBtn.title = pulse ? "Per Frame Type is available in Loop" : "";
     }
     pulseNote.hidden = !pulse;
     statesHost.hidden = sequence;
