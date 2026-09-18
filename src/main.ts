@@ -44,6 +44,7 @@ import {
   type SavedState,
   type SavedStateInput,
 } from "./core/savedStates";
+import { buildProjectFile, parseProjectFile, resolveProjectSource, serializeProjectFile } from "./core/projectFile";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -101,7 +102,7 @@ app.innerHTML = `
           <button id="play-pause" class="primary" title="Pause or resume source video. Independent of Phase Auto/Hold.">Pause</button>
           <button type="button" class="diagnostic-toggle" id="audio-toggle" title="Hear source video audio, or mute. Independent of HOLD.">Audio</button>
           <button id="swap" title="Reverse the source sequence">Reverse</button>
-          <button type="button" id="randomise" title="Curated Bloom variation, frozen as a still">Randomise</button>
+          <button type="button" id="randomise" title="Curated Bloom variation. Freezes as a still if already paused/held, otherwise keeps playing.">Randomise</button>
           <button type="button" id="randomise-undo" disabled title="Restore the previous composition">Undo</button>
         </div>
         <div class="export-panel" id="export-panel">
@@ -168,6 +169,17 @@ app.innerHTML = `
             </div>
           </div>
           <div id="end-behaviour-panel"></div>
+          <div class="saved-panel">
+            <div class="panel-label-row">
+              <label class="panel-label">Project</label>
+            </div>
+            <div class="project-actions">
+              <button type="button" class="reset-btn" id="save-project-btn">Save Project</button>
+              <button type="button" class="reset-btn" id="open-project-btn">Open Project</button>
+              <input type="file" id="open-project-input" accept="application/json,.json" hidden />
+            </div>
+            <p class="control-note" id="project-status" hidden></p>
+          </div>
           <div class="saved-panel">
             <div class="panel-label-row">
               <label class="panel-label">Saved States</label>
@@ -250,6 +262,10 @@ const presetToggle = document.querySelector<HTMLDivElement>("#preset-toggle")!;
 const saveStateBtn = document.querySelector<HTMLButtonElement>("#save-state-btn")!;
 const savedStatesListEl = document.querySelector<HTMLDivElement>("#saved-states-list")!;
 const savedStatesEmptyEl = document.querySelector<HTMLParagraphElement>("#saved-states-empty")!;
+const saveProjectBtn = document.querySelector<HTMLButtonElement>("#save-project-btn")!;
+const openProjectBtn = document.querySelector<HTMLButtonElement>("#open-project-btn")!;
+const openProjectInput = document.querySelector<HTMLInputElement>("#open-project-input")!;
+const projectStatusEl = document.querySelector<HTMLParagraphElement>("#project-status")!;
 const exportRunBtn = document.querySelector<HTMLButtonElement>("#export-run")!;
 const exportCancelBtn = document.querySelector<HTMLButtonElement>("#export-cancel")!;
 const exportStatusEl = document.querySelector<HTMLSpanElement>("#export-status")!;
@@ -1131,9 +1147,16 @@ function applyRandomise(): void {
   rememberCurrentExpression();
   renderer.setBehavior(currentBehavior, currentParams);
   renderer.setGraphicElapsed(result.graphicElapsed);
-  renderer.setHoldPhase(result.holdPhase);
-  renderer.setFrozen(true);
-  restoreClockUi("hold", result.holdPhase);
+  // Only land on the curated still phase (and freeze there) if the
+  // composition was already paused/held before this click -- if it was
+  // playing, keep it playing: drop the new variation into the running
+  // loop instead of interrupting playback to show a frozen still.
+  const wasHeld = renderer.getClockMode() === "hold" || renderer.isFrozen();
+  if (wasHeld) {
+    renderer.setHoldPhase(result.holdPhase);
+    renderer.setFrozen(true);
+    restoreClockUi("hold", result.holdPhase);
+  }
   rebuildControlsPanel();
   rebuildGraphicPanel();
   syncTreatmentUI();
@@ -1468,6 +1491,83 @@ saveStateBtn.addEventListener("click", () => {
 });
 
 renderSavedStatesList();
+
+// --- Project file: a downloadable, reopenable snapshot (core/projectFile.ts)
+// -- unlike Saved States (in-memory, gone on reload), this embeds the
+// source media itself so the file is portable on its own. ---
+function setProjectStatus(text: string, isError = false): void {
+  projectStatusEl.textContent = text;
+  projectStatusEl.hidden = false;
+  projectStatusEl.style.color = isError ? "#e8827a" : "";
+}
+
+saveProjectBtn.addEventListener("click", () => {
+  void (async () => {
+    saveProjectBtn.disabled = true;
+    setProjectStatus("Saving…");
+    try {
+      const input = gatherCurrentSaveInput("Project");
+      const project = await buildProjectFile(input);
+      const json = serializeProjectFile(project);
+      const blob = new Blob([json], { type: "application/json" });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      downloadBlobDirectly(blob, `motion-studio-project-${stamp}.json`);
+      setProjectStatus("Saved");
+      setTimeout(() => {
+        projectStatusEl.hidden = true;
+      }, 2500);
+    } catch (err) {
+      setProjectStatus(err instanceof Error ? err.message : "Could not save the project.", true);
+    } finally {
+      saveProjectBtn.disabled = false;
+    }
+  })();
+});
+
+openProjectBtn.addEventListener("click", () => {
+  openProjectInput.click();
+});
+
+openProjectInput.addEventListener("change", () => {
+  const file = openProjectInput.files?.[0];
+  openProjectInput.value = "";
+  if (!file) return;
+  void (async () => {
+    openProjectBtn.disabled = true;
+    setProjectStatus("Opening…");
+    try {
+      const text = await file.text();
+      const project = parseProjectFile(text);
+      const [aw, ah] = project.state.aspect.split(":").map(Number);
+      const resolved = await Promise.all(
+        project.sources.map((src) =>
+          resolveProjectSource(
+            src,
+            renderer.getVideoHost(),
+            (label, field) => createGraphicAsset(aw || 4, ah || 5, label, field),
+            (label) => makePlaceholder(label),
+          ),
+        ),
+      );
+      const restoredState: SavedState = {
+        id: "project-import",
+        createdAt: Date.now(),
+        name: "Project",
+        ...project.state,
+        sources: resolved.map((r) => ({ id: r.id, asset: r.asset, transform: r.transform, label: r.label })),
+      };
+      loadSavedState(restoredState);
+      setProjectStatus("Opened");
+      setTimeout(() => {
+        projectStatusEl.hidden = true;
+      }, 2500);
+    } catch (err) {
+      setProjectStatus(err instanceof Error ? err.message : "Could not open that project file.", true);
+    } finally {
+      openProjectBtn.disabled = false;
+    }
+  })();
+});
 
 function activeSeg(root: HTMLElement): string {
   return root.querySelector("button.active")?.getAttribute("data-value") ?? "";
