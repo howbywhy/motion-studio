@@ -42,6 +42,24 @@ const BLEND_LABEL: Record<TypeBlendMode, string> = {
   exclusion: "Exclusion",
 };
 
+/** Same grouped-section pattern Bloom's panel already uses (main.ts's
+ * appendFamily): a small uppercase header, then a body to append controls
+ * into. Applied here so a Type block's ~10 flat controls read as three
+ * labeled clusters (content, typography, layout) instead of one
+ * undifferentiated list. */
+function appendFamily(parent: HTMLElement, title: string): HTMLElement {
+  const fam = document.createElement("div");
+  fam.className = "control-family";
+  const lab = document.createElement("div");
+  lab.className = "control-family-label";
+  lab.textContent = title;
+  fam.appendChild(lab);
+  const body = document.createElement("div");
+  fam.appendChild(body);
+  parent.appendChild(fam);
+  return body;
+}
+
 function seg(
   parent: HTMLElement,
   label: string,
@@ -384,15 +402,16 @@ function buildBlock(
     onChange({ activeIndex: index, ...patch });
   });
 
-  const scale = slider(body, "Type Size", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
-  const weight = slider(body, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
+  const typeFamily = appendFamily(body, "Typography");
+  const scale = slider(typeFamily, "Type Size", 0, 100, 1, initial.scale, (v) => onChange({ activeIndex: index, scale: v }));
+  const weight = slider(typeFamily, "Weight", TYPE_WEIGHT_MIN, TYPE_WEIGHT_MAX, 10, initial.weight, (v) => onChange({ activeIndex: index, weight: v }));
 
-  const trackingH = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
-  const leading = slider(body, "Leading", 0, 100, 1, initial.leading, (v) => onChange({ activeIndex: index, leading: v }));
-  const trackingP = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
-  const trackingF = slider(body, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+  const trackingH = slider(typeFamily, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+  const leading = slider(typeFamily, "Leading", 0, 100, 1, initial.leading, (v) => onChange({ activeIndex: index, leading: v }));
+  const trackingP = slider(typeFamily, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
+  const trackingF = slider(typeFamily, "Tracking", 0, 100, 1, initial.tracking, (v) => onChange({ activeIndex: index, tracking: v }));
 
-  const distSeg = seg(body, "Distribution", [
+  const distSeg = seg(typeFamily, "Distribution", [
     { value: "packed", label: "Packed" },
     { value: "between", label: "Between" },
   ], initial.distribution, (v) => {
@@ -401,15 +420,16 @@ function buildBlock(
     refreshSummary();
     onChange({ activeIndex: index, distribution: currentDist });
   });
-  const gap = slider(body, "Gap", 0, 100, 1, initial.gap, (v) => onChange({ activeIndex: index, gap: v }));
+  const gap = slider(typeFamily, "Gap", 0, 100, 1, initial.gap, (v) => onChange({ activeIndex: index, gap: v }));
 
-  const alignSeg = seg(body, "Text Align", [
+  const layoutFamily = appendFamily(body, "Layout");
+  const alignSeg = seg(layoutFamily, "Text Align", [
     { value: "left", label: "Left" },
     { value: "center", label: "Centre" },
     { value: "right", label: "Right" },
   ], initial.textAlign, (v) => onChange({ activeIndex: index, textAlign: v as TypeTextAlign }));
 
-  const pos = buildPositionPad(body, initial.anchor, initial.offsetX, initial.offsetY, (anchor, offsetX, offsetY) => {
+  const pos = buildPositionPad(layoutFamily, initial.anchor, initial.offsetX, initial.offsetY, (anchor, offsetX, offsetY) => {
     currentAnchor = anchor;
     currentOffsetX = offsetX;
     currentOffsetY = offsetY;
@@ -417,7 +437,7 @@ function buildBlock(
     onChange({ activeIndex: index, anchor, offsetX, offsetY });
   });
 
-  const widthSeg = seg(body, "Width", [
+  const widthSeg = seg(layoutFamily, "Width", [
     { value: "narrow", label: "Narrow" },
     { value: "medium", label: "Medium" },
     { value: "wide", label: "Wide" },
@@ -426,11 +446,9 @@ function buildBlock(
     onChange({ activeIndex: index, column: v as TypeColumn });
   });
 
-  const padding = slider(body, "Padding", 0, 100, 1, initial.padding, (v) => onChange({ activeIndex: index, padding: v }));
+  const padding = slider(layoutFamily, "Padding", 0, 100, 1, initial.padding, (v) => onChange({ activeIndex: index, padding: v }));
 
-  const appear = document.createElement("div");
-  appear.className = "type-appear";
-  body.appendChild(appear);
+  const appear = appendFamily(body, "Appearance");
 
   const colorRow = document.createElement("div");
   colorRow.className = "control-row type-appear-row";

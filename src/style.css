@@ -1165,12 +1165,6 @@ body {
   display: none;
 }
 
-.type-appear {
-  margin-top: 4px;
-  padding-top: 7px;
-  border-top: 1px solid var(--panel-border);
-}
-
 .type-appear-row {
   display: flex;
   align-items: center;
