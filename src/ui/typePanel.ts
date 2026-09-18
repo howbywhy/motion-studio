@@ -340,7 +340,12 @@ function buildBlock(
   const randomiseBtn = document.createElement("button");
   randomiseBtn.type = "button";
   randomiseBtn.className = "diagnostic-toggle type-block-randomise";
-  randomiseBtn.textContent = "🎲";
+  randomiseBtn.innerHTML =
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line>' +
+    '<polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line>' +
+    '<line x1="4" y1="4" x2="9" y2="9"></line></svg>';
   randomiseBtn.setAttribute("aria-label", "Randomise this block's size, weight, tracking and position");
   randomiseBtn.setAttribute("data-tooltip", "Randomise size, weight, tracking & position");
   randomiseBtn.addEventListener("click", (e) => {
@@ -696,6 +701,11 @@ export function buildTypePanel(
   const modeHost = document.createElement("div");
   modeHost.className = "type-mode-host";
   container.appendChild(modeHost);
+
+  const offHint = document.createElement("p");
+  offHint.className = "type-off-hint";
+  offHint.textContent = "Turn on to add up to three headline, paragraph or subtitle blocks, each with its own size, position and timing.";
+  container.appendChild(offHint);
 
   const body = document.createElement("div");
   body.className = "type-panel-body";

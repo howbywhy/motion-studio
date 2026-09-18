@@ -117,6 +117,10 @@ export function mountMarkPanel(
     host.appendChild(fields);
     if (!state.enabled) {
       fields.hidden = true;
+      const offHint = document.createElement("p");
+      offHint.className = "mark-off-hint";
+      offHint.textContent = "Turn on to choose when the wordmark or symbol cuts in, and its size and position.";
+      host.appendChild(offHint);
       return;
     }
 

@@ -106,6 +106,7 @@ app.innerHTML = `
           <button id="swap" title="Reverse the source sequence">Reverse</button>
           <button type="button" id="randomise" title="Curated Bloom variation. Freezes as a still if already paused/held, otherwise keeps playing.">Randomise</button>
           <button type="button" id="randomise-undo" disabled title="Undo the last change (Ctrl/Cmd+Z)">Undo</button>
+          <button type="button" id="randomise-redo" disabled title="Redo the last undone change (Ctrl/Cmd+Shift+Z)">Redo</button>
         </div>
         <div class="export-panel" id="export-panel">
           <div class="export-row">
@@ -232,6 +233,7 @@ const playPauseBtn = document.querySelector<HTMLButtonElement>("#play-pause")!;
 const pauseAllBtn = document.querySelector<HTMLButtonElement>("#pause-all")!;
 const randomiseBtn = document.querySelector<HTMLButtonElement>("#randomise")!;
 const randomiseUndoBtn = document.querySelector<HTMLButtonElement>("#randomise-undo")!;
+const randomiseRedoBtn = document.querySelector<HTMLButtonElement>("#randomise-redo")!;
 const audioBtn = document.querySelector<HTMLButtonElement>("#audio-toggle")!;
 const swapBtn = document.querySelector<HTMLButtonElement>("#swap")!;
 const aspectToggle = document.querySelector<HTMLDivElement>("#aspect-toggle")!;
@@ -1107,11 +1109,16 @@ function restoreClockUi(mode: ClockMode, phase: number): void {
 const UNDO_STACK_LIMIT = 25;
 const UNDO_COMMIT_DELAY_MS = 650;
 let undoStack: SavedStateInput[] = [];
+// Redo holds states undone via performUndo -- any new edit (a flushed drag
+// or a single-shot action) invalidates it, same as most editors: once you've
+// branched into a new change, the old "future" no longer applies.
+let redoStack: SavedStateInput[] = [];
 let pendingUndoBefore: SavedStateInput | null = null;
 let undoCommitTimer: number | null = null;
 
 function syncUndoButton(): void {
   randomiseUndoBtn.disabled = undoStack.length === 0;
+  randomiseRedoBtn.disabled = redoStack.length === 0;
 }
 
 function flushPendingUndo(): void {
@@ -1123,6 +1130,7 @@ function flushPendingUndo(): void {
     undoStack.push(pendingUndoBefore);
     if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
     pendingUndoBefore = null;
+    redoStack = [];
     syncUndoButton();
   }
 }
@@ -1139,6 +1147,7 @@ function pushUndoNow(): void {
   flushPendingUndo();
   undoStack.push(gatherCurrentSaveInput("__undo__"));
   if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+  redoStack = [];
   syncUndoButton();
 }
 
@@ -1146,6 +1155,19 @@ function performUndo(): boolean {
   flushPendingUndo();
   const snap = undoStack.pop();
   if (!snap) return false;
+  redoStack.push(gatherCurrentSaveInput("__undo__"));
+  if (redoStack.length > UNDO_STACK_LIMIT) redoStack.shift();
+  loadSavedState({ ...snap, id: "__undo__", createdAt: Date.now() });
+  syncUndoButton();
+  return true;
+}
+
+function performRedo(): boolean {
+  flushPendingUndo();
+  const snap = redoStack.pop();
+  if (!snap) return false;
+  undoStack.push(gatherCurrentSaveInput("__undo__"));
+  if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
   loadSavedState({ ...snap, id: "__undo__", createdAt: Date.now() });
   syncUndoButton();
   return true;
@@ -1170,7 +1192,19 @@ function isEditableTarget(el: EventTarget | null): boolean {
 window.addEventListener("keydown", (e) => {
   const editing = isEditableTarget(e.target);
   const mod = e.metaKey || e.ctrlKey;
-  if (mod && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+  if (mod && (e.key === "z" || e.key === "Z") && e.shiftKey) {
+    if (editing) return;
+    e.preventDefault();
+    performRedo();
+    return;
+  }
+  if (mod && (e.key === "y" || e.key === "Y")) {
+    if (editing) return;
+    e.preventDefault();
+    performRedo();
+    return;
+  }
+  if (mod && (e.key === "z" || e.key === "Z")) {
     if (editing) return;
     e.preventDefault();
     performUndo();
@@ -1231,6 +1265,10 @@ randomiseBtn.addEventListener("click", () => {
 
 randomiseUndoBtn.addEventListener("click", () => {
   performUndo();
+});
+
+randomiseRedoBtn.addEventListener("click", () => {
+  performRedo();
 });
 
 function parseBwMode(value: string | null): BwMode {
@@ -1851,6 +1889,7 @@ Object.assign(window, {
     },
     undoRandomise: () => performUndo(),
     undo: () => performUndo(),
+    redo: () => performRedo(),
     canvasSha: async () => {
       const img = renderer.getVisibleImageData();
       const digest = await crypto.subtle.digest("SHA-256", img.data);
