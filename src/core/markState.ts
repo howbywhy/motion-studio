@@ -19,6 +19,10 @@ export interface MarkState {
   sequenceStop: number;
   scale: number;
   anchor: TypeAnchor;
+  /** Fine nudge from the anchor's own position, as % of frame width/height
+   * (-50..50, same scale as Type's block offset / `alignFromAnchor`). */
+  offsetX: number;
+  offsetY: number;
 }
 
 export const MARK_WINDOW_MIN = 0.08;
@@ -41,6 +45,11 @@ function clamp01(n: unknown, fallback: number): number {
 function clamp100(n: unknown, fallback: number): number {
   if (typeof n !== "number" || !Number.isFinite(n)) return fallback;
   return Math.min(100, Math.max(0, n));
+}
+
+function clampOffset(n: unknown, fallback: number): number {
+  if (typeof n !== "number" || !Number.isFinite(n)) return fallback;
+  return Math.min(50, Math.max(-50, n));
 }
 
 export function clampMarkWindow(startRaw: unknown, stopRaw: unknown): { start: number; stop: number } {
@@ -91,6 +100,8 @@ export function defaultMarkState(): MarkState {
     sequenceStop: 1,
     scale: MARK_SCALE_DEFAULT,
     anchor: "mc",
+    offsetX: 0,
+    offsetY: 0,
   };
 }
 
@@ -110,6 +121,8 @@ export function clampMarkState(raw: Partial<MarkState> | Record<string, unknown>
     sequenceStop: win.stop,
     scale: clamp100((raw as MarkState).scale, base.scale),
     anchor: parseMarkAnchor((raw as MarkState).anchor, base.anchor),
+    offsetX: clampOffset((raw as MarkState).offsetX, base.offsetX),
+    offsetY: clampOffset((raw as MarkState).offsetY, base.offsetY),
   };
 }
 

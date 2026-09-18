@@ -145,6 +145,8 @@ function layoutBox(
   worldW: number,
   worldH: number,
   originX: number,
+  offsetX = 0,
+  offsetY = 0,
 ): MarkLayout {
   const safeW = width * (1 - INSET * 2);
   const safeH = height * (1 - INSET * 2);
@@ -153,8 +155,8 @@ function layoutBox(
   const dw = worldW * s;
   const dh = worldH * s;
   const { hx, hy } = anchorFrac(TYPE_ANCHORS.includes(anchor) ? anchor : "mc");
-  const x = width * INSET + (safeW - dw) * hx;
-  const y = height * INSET + (safeH - dh) * hy;
+  const x = width * INSET + (safeW - dw) * hx + (offsetX / 100) * width;
+  const y = height * INSET + (safeH - dh) * hy + (offsetY / 100) * height;
   return { x, y, s, worldW, worldH, originX };
 }
 
@@ -167,8 +169,10 @@ export function layoutMarkRect(
   height: number,
   scale: number,
   anchor: TypeAnchor,
+  offsetX = 0,
+  offsetY = 0,
 ): MarkLayout {
-  return layoutBox(width, height, scale, anchor, MARK_STACKED.width, MARK_STACKED.height, 0);
+  return layoutBox(width, height, scale, anchor, MARK_STACKED.width, MARK_STACKED.height, 0, offsetX, offsetY);
 }
 
 /** Eval-only: fit the full RIGHT → LEFT overshoot so the trajectory is visible. */
@@ -231,7 +235,7 @@ function emptyPlan(state: MarkState, width: number, height: number): MarkPlan {
     bands: [],
     hideType: false,
     yieldEnd: false,
-    layout: layoutMarkRect(width, height, state.scale, state.anchor),
+    layout: layoutMarkRect(width, height, state.scale, state.anchor, state.offsetX, state.offsetY),
     source: state.source,
     mode: state.mode,
   };
@@ -321,7 +325,7 @@ export function planMarkDock(
   const span = Math.max(1e-6, stop - start);
   const local = clamp01((p - start) / span);
   const seq = state.mode === "interrupt" ? interruptSeq(local) : introEndSeq(local);
-  const layout = layoutMarkRect(width, height, state.scale, state.anchor);
+  const layout = layoutMarkRect(width, height, state.scale, state.anchor, state.offsetX, state.offsetY);
   const visible = seq.kind !== "absent";
   const plan: MarkPlan = {
     visible,
@@ -359,7 +363,7 @@ export function planMark(
   if (p < start || p >= stop) return empty;
   const span = Math.max(1e-6, stop - start);
   const local = clamp01((p - start) / span);
-  const layout = layoutMarkRect(width, height, state.scale, state.anchor);
+  const layout = layoutMarkRect(width, height, state.scale, state.anchor, state.offsetX, state.offsetY);
   const isTransition = state.source === "stackedToSymbol";
   const kind = isTransition ? stackedToSymbolKind(local) : state.source === "emblem" ? "emblem" : "logotype";
   const plan: MarkPlan = {
