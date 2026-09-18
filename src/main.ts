@@ -438,7 +438,7 @@ function setSourceKind(id: string, mode: "media" | "field"): void {
     const { w, h } = aspectParts();
     const index = renderer.getSequence().findIndex((s) => s.id === id);
     const asset = createGraphicAsset(w, h, `Field ${String(index + 1).padStart(2, "0")}`, { ...DEFAULT_FIELD });
-    const disposePrevious = current.kind === "graphic" ? !isAssetReferencedBySavedState(current) : false;
+    const disposePrevious = current.kind === "graphic" ? isAssetSafeToDispose(current) : false;
     renderer.replaceSource(id, asset, { disposePrevious });
     syncSourceInspector();
     rebuildGraphicPanel();
@@ -448,7 +448,7 @@ function setSourceKind(id: string, mode: "media" | "field"): void {
   }
 
   const restored = lastMediaById.get(id) ?? makePlaceholder("Media");
-  const disposePrevious = current ? !isAssetReferencedBySavedState(current) : true;
+  const disposePrevious = current ? isAssetSafeToDispose(current) : true;
   renderer.replaceSource(id, restored, { disposePrevious });
   syncSourceInspector();
   rebuildGraphicPanel();
@@ -458,7 +458,7 @@ function setSourceKind(id: string, mode: "media" | "field"): void {
 
 function loadSourceAsset(id: string, asset: MediaAsset, displayLabel?: string): void {
   const prev = renderer.getSource(id);
-  const disposePrevious = prev ? !isAssetReferencedBySavedState(prev) : true;
+  const disposePrevious = prev ? isAssetSafeToDispose(prev) : true;
   renderer.replaceSource(id, asset, { disposePrevious });
   if (displayLabel) asset.label = displayLabel;
   if (asset.kind !== "graphic") lastMediaById.set(id, asset);
@@ -482,7 +482,7 @@ function rebuildPlaceholderAssets(): void {
     if (!item.asset.placeholder) continue;
     const next = makePlaceholder(item.asset.label);
     next.transform = { ...item.asset.transform };
-    const disposePrevious = !isAssetReferencedBySavedState(item.asset);
+    const disposePrevious = isAssetSafeToDispose(item.asset);
     renderer.replaceSource(item.id, next, { disposePrevious });
   }
   sequenceStrip.refresh();
@@ -522,7 +522,7 @@ sourceRemoveBtn.addEventListener("click", () => {
   const item = selectedItem();
   if (!item || renderer.getSequence().length <= 1) return;
   if (!window.confirm(`Remove "${item.asset.label}"? This can't be undone.`)) return;
-  const dispose = !isAssetReferencedBySavedState(item.asset);
+  const dispose = isAssetSafeToDispose(item.asset);
   lastMediaById.delete(item.id);
   renderer.removeSource(item.id, { dispose });
   syncSourceInspector();
@@ -1115,6 +1115,20 @@ let undoStack: SavedStateInput[] = [];
 let redoStack: SavedStateInput[] = [];
 let pendingUndoBefore: SavedStateInput | null = null;
 let undoCommitTimer: number | null = null;
+
+// Undo/redo entries hold live asset references too (gatherCurrentSaveInput
+// captures `sources`, not just params) -- isAssetReferencedBySavedState alone
+// only guards Saved States, so disposing an asset still sitting on the undo
+// or redo stack would leave that entry pointing at a revoked object URL.
+// Every disposal decision must go through this, not the Saved-States check
+// directly.
+function isAssetSafeToDispose(asset: MediaAsset): boolean {
+  if (isAssetReferencedBySavedState(asset)) return false;
+  const referencedIn = (input: SavedStateInput | null): boolean =>
+    input !== null && input.sources.some((src) => src.asset === asset);
+  if (referencedIn(pendingUndoBefore)) return false;
+  return !undoStack.some((s) => referencedIn(s)) && !redoStack.some((s) => referencedIn(s));
+}
 
 function syncUndoButton(): void {
   randomiseUndoBtn.disabled = undoStack.length === 0;
